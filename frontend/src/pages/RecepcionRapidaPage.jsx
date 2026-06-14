@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import api from "../services/api";
 
+const ESTADO_ORDEN_INICIAL = "Recepcionado";
+
 const ESTADO_INICIAL_CLIENTE = {
   nombre: "",
   telefono: "",
@@ -278,8 +280,10 @@ function RecepcionRapidaPage() {
         kilometraje: Number(kilometraje),
         motivo_ingreso: motivoIngreso,
         monto_total: Number(montoTotal),
-        estado: "Recepción",
+        estado: ESTADO_ORDEN_INICIAL,
       };
+
+      console.log("ENVIANDO ORDEN:", payload);
 
       const res = await api.post("/ordenes", payload);
       console.log("ORDEN CREADA:", res.data);
