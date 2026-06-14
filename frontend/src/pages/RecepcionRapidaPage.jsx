@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import api from "../services/api";
 
-const ESTADO_ORDEN_INICIAL = "Recepcionado";
+const ESTADO_ORDEN_INICIAL = "Recepcion";
 
 const ESTADO_INICIAL_CLIENTE = {
   nombre: "",
