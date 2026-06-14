@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'; 
+import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import api from './services/api'; 
+import api from './services/api';
 import ClientesPage from './pages/ClientesPage';
 import VehiculosPage from './pages/VehiculosPage';
 import OrdenesPage from './pages/OrdenesPage';
@@ -8,81 +8,120 @@ import ArchivosECUPage from './pages/ArchivosECUPage';
 import FotosPage from './pages/FotosPage';
 import VehiculoDetallePage from './pages/VehiculoDetallePage';
 import DiagnosticoPage from './pages/DiagnosticoPage';
+import RecepcionRapidaPage from './pages/RecepcionRapidaPage'; // <--- NUEVO FLUJO
 
 function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
+  const closeSidebar = () => setSidebarOpen(false);
+
   return (
     <Router>
-      <div style={{ display: 'flex', minHeight: '100vh', fontFamily: "'Inter', sans-serif", backgroundColor: '#f1f5f9' }}>
+      <div className="flex min-h-screen bg-slate-100">
         
-        {/* SIDEBAR REDISEÑADO (Tech Premium) */}
-        <nav style={{ width: '280px', background: '#0f172a', color: 'white', display: 'flex', flexDirection: 'column', boxShadow: '4px 0 10px rgba(0,0,0,0.1)' }}>
-          
-          {/* Header del Logo */}
-          <div style={{ padding: '40px 25px', background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', borderBottom: '1px solid #1e293b' }}>
-            <h1 style={{ fontWeight: '900', fontSize: '24px', letterSpacing: '-1.5px', margin: 0, color: '#3b82f6', display: 'flex', alignItems: 'center' }}>
-              GMTCH<span style={{ color: 'white' }}>TUNE</span>
+        {/* SIDEBAR - VISIBLE EN PC, TOGGLE EN MÓVIL */}
+        <aside
+          className={`
+            z-20
+            fixed inset-y-0 left-0
+            w-64
+            bg-slate-900 text-white
+            border-r border-slate-800
+            transform transition-transform duration-200
+            lg:translate-x-0
+            ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          `}
+        >
+          {/* HEADER LOGO */}
+          <div className="px-6 py-6 border-b border-slate-800">
+            <h1 className="text-xl font-black tracking-tight">
+              <span className="text-blue-500">GMTCH</span>
+              <span className="text-white"> TUNE</span>
             </h1>
-            <p style={{ fontSize: '10px', textTransform: 'uppercase', opacity: 0.6, marginTop: '8px', fontWeight: '800', letterSpacing: '1px', color: '#94a3b8' }}>
-              Performance & Software Engine
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">
+              Performance &amp; Software Engine
             </p>
           </div>
-          
-          {/* Links de Navegación */}
-          <ul style={{ listStyle: 'none', padding: '25px 15px', margin: 0, flex: 1 }}>
-            <li style={navItemStyle}><Link to="/" style={linkStyle}>📊 Panel Principal</Link></li>
-            <li style={navItemStyle}><Link to="/clientes" style={linkStyle}>👥 Base de Clientes</Link></li>
-            <li style={navItemStyle}><Link to="/vehiculos" style={linkStyle}>🚗 Garage de Vehículos</Link></li>
-            <li style={navItemStyle}><Link to="/ordenes" style={linkStyle}>📝 Recepción / Órdenes</Link></li>
-            <li style={navItemStyle}><Link to="/archivos-ecu" style={linkStyle}>📂 Archivos ECU</Link></li>
-            <li style={navItemStyle}><Link to="/fotos" style={linkStyle}>📸 Fotos de Ingreso</Link></li>
-            <li style={navItemStyle}><Link to="/diagnosticos" style={linkStyle}>🔬 Informe Scanner</Link></li>
-          </ul>
 
-          {/* Footer del Sidebar */}
-          <div style={{ padding: '20px', fontSize: '11px', color: '#475569', borderTop: '1px solid #1e293b', textAlign: 'center' }}>
-            <div style={{ color: '#3b82f6', fontWeight: 'bold', marginBottom: '4px' }}>MODO MARCHA BLANCA</div>
-            PROYECTO GMTCH v1.0
+          {/* NAVEGACIÓN */}
+          <nav className="px-3 py-4 text-sm font-medium">
+            <SidebarLink to="/" onClick={closeSidebar}>📊 Panel Principal</SidebarLink>
+            <SidebarLink to="/flujo" onClick={closeSidebar}>🚦 Flujo Completo</SidebarLink> {/* NUEVO */}
+            <SidebarLink to="/clientes" onClick={closeSidebar}>👥 Clientes</SidebarLink>
+            <SidebarLink to="/vehiculos" onClick={closeSidebar}>🚗 Garage Vehículos</SidebarLink>
+            <SidebarLink to="/ordenes" onClick={closeSidebar}>📝 Recepción / Órdenes</SidebarLink>
+            <SidebarLink to="/archivos-ecu" onClick={closeSidebar}>📂 Archivos ECU</SidebarLink>
+            <SidebarLink to="/fotos" onClick={closeSidebar}>📸 Fotos Ingreso</SidebarLink>
+            <SidebarLink to="/diagnosticos" onClick={closeSidebar}>🔬 Informe Scanner</SidebarLink>
+          </nav>
+
+          <div className="mt-auto px-4 py-3 text-[10px] text-slate-500 border-t border-slate-800">
+            <p className="font-bold uppercase">Modo Marcha Blanca</p>
+            <p>GMTCH Tune v1.0</p>
           </div>
-        </nav>
+        </aside>
 
-        {/* ÁREA DE CONTENIDO PRINCIPAL */}
-        <main style={{ flex: 1, padding: '40px', overflowY: 'auto' }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/clientes" element={<ClientesPage />} />
-            <Route path="/vehiculos" element={<VehiculosPage />} />
-            <Route path="/vehiculos/:id" element={<VehiculoDetallePage />} />
-            <Route path="/ordenes" element={<OrdenesPage />} />
-            <Route path="/archivos-ecu" element={<ArchivosECUPage />} />
-            <Route path="/fotos" element={<FotosPage />} />
-            <Route path="/diagnosticos" element={<DiagnosticoPage />} />
-          </Routes>
-        </main>
-        
+        {/* OVERLAY OSCURO EN MÓVIL CUANDO SIDEBAR ABIERTO */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-40 z-10 lg:hidden"
+            onClick={closeSidebar}
+          />
+        )}
+
+        {/* CONTENIDO PRINCIPAL */}
+        <div className="flex-1 flex flex-col lg:ml-64">
+          {/* TOPBAR SOLO EN MÓVIL */}
+          <header className="lg:hidden sticky top-0 z-10 bg-slate-100/90 backdrop-blur border-b border-slate-200 flex items-center justify-between px-4 py-3">
+            <button
+              onClick={toggleSidebar}
+              className="text-slate-800 border border-slate-400 rounded-md px-3 py-1 text-sm font-bold flex items-center gap-2"
+            >
+              ☰ Menú
+            </button>
+            <span className="text-xs font-bold text-slate-500 uppercase">
+              GMTCH TUNE
+            </span>
+          </header>
+
+          {/* ÁREA DE PÁGINAS */}
+          <main className="flex-1 p-4 lg:p-8 overflow-auto">
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/flujo" element={<RecepcionRapidaPage />} /> {/* NUEVA RUTA */}
+              <Route path="/clientes" element={<ClientesPage />} />
+              <Route path="/vehiculos" element={<VehiculosPage />} />
+              <Route path="/vehiculos/:id" element={<VehiculoDetallePage />} />
+              <Route path="/ordenes" element={<OrdenesPage />} />
+              <Route path="/archivos-ecu" element={<ArchivosECUPage />} />
+              <Route path="/fotos" element={<FotosPage />} />
+              <Route path="/diagnosticos" element={<DiagnosticoPage />} />
+            </Routes>
+          </main>
+        </div>
+
       </div>
     </Router>
   );
 }
 
-// ESTILOS PARA LOS LINKS
-const navItemStyle = {
-  marginBottom: '6px',
-};
+/* COMPONENTE PARA LINKS DEL SIDEBAR */
+function SidebarLink({ to, children, onClick }) {
+  return (
+    <div className="mb-1">
+      <Link
+        to={to}
+        onClick={onClick}
+        className="block px-3 py-2 rounded-md text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-[13px]"
+      >
+        {children}
+      </Link>
+    </div>
+  );
+}
 
-const linkStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  padding: '14px 18px',
-  color: '#94a3b8',
-  textDecoration: 'none',
-  fontSize: '14px',
-  fontWeight: '600',
-  borderRadius: '12px',
-  transition: 'all 0.3s ease',
-  backgroundColor: 'transparent',
-};
-
-// COMPONENTE DASHBOARD (Diseño Mejorado)
+/* DASHBOARD SIMPLE (PUEDES AJUSTARLO) */
 function Dashboard() {
   const [stats, setStats] = useState({ clientes: 0, vehiculos: 0, ordenes: 0, ingresos: 0 });
 
@@ -109,50 +148,27 @@ function Dashboard() {
   }, []);
 
   return (
-    <div>
-      <div style={{ marginBottom: '40px' }}>
-        <h1 style={{ fontSize: '32px', fontWeight: '900', color: '#0f172a', margin: 0, letterSpacing: '-1px' }}>CONTROL DE MANDO</h1>
-        <p style={{ color: '#64748b', marginTop: '5px', fontWeight: '500' }}>Resumen operativo de Gmtch Tune</p>
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-        <div className="bg-white p-8 rounded-3xl shadow-sm border-b-8 border-blue-500">
-          <p style={{ color: '#94a3b8', fontWeight: '800', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Clientes</p>
-          <p style={{ fontSize: '42px', fontWeight: '900', color: '#0f172a', margin: '10px 0' }}>{stats.clientes}</p>
-        </div>
-        
-        <div className="bg-white p-8 rounded-3xl shadow-sm border-b-8 border-indigo-500">
-          <p style={{ color: '#94a3b8', fontWeight: '800', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Vehículos</p>
-          <p style={{ fontSize: '42px', fontWeight: '900', color: '#0f172a', margin: '10px 0' }}>{stats.vehiculos}</p>
-        </div>
-        
-        <div className="bg-white p-8 rounded-3xl shadow-sm border-b-8 border-slate-800">
-          <p style={{ color: '#94a3b8', fontWeight: '800', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Órdenes Activas</p>
-          <p style={{ fontSize: '42px', fontWeight: '900', color: '#0f172a', margin: '10px 0' }}>{stats.ordenes}</p>
-        </div>
-        
-        <div className="bg-slate-900 p-8 rounded-3xl shadow-xl border-b-8 border-blue-600">
-          <p style={{ color: '#64748b', fontWeight: '800', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Ingresos Totales</p>
-          <p style={{ fontSize: '36px', fontWeight: '900', color: '#3b82f6', margin: '10px 0' }}>
-            ${stats.ingresos.toLocaleString('es-CL')}
-          </p>
-        </div>
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">Panel General</h1>
+        <p className="text-sm text-slate-500 mt-1">Visión rápida del estado del taller y file service.</p>
       </div>
 
-      <div style={{ marginTop: '50px', background: 'linear-gradient(90deg, #1e3a8a 0%, #1e40af 100%)', padding: '50px', borderRadius: '40px', color: 'white', position: 'relative', overflow: 'hidden', boxShadow: '0 20px 40px rgba(30, 58, 138, 0.2)' }}>
-        <div style={{ position: 'relative', zIndex: 2 }}>
-          <h2 style={{ fontSize: '36px', fontWeight: '900', margin: 0 }}>Bienvenido, Gaston 👋</h2>
-          <p style={{ fontSize: '18px', opacity: 0.8, marginTop: '10px', maxWidth: '500px' }}>
-            El taller está configurado. Registra ingresos, sube fotos y gestiona archivos de ECU desde este panel o desde tu móvil.
-          </p>
-          <button style={{ marginTop: '25px', backgroundColor: '#3b82f6', color: 'white', border: 'none', padding: '12px 30px', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer' }}>
-            Ver Reportes del Día
-          </button>
-        </div>
-        <div style={{ position: 'absolute', right: '-40px', bottom: '-60px', fontSize: '180px', fontWeight: '900', opacity: 0.05, fontStyle: 'italic' }}>
-          GMTCH
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard title="Clientes" value={stats.clientes} />
+        <StatCard title="Vehículos" value={stats.vehiculos} />
+        <StatCard title="Órdenes" value={stats.ordenes} />
+        <StatCard title="Ingresos" value={`$${stats.ingresos.toLocaleString('es-CL')}`} />
       </div>
+    </div>
+  );
+}
+
+function StatCard({ title, value }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">{title}</p>
+      <p className="mt-2 text-2xl font-black text-slate-900">{value}</p>
     </div>
   );
 }
