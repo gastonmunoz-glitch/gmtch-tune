@@ -1,17 +1,15 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import process from "node:process";
-
-const railwayFrontendHost = "abundant-emotion-production-830a.up.railway.app";
 
 export default defineConfig({
   plugins: [react()],
 
   preview: {
     host: "0.0.0.0",
-    port: Number(process.env.PORT || 8080),
+    port: 8080,
+    strictPort: false,
     allowedHosts: [
-      railwayFrontendHost,
+      "abundant-emotion-production-830a.up.railway.app",
       ".up.railway.app",
     ],
   },
@@ -22,7 +20,7 @@ export default defineConfig({
     allowedHosts: [
       "localhost",
       "127.0.0.1",
-      railwayFrontendHost,
+      "abundant-emotion-production-830a.up.railway.app",
       ".up.railway.app",
     ],
   },
