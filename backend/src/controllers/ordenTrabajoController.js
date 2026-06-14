@@ -10,7 +10,7 @@ const crearOrden = async (req, res) => {
       motivo_ingreso,
       tecnico_asignado,
       monto_total,
-      estado: 'Recibido'
+      estado: 'Recepción'
     });
     res.status(201).json({ mensaje: 'Orden creada', orden: nuevaOrden });
   } catch (error) {
