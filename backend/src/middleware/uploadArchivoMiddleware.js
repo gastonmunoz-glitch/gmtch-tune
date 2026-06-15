@@ -9,13 +9,14 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 const limpiarNombre = (nombreOriginal) => {
-  const ext = path.extname(nombreOriginal || "").toLowerCase();
+  const ext = path.extname(nombreOriginal || "").toLowerCase() || ".bin";
+
   const base = path
     .basename(nombreOriginal || "archivo_ecu", ext)
     .replace(/[^a-zA-Z0-9-_]/g, "_")
     .slice(0, 80);
 
-  return `${Date.now()}-${base}${ext || ".bin"}`;
+  return `${Date.now()}-${base}${ext}`;
 };
 
 const storage = multer.diskStorage({
