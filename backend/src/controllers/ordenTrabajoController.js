@@ -1,20 +1,91 @@
-const { OrdenTrabajo, Vehiculo, Cliente, Diagnostico, ArchivoECU, FotoVehiculo } = require('../models');
+const {
+  OrdenTrabajo,
+  Vehiculo,
+  Cliente,
+  Diagnostico,
+  ArchivoECU,
+  FotoVehiculo,
+} = require("../models");
+
+const ESTADOS_VALIDOS = [
+  "RECEPCION",
+  "EN TRABAJO",
+  "ESPERANDO MAPA",
+  "LISTO / CARGAR",
+  "ENTREGADO",
+];
+
+const normalizarEstado = (estado) => {
+  if (!estado) return "RECEPCION";
+
+  const valor = String(estado).trim().toUpperCase();
+
+  const mapa = {
+    RECEPCION: "RECEPCION",
+    "RECEPCIÓN": "RECEPCION",
+    RECEPCIONADO: "RECEPCION",
+    RECIBIDO: "RECEPCION",
+    "EN TRABAJO": "EN TRABAJO",
+    TRABAJANDO: "EN TRABAJO",
+    "ESPERANDO MAPA": "ESPERANDO MAPA",
+    LISTO: "LISTO / CARGAR",
+    "LISTO / CARGAR": "LISTO / CARGAR",
+    ENTREGADO: "ENTREGADO",
+  };
+
+  return mapa[valor] || "RECEPCION";
+};
 
 const crearOrden = async (req, res) => {
   try {
-    const { vehiculoId, kilometraje, nivel_combustible, motivo_ingreso, tecnico_asignado, monto_total } = req.body;
-    const nuevaOrden = await OrdenTrabajo.create({
+    const {
       vehiculoId,
+      vehiculo_id,
       kilometraje,
-      nivel_combustible,
       motivo_ingreso,
-      tecnico_asignado,
       monto_total,
-      estado: 'Recepción'
+      estado,
+    } = req.body;
+
+    const idVehiculo = vehiculoId || vehiculo_id;
+
+    if (!idVehiculo) {
+      return res.status(400).json({
+        error: "Falta vehiculoId",
+      });
+    }
+
+    const vehiculo = await Vehiculo.findByPk(idVehiculo);
+
+    if (!vehiculo) {
+      return res.status(404).json({
+        error: "Vehículo no encontrado",
+      });
+    }
+
+    const estadoFinal = normalizarEstado(estado);
+
+    const nuevaOrden = await OrdenTrabajo.create({
+      vehiculoId: idVehiculo,
+      kilometraje: kilometraje ? Number(kilometraje) : null,
+      motivo_ingreso: motivo_ingreso || "",
+      monto_total: monto_total ? Number(monto_total) : 0,
+      estado: estadoFinal,
     });
-    res.status(201).json({ mensaje: 'Orden creada', orden: nuevaOrden });
+
+    res.status(201).json({
+      mensaje: "Orden creada",
+      orden: nuevaOrden,
+      id: nuevaOrden.id,
+      ordenId: nuevaOrden.id,
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("ERROR AL CREAR ORDEN:", error);
+
+    res.status(500).json({
+      error: error.message,
+      detalle: error.errors?.map((e) => e.message) || null,
+    });
   }
 };
 
@@ -25,12 +96,18 @@ const obtenerOrdenes = async (req, res) => {
         { model: Vehiculo, include: Cliente },
         Diagnostico,
         ArchivoECU,
-        FotoVehiculo
-      ]
+        FotoVehiculo,
+      ],
+      order: [["createdAt", "DESC"]],
     });
+
     res.json(ordenes);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("ERROR AL OBTENER ÓRDENES:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
   }
 };
 
@@ -41,24 +118,55 @@ const obtenerOrdenPorId = async (req, res) => {
         { model: Vehiculo, include: Cliente },
         Diagnostico,
         ArchivoECU,
-        FotoVehiculo
-      ]
+        FotoVehiculo,
+      ],
     });
-    if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
     res.json(orden);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("ERROR AL OBTENER ORDEN:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
   }
 };
 
 const actualizarOrden = async (req, res) => {
   try {
     const orden = await OrdenTrabajo.findByPk(req.params.id);
-    if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
-    await orden.update(req.body);
-    res.json({ mensaje: 'Orden actualizada', orden });
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    const datosActualizados = { ...req.body };
+
+    if (datosActualizados.estado) {
+      datosActualizados.estado = normalizarEstado(datosActualizados.estado);
+    }
+
+    await orden.update(datosActualizados);
+
+    res.json({
+      mensaje: "Orden actualizada",
+      orden,
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("ERROR AL ACTUALIZAR ORDEN:", error);
+
+    res.status(500).json({
+      error: error.message,
+      detalle: error.errors?.map((e) => e.message) || null,
+    });
   }
 };
 
@@ -66,12 +174,42 @@ const actualizarEstado = async (req, res) => {
   try {
     const { estado } = req.body;
     const orden = await OrdenTrabajo.findByPk(req.params.id);
-    if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
-    await orden.update({ estado });
-    res.json({ mensaje: 'Estado actualizado', orden });
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    const estadoFinal = normalizarEstado(estado);
+
+    if (!ESTADOS_VALIDOS.includes(estadoFinal)) {
+      return res.status(400).json({
+        error: "Estado no válido",
+      });
+    }
+
+    await orden.update({
+      estado: estadoFinal,
+    });
+
+    res.json({
+      mensaje: "Estado actualizado",
+      orden,
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("ERROR AL ACTUALIZAR ESTADO:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
   }
 };
 
-module.exports = { crearOrden, obtenerOrdenes, obtenerOrdenPorId, actualizarOrden, actualizarEstado };
+module.exports = {
+  crearOrden,
+  obtenerOrdenes,
+  obtenerOrdenPorId,
+  actualizarOrden,
+  actualizarEstado,
+};
