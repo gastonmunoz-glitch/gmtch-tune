@@ -76,7 +76,7 @@ const diagnosticoRoutes = require("./src/routes/diagnosticoRoutes");
 const archivoECURoutes = require("./src/routes/archivoECURoutes");
 const fotoVehiculoRoutes = require("./src/routes/fotoVehiculoRoutes");
 const pagoRoutes = require("./src/routes/pagoRoutes");
-const fileRoutes = require("./src/routes/fileRoutes"); // ← NUEVO
+const fileRoutes = require("./src/routes/fileRoutes");
 
 // Usar rutas
 app.use("/api/auth", authRoutes);
@@ -87,7 +87,7 @@ app.use("/api/diagnosticos", diagnosticoRoutes);
 app.use("/api/archivos-ecu", archivoECURoutes);
 app.use("/api/fotos", fotoVehiculoRoutes);
 app.use("/api/pagos", pagoRoutes);
-app.use("/api/files", fileRoutes); // ← NUEVO
+app.use("/api/files", fileRoutes);
 
 // Ruta no encontrada
 app.use((req, res) => {
@@ -113,6 +113,18 @@ const startServer = async () => {
 
     await sequelize.sync({ alter: shouldAlter });
 
+    // CREAR USUARIO ADMIN TEMPORAL SI NO EXISTE
+    const Usuario = require("./src/models/Usuario");
+
+    await Usuario.findOrCreate({
+      where: { username: "admin" },
+      defaults: {
+        password: "gmtch2024",
+        rol: "ADMIN",
+      },
+    });
+
+    console.log("✅ Usuario admin verificado/creado correctamente");
     console.log("✅ Tablas sincronizadas correctamente");
     console.log("📁 Uploads path:", uploadsPath);
 
