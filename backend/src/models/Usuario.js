@@ -3,48 +3,14 @@ const sequelize = require('../config/database');
 const bcrypt = require('bcryptjs');
 
 const Usuario = sequelize.define('Usuario', {
-  id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true
-  },
-  nombre: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  email: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    unique: true,
-    validate: { isEmail: true }
-  },
-  password: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  role: {
-    type: DataTypes.ENUM('ADMIN', 'MECANICO', 'CLIENTE_FILE_SERVICE'),
-    defaultValue: 'CLIENTE_FILE_SERVICE'
-  },
-  plan: {
-    type: DataTypes.ENUM('FREE', 'WEEKLY', 'MONTHLY', 'ANNUAL', 'UNLIMITED'),
-    defaultValue: 'FREE'
-  },
-  subscription_expires: {
-    type: DataTypes.DATE,
-    allowNull: true
-  },
-  activo: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: true
-  }
-}, {
-  hooks: {
-    beforeCreate: async (usuario) => {
-      const salt = await bcrypt.genSalt(10);
-      usuario.password = await bcrypt.hash(usuario.password, salt);
-    }
-  }
+  username: { type: DataTypes.STRING, unique: true, allowNull: false },
+  password: { type: DataTypes.STRING, allowNull: false },
+  rol: { type: DataTypes.ENUM('ADMIN', 'TALLER'), defaultValue: 'TALLER' }
+});
+
+// Encriptar clave antes de guardar
+Usuario.beforeCreate(async (user) => {
+  user.password = await bcrypt.hash(user.password, 10);
 });
 
 module.exports = Usuario;
