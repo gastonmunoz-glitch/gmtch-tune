@@ -1,60 +1,23 @@
-const Usuario = require("../models/Usuario");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
+const Usuario = require('../models/Usuario');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const login = async (req, res) => {
   try {
     const { username, password } = req.body;
-
-    console.log("INTENTO DE LOGIN:", username);
-
-    if (!username || !password) {
-      return res.status(400).json({
-        error: "Falta usuario o contraseña",
-      });
-    }
-
-    const user = await Usuario.findOne({
-      where: { username },
-    });
-
-    if (!user) {
-      return res.status(401).json({
-        error: "Credenciales inválidas",
-      });
-    }
+    const user = await Usuario.findOne({ where: { username } });
+    
+    if (!user) return res.status(401).json({ error: 'Credenciales inválidas' });
 
     const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(401).json({ error: 'Credenciales inválidas' });
 
-    if (!isMatch) {
-      return res.status(401).json({
-        error: "Credenciales inválidas",
-      });
-    }
+    const token = jwt.sign({ id: user.id, rol: user.rol }, process.env.JWT_SECRET || 'gmtch_secret_2026');
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        rol: user.rol,
-      },
-      process.env.JWT_SECRET || "gmtch_secret_2026",
-      {
-        expiresIn: "24h",
-      }
-    );
-
-    res.json({
-      token,
-      rol: user.rol,
-      username: user.username,
-    });
+    res.json({ token, rol: user.rol, username: user.username });
   } catch (error) {
-    console.error("ERROR EN LOGIN:", error);
-
-    res.status(500).json({
-      error: "Error interno del servidor",
-    });
+    res.status(500).json({ error: error.message });
   }
 };
 
-module.exports = { login };
+module.exports = { login }; // <-- DEBE DECIR ESTO
