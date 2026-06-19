@@ -106,32 +106,37 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Sincronizar modelos con la base de datos
+// Sincronizar modelos con la base de datos + crear usuario maestro
 const startServer = async () => {
   try {
-    const shouldAlter = process.env.DB_ALTER === "true";
+    await sequelize.sync({ alter: true });
+    console.log("✅ Base de Datos Sincronizada");
 
-    await sequelize.sync({ alter: shouldAlter });
-
-    // CREAR USUARIO ADMIN TEMPORAL SI NO EXISTE
+    // --- CREACIÓN AUTOMÁTICA DE TU ACCESO MAESTRO ---
     const Usuario = require("./src/models/Usuario");
 
-    await Usuario.findOrCreate({
-      where: { username: "admin" },
-      defaults: {
-        password: "gmtch2024",
-        rol: "ADMIN",
-      },
+    const adminExiste = await Usuario.findOne({
+      where: { username: "gaston.master" },
     });
 
-    console.log("✅ Usuario admin verificado/creado correctamente");
-    console.log("✅ Tablas sincronizadas correctamente");
+    if (!adminExiste) {
+      await Usuario.create({
+        username: "gaston.master",
+        password: "gmtch2024admin", // ESTA SERÁ TU CLAVE
+        rol: "ADMIN",
+      });
+
+      console.log("🚀 ACCESO MAESTRO CREADO: gaston.master / gmtch2024admin");
+    } else {
+      console.log("✅ Acceso maestro ya existe: gaston.master");
+    }
+
     console.log("📁 Uploads path:", uploadsPath);
 
     const PORT = process.env.PORT || 5000;
 
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
+      console.log(`🚀 Servidor Gmtch Tune en Puerto ${PORT}`);
       console.log("📡 Endpoints:");
       console.log("   /api/auth");
       console.log("   /api/clientes");
@@ -145,7 +150,7 @@ const startServer = async () => {
       console.log("   /api/health");
     });
   } catch (error) {
-    console.error("❌ Error al sincronizar la base de datos:", error);
+    console.error("❌ Error Crítico:", error);
     process.exit(1);
   }
 };
