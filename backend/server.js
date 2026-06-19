@@ -112,23 +112,21 @@ const startServer = async () => {
     await sequelize.sync({ alter: true });
     console.log("✅ Base de Datos Sincronizada");
 
-    // --- CREACIÓN AUTOMÁTICA DE TU ACCESO MAESTRO ---
+    // CREACIÓN FORZADA DEL ADMIN
     const Usuario = require("./src/models/Usuario");
 
-    const adminExiste = await Usuario.findOne({
+    const [, created] = await Usuario.findOrCreate({
       where: { username: "gaston.master" },
+      defaults: {
+        password: "gmtch2024admin",
+        rol: "ADMIN",
+      },
     });
 
-    if (!adminExiste) {
-      await Usuario.create({
-        username: "gaston.master",
-        password: "gmtch2024admin", // ESTA SERÁ TU CLAVE
-        rol: "ADMIN",
-      });
-
-      console.log("🚀 ACCESO MAESTRO CREADO: gaston.master / gmtch2024admin");
+    if (created) {
+      console.log("🚀 USUARIO MAESTRO CREADO: gaston.master / gmtch2024admin");
     } else {
-      console.log("✅ Acceso maestro ya existe: gaston.master");
+      console.log("ℹ️ EL USUARIO MAESTRO YA EXISTE EN LA BASE DE DATOS");
     }
 
     console.log("📁 Uploads path:", uploadsPath);
