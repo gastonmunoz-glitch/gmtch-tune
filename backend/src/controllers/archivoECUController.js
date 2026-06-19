@@ -7,6 +7,12 @@ const obtenerOrdenId = (body) => {
 const obtenerRutaPublicaArchivo = (file) => {
   if (!file) return null;
 
+  // Si viene desde Cloudinary, normalmente viene como URL en file.path
+  if (file.path && /^https?:\/\//i.test(file.path)) {
+    return file.path;
+  }
+
+  // Si es subida local con multer
   if (file.filename) {
     return `/uploads/ecu/${file.filename}`;
   }
@@ -83,36 +89,33 @@ const crearArchivoECU = async (req, res) => {
   }
 };
 
+// Función para que GASTON suba el archivo ya modificado
 const subirArchivoModificado = async (req, res) => {
   try {
-    const archivo = await ArchivoECU.findByPk(req.params.id);
+    const { id } = req.params; // ID del registro del archivo
+
+    const archivo = await ArchivoECU.findByPk(id);
 
     if (!archivo) {
       return res.status(404).json({
-        error: "Registro de ECU no encontrado",
+        error: "Registro no encontrado",
       });
     }
 
-    const actualizaciones = {};
-
-    if (req.file) {
-      actualizaciones.archivo_modificado = obtenerRutaPublicaArchivo(req.file);
-    }
-
-    if (req.body.observaciones) {
-      actualizaciones.observaciones = req.body.observaciones;
-    }
-
-    if (!req.file && !req.body.observaciones) {
+    if (!req.file) {
       return res.status(400).json({
-        error: "No se recibió archivo ni observaciones para actualizar",
+        error: "No se cargó el archivo modificado",
       });
     }
 
-    await archivo.update(actualizaciones);
+    // Actualizamos el registro con la URL del archivo modificado de Cloudinary
+    await archivo.update({
+      archivo_modificado: obtenerRutaPublicaArchivo(req.file),
+      observaciones: req.body.observaciones || archivo.observaciones,
+    });
 
     res.json({
-      mensaje: "Expediente técnico actualizado",
+      mensaje: "Software modificado inyectado con éxito",
       archivo,
     });
   } catch (error) {

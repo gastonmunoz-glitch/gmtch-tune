@@ -68,20 +68,26 @@ app.get("/api/health", (req, res) => {
 });
 
 // Importar rutas
+const authRoutes = require("./src/routes/authRoutes");
 const clienteRoutes = require("./src/routes/clienteRoutes");
 const vehiculoRoutes = require("./src/routes/vehiculoRoutes");
 const ordenTrabajoRoutes = require("./src/routes/ordenTrabajoRoutes");
 const diagnosticoRoutes = require("./src/routes/diagnosticoRoutes");
 const archivoECURoutes = require("./src/routes/archivoECURoutes");
 const fotoVehiculoRoutes = require("./src/routes/fotoVehiculoRoutes");
+const pagoRoutes = require("./src/routes/pagoRoutes");
+const fileRoutes = require("./src/routes/fileRoutes"); // ← NUEVO
 
 // Usar rutas
+app.use("/api/auth", authRoutes);
 app.use("/api/clientes", clienteRoutes);
 app.use("/api/vehiculos", vehiculoRoutes);
 app.use("/api/ordenes", ordenTrabajoRoutes);
 app.use("/api/diagnosticos", diagnosticoRoutes);
 app.use("/api/archivos-ecu", archivoECURoutes);
 app.use("/api/fotos", fotoVehiculoRoutes);
+app.use("/api/pagos", pagoRoutes);
+app.use("/api/files", fileRoutes); // ← NUEVO
 
 // Ruta no encontrada
 app.use((req, res) => {
@@ -115,12 +121,15 @@ const startServer = async () => {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
       console.log("📡 Endpoints:");
+      console.log("   /api/auth");
       console.log("   /api/clientes");
       console.log("   /api/vehiculos");
       console.log("   /api/ordenes");
       console.log("   /api/diagnosticos");
       console.log("   /api/archivos-ecu");
       console.log("   /api/fotos");
+      console.log("   /api/pagos");
+      console.log("   /api/files");
       console.log("   /api/health");
     });
   } catch (error) {

@@ -1,155 +1,196 @@
-import { useState, useEffect } from 'react';
-import api from '../services/api';
+import { useState, useEffect } from "react";
+import api from "../services/api";
 
 function ArchivosECUPage() {
   const [archivos, setArchivos] = useState([]);
-  const [ordenes, setOrdenes] = useState([]);
-  const [archivoMod, setArchivoMod] = useState(null);
-  const [notas, setNotas] = useState('');
-  
-  const [nuevoArchivo, setNuevoArchivo] = useState({ ordenId: '', marca_ecu: '', modelo_ecu: '', version_software: '' });
-  const [fileOriginal, setFileOriginal] = useState(null);
+  const [fileMod, setFileMod] = useState(null);
+  const [cargando, setCargando] = useState(false);
 
   useEffect(() => {
-    const sincronizarServidor = async () => {
+    const fetchArchivosMatriz = async () => {
       try {
-        const [aRes, oRes] = await Promise.all([
-          api.get('/archivos-ecu'),
-          api.get('/ordenes')
-        ]);
-        setArchivos(aRes.data);
-        setOrdenes(oRes.data);
-      } catch (err) { 
-        console.error("ERROR DE CONEXIÓN CON MATRIZ:", err); 
+        const res = await api.get("/archivos-ecu");
+        setArchivos(res.data);
+      } catch (err) {
+        console.error("ERROR SISTEMA: Fallo en sincronización de archivos", err);
       }
     };
-    sincronizarServidor();
+
+    fetchArchivosMatriz();
   }, []);
 
-  const handleSubirOriginal = async (e) => {
-    e.preventDefault();
-    if (!fileOriginal) return alert("SISTEMA: SELECCIONE ARCHIVO BINARIO");
-    
-    const fd = new FormData();
-    fd.append('archivo', fileOriginal);
-    // CORRECCIÓN AQUÍ: k en lugar de key
-    Object.keys(nuevoArchivo).forEach(k => fd.append(k, nuevoArchivo[k]));
-
+  const recargarMatriz = async () => {
     try {
-      await api.post('/archivos-ecu', fd);
-      alert("✅ ARCHIVO ORIGINAL CARGADO EXITOSAMENTE");
-      window.location.reload();
-    } catch (err) { 
-      console.error(err);
-      alert("ERROR EN LA CARGA");
+      const res = await api.get("/archivos-ecu");
+      setArchivos(res.data);
+    } catch (err) {
+      console.error("Error al refrescar matriz:", err);
     }
   };
 
-  const handleSubirModificado = async (id) => {
+  const handleInyectarModificado = async (id) => {
+    if (!fileMod) {
+      return alert("SISTEMA: SELECCIONE EL BINARIO REPROGRAMADO");
+    }
+
     const fd = new FormData();
-    if (archivoMod) fd.append('archivo', archivoMod);
-    fd.append('observaciones', notas);
+    fd.append("archivo", fileMod);
 
     try {
-      await api.post(`/archivos-ecu/${id}/modificado`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      setCargando(true);
+
+      await api.post(`/archivos-ecu/${id}/modificado`, fd);
+
       alert("✅ SOFTWARE REPROGRAMADO ENVIADO AL TALLER");
-      setArchivoMod(null);
-      setNotas('');
-      const res = await api.get('/archivos-ecu');
-      setArchivos(res.data);
-    } catch (err) { 
-      console.error(err);
-      alert("ERROR EN LA INYECCIÓN"); 
+      setFileMod(null);
+      await recargarMatriz();
+    } catch (err) {
+      console.error("Fallo en inyección de binario:", err);
+      alert("ERROR EN LA INYECCIÓN");
+    } finally {
+      setCargando(false);
     }
+  };
+
+  const notificarWhatsApp = (id, patente) => {
+    // Sin el "+", solo el código de país y número
+    const telefono = "56962267642";
+
+    const texto = `*SISTEMA GMTCH TUNE*%0A---------------------------%0A✅ *NUEVO ARCHIVO CARGADO*%0A*ID ORDEN:* #${id}%0A*PATENTE:* ${patente}%0A*ESTADO:* ESPERANDO REPROGRAMACIÓN%0A---------------------------%0A_Favor procesar en WinOLS_`;
+
+    const url = `https://api.whatsapp.com/send?phone=${telefono}&text=${texto}`;
+    window.open(url, "_blank");
   };
 
   return (
     <div className="max-w-full mx-auto p-2">
-      <div className="bg-black text-white p-8 border-b-8 border-blue-600 mb-10 flex justify-between items-center">
+      <div className="bg-black text-white p-8 border-b-8 border-blue-600 mb-10 flex justify-between items-center shadow-2xl">
         <div>
-          <h1 className="text-4xl font-black italic tracking-tighter uppercase leading-none">Estación de Ingeniería: File Service</h1>
-          <p className="text-blue-400 font-bold text-xs uppercase tracking-[.3em] mt-2">Master & Slave Management System</p>
+          <h1 className="text-4xl font-black italic tracking-tighter uppercase">
+            Estación de Ingeniería: File Service
+          </h1>
+          <p className="text-blue-400 font-bold text-xs uppercase tracking-[.3em] mt-2">
+            Central de Gestión de Binarios Gmtch Tune
+          </p>
         </div>
+
         <div className="text-right border-l-4 border-gray-800 pl-10">
-          <p className="text-xs font-black text-gray-500 uppercase">Registros en Matriz</p>
-          <p className="text-4xl font-black text-white">{archivos.length}</p>
+          <p className="text-xs font-black text-gray-500 uppercase tracking-widest">
+            Registros Totales
+          </p>
+          <p className="text-5xl font-black text-white">{archivos.length}</p>
         </div>
       </div>
 
-      {/* CARGA DE ORIGINALES (NIVEL TALLER) */}
-      <div className="bg-white border-4 border-black p-8 mb-12 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)]">
-        <h2 className="font-black text-black uppercase text-lg mb-6 border-b-4 border-black pb-2 tracking-tighter">📥 Inyectar Nueva Lectura (Original)</h2>
-        <form onSubmit={handleSubirOriginal} className="grid grid-cols-1 md:grid-cols-5 gap-6 items-end">
-          <div>
-            <label className="block text-[10px] font-black text-black uppercase mb-2">Orden Relacionada</label>
-            <select className="w-full border-2 border-black p-3 text-sm font-bold bg-gray-50" onChange={e => setNuevoArchivo({...nuevoArchivo, ordenId: e.target.value})} required>
-              <option value="">Seleccionar...</option>
-              {ordenes.map(o => <option key={o.id} value={o.id}>OT#{o.id} - {o.Vehiculo?.patente}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] font-black text-black uppercase mb-2">Marca ECU</label>
-            <input type="text" className="w-full border-2 border-black p-3 text-sm font-bold bg-gray-50" onChange={e => setNuevoArchivo({...nuevoArchivo, marca_ecu: e.target.value})} placeholder="EJ: BOSCH" />
-          </div>
-          <div>
-            <label className="block text-[10px] font-black text-black uppercase mb-2">Modelo ECU</label>
-            <input type="text" className="w-full border-2 border-black p-3 text-sm font-bold bg-gray-50" onChange={e => setNuevoArchivo({...nuevoArchivo, modelo_ecu: e.target.value})} placeholder="EJ: EDC17C60" />
-          </div>
-          <div>
-            <label className="block text-[10px] font-black text-black uppercase mb-2">Archivo Binario</label>
-            <input type="file" className="w-full text-[10px] font-black" onChange={e => setFileOriginal(e.target.files[0])} required />
-          </div>
-          <button type="submit" className="bg-black text-white py-4 font-black uppercase text-xs hover:bg-blue-600 transition shadow-lg">Enviar al Máster</button>
-        </form>
-      </div>
+      <div className="space-y-12">
+        {archivos.map((arq) => (
+          <div
+            key={arq.id}
+            className="bg-white border-4 border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] overflow-hidden"
+          >
+            <div className="bg-gray-100 border-b-4 border-black p-4 flex justify-between items-center">
+              <div>
+                <span className="bg-black text-white px-3 py-1 text-[10px] font-black uppercase">
+                  REF-ID #{arq.id}
+                </span>
 
-      {/* MATRIZ DE PROCESAMIENTO */}
-      <div className="space-y-10">
-        <h2 className="font-black text-black uppercase text-sm tracking-[0.2em] mb-4 ml-2">Monitor de Archivos en Nube</h2>
-        {archivos.map(arq => (
-          <div key={arq.id} className="bg-white border-4 border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] overflow-hidden">
-            <div className="bg-black text-white p-4 flex justify-between items-center">
-              <span className="font-black text-2xl uppercase tracking-tighter italic">HARDWARE: {arq.marca_ecu} {arq.modelo_ecu}</span>
-              <span className="bg-blue-600 text-white px-6 py-1 text-xs font-black uppercase">Expediente #{arq.id}</span>
+                <h2 className="text-2xl font-black text-black uppercase mt-1">
+                  HW: {arq.marca_ecu} {arq.modelo_ecu}
+                </h2>
+              </div>
+
+              <button
+                onClick={() =>
+                  notificarWhatsApp(
+                    arq.id,
+                    arq.patente || arq.orden?.patente || arq.ordenId || "SIN PATENTE"
+                  )
+                }
+                className="bg-green-500 text-black px-4 py-2 border-2 border-black font-black text-[10px] uppercase hover:bg-black hover:text-white transition"
+              >
+                📲 Notificar al Máster
+              </button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 divide-x-4 divide-black">
-              {/* ORIGINAL */}
-              <div className="p-10 space-y-6">
-                <h3 className="bg-blue-600 text-white px-4 py-1 font-black text-xs uppercase inline-block">Entrada (Slave File)</h3>
-                <div className="bg-gray-100 p-10 border-4 border-dashed border-gray-300 text-center">
-                  <p className="text-xs font-black text-gray-400 mb-6 uppercase tracking-widest">Archivo leído de la unidad</p>
-                  <a href={arq.archivo_original} target="_blank" rel="noreferrer" className="bg-black text-white px-12 py-5 font-black text-base uppercase hover:bg-blue-600 transition-all shadow-2xl">Descargar Original</a>
+              <div className="p-8 space-y-6">
+                <h3 className="bg-blue-600 text-white px-4 py-1 font-black text-xs uppercase inline-block shadow-md">
+                  ENTRADA: SOFTWARE ORIGINAL (SLAVE)
+                </h3>
+
+                <div className="bg-slate-50 p-10 border-4 border-dashed border-gray-300 text-center">
+                  <p className="text-[10px] font-black text-gray-400 mb-6 uppercase tracking-widest italic">
+                    Archivo leído de la unidad física
+                  </p>
+
+                  <a
+                    href={arq.archivo_original}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="bg-black text-white px-12 py-5 font-black text-lg uppercase hover:bg-blue-600 transition-all shadow-xl inline-block"
+                  >
+                    Descargar Binario Original
+                  </a>
                 </div>
               </div>
 
-              {/* MODIFICADO */}
-              <div className="p-10 bg-slate-50 space-y-6">
-                <h3 className="bg-green-600 text-white px-4 py-1 font-black text-xs uppercase inline-block">Salida (Master Repro)</h3>
+              <div className="p-8 bg-slate-50 space-y-6">
+                <h3 className="bg-green-600 text-white px-4 py-1 font-black text-xs uppercase inline-block shadow-md">
+                  SALIDA: SOFTWARE REPROGRAMADO (MÁSTER)
+                </h3>
+
                 {arq.archivo_modificado ? (
                   <div className="space-y-6">
                     <div className="bg-green-100 p-8 border-4 border-green-600 text-center">
-                       <p className="text-green-800 font-black text-xl mb-6 uppercase italic">✅ Software Procesado con Éxito</p>
-                       <a href={arq.archivo_modificado} target="_blank" rel="noreferrer" className="bg-green-600 text-white px-10 py-4 font-black text-sm uppercase hover:bg-black transition-all">Descargar Modificado</a>
+                      <p className="text-green-800 font-black text-2xl mb-6 uppercase italic tracking-tighter">
+                        ✅ PROCESADO Y LISTO PARA CARGA
+                      </p>
+
+                      <a
+                        href={arq.archivo_modificado}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="bg-green-600 text-white px-10 py-4 font-black text-sm uppercase hover:bg-black transition-all shadow-lg inline-block"
+                      >
+                        Descargar Archivo Modificado
+                      </a>
                     </div>
+
                     <div className="bg-white p-6 border-4 border-black shadow-inner">
-                      <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Instrucciones de Carga:</p>
-                      <p className="text-lg font-black text-black uppercase leading-tight">{arq.observaciones || 'Sin instrucciones adicionales del ingeniero.'}</p>
+                      <p className="text-[10px] font-black text-gray-400 uppercase mb-2">
+                        Instrucciones Técnicas:
+                      </p>
+
+                      <p className="text-lg font-black text-black uppercase leading-tight">
+                        {arq.observaciones || "Cargar sin notas adicionales."}
+                      </p>
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-6">
-                    <div className="bg-white p-6 border-2 border-black">
-                      <label className="block text-[10px] font-black text-black uppercase mb-2">1. Seleccionar Mapa Modificado</label>
-                      <input type="file" className="w-full text-xs font-black" onChange={(e) => setArchivoMod(e.target.files[0])} />
+                  <div className="space-y-8 bg-white p-6 border-4 border-black shadow-inner">
+                    <div className="space-y-2">
+                      <label className="block text-xs font-black text-black uppercase tracking-tighter italic">
+                        Seleccionar Software Reprogramado:
+                      </label>
+
+                      <input
+                        type="file"
+                        className="w-full border-2 border-black p-4 text-xs font-black bg-gray-50"
+                        onChange={(e) => setFileMod(e.target.files?.[0] || null)}
+                      />
                     </div>
-                    <div className="bg-white p-6 border-2 border-black">
-                      <label className="block text-[10px] font-black text-black uppercase mb-2">2. Instrucciones para el Taller</label>
-                      <textarea className="w-full text-base font-black text-black uppercase outline-none focus:bg-yellow-50" rows="3" placeholder="ESCRIBA NOTAS TÉCNICAS AQUÍ..." onChange={(e) => setNotas(e.target.value)} />
-                    </div>
-                    <button onClick={() => handleSubirModificado(arq.id)} className="w-full bg-black text-white py-6 font-black uppercase text-lg shadow-2xl hover:bg-green-600 transition-all">Inyectar Modificado</button>
+
+                    <button
+                      onClick={() => handleInyectarModificado(arq.id)}
+                      disabled={cargando}
+                      className={`w-full py-6 font-black uppercase text-xl shadow-2xl transition-all ${
+                        cargando
+                          ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                          : "bg-black text-white hover:bg-green-600"
+                      }`}
+                    >
+                      {cargando ? "PROCESANDO BINARIO..." : "INYECTAR REPROGRAMACIÓN"}
+                    </button>
                   </div>
                 )}
               </div>

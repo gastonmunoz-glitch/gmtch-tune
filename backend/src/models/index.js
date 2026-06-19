@@ -1,3 +1,4 @@
+const Usuario = require('./Usuario'); // <--- NUEVO
 const Cliente = require('./Cliente');
 const Vehiculo = require('./Vehiculo');
 const OrdenTrabajo = require('./OrdenTrabajo');
@@ -6,6 +7,10 @@ const ArchivoECU = require('./ArchivoECU');
 const FotoVehiculo = require('./FotoVehiculo');
 
 // ====================== RELACIONES ======================
+
+// Usuario - Cliente (Un mecánico/admin atiende a muchos clientes)
+Usuario.hasMany(Cliente, { foreignKey: 'usuarioId' });
+Cliente.belongsTo(Usuario, { foreignKey: 'usuarioId' });
 
 // Cliente - Vehiculo
 Cliente.hasMany(Vehiculo, { foreignKey: 'clienteId' });
@@ -28,6 +33,7 @@ OrdenTrabajo.hasMany(FotoVehiculo, { foreignKey: 'ordenId' });
 FotoVehiculo.belongsTo(OrdenTrabajo, { foreignKey: 'ordenId' });
 
 module.exports = {
+  Usuario, // <--- EXPORTADO
   Cliente,
   Vehiculo,
   OrdenTrabajo,
