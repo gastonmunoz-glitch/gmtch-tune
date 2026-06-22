@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import api from "../services/api";
 
-const ESTADO_ORDEN_INICIAL = "RECEPCION";
+const ESTADO_ORDEN_INICIAL = "RECEPCIONADO";
+const ESTADO_ORDEN_FINAL_RECEPCION = "PARA_DIAGNOSTICO";
 
 const ESTADO_INICIAL_CLIENTE = {
   nombre: "",
@@ -18,20 +19,14 @@ const ESTADO_INICIAL_VEHICULO = {
 
 const ESTADO_INICIAL_ORDEN = {
   kilometraje: "",
-  motivo_ingreso: "",
+  servicio_solicitado: "",
+  sintomas_cliente: "",
+  observaciones_visuales: "",
+  prioridad: "MEDIA",
+  requiere_scanner: true,
+  requiere_lectura_ecu: true,
+  requiere_mecanica: false,
   monto_total: "",
-};
-
-const ESTADO_INICIAL_SCANNER = {
-  fallas_detectadas: "",
-  codigos_dtc: "",
-};
-
-const ESTADO_INICIAL_ECU = {
-  marca_ecu: "",
-  modelo_ecu: "",
-  version_software: "",
-  dpf_vaciado: false,
 };
 
 const leerStorage = (clave) => {
@@ -68,15 +63,16 @@ const calcularPasoInicial = () => {
 
   if (!clienteGuardado && pasoSeguro > 1) pasoSeguro = 1;
   if (clienteGuardado && !vehiculoGuardado && pasoSeguro > 2) pasoSeguro = 2;
-  if (vehiculoGuardado && !ordenGuardada && pasoSeguro > 3) pasoSeguro = 3;
+  if (vehiculoGuardado && !ordenGuardada && pasoSeguro > 4) pasoSeguro = 3;
 
-  if (!pasoSeguro || pasoSeguro < 1 || pasoSeguro > 6) pasoSeguro = 1;
+  if (!pasoSeguro || pasoSeguro < 1 || pasoSeguro > 5) pasoSeguro = 1;
 
   return pasoSeguro;
 };
 
 function RecepcionRapidaPage() {
   const [paso, setPaso] = useState(() => calcularPasoInicial());
+  const [cargando, setCargando] = useState(false);
 
   const [cliente, setCliente] = useState({ ...ESTADO_INICIAL_CLIENTE });
   const [clienteId, setClienteId] = useState(() => leerStorage("gmtch_clienteId"));
@@ -87,20 +83,16 @@ function RecepcionRapidaPage() {
   const [orden, setOrden] = useState({ ...ESTADO_INICIAL_ORDEN });
   const [ordenId, setOrdenId] = useState(() => leerStorage("gmtch_ordenId"));
 
-  const [fotoArchivo, setFotoArchivo] = useState(null);
-  const [scanner, setScanner] = useState({ ...ESTADO_INICIAL_SCANNER });
+  const [fotosArchivos, setFotosArchivos] = useState([]);
 
-  const [ecuOriginal, setEcuOriginal] = useState(null);
-  const [ecuInfo, setEcuInfo] = useState({ ...ESTADO_INICIAL_ECU });
-
-  const etiquetas = ["Cliente", "Vehículo", "Orden", "Fotos", "Scanner", "ECU"];
+  const etiquetas = ["Cliente", "Vehículo", "Servicio", "Fotos", "Cierre"];
 
   useEffect(() => {
     escribirStorage("gmtch_paso_recepcion", paso);
   }, [paso]);
 
   const siguiente = () => {
-    setPaso((p) => Math.min(6, p + 1));
+    setPaso((p) => Math.min(5, p + 1));
   };
 
   const anterior = () => {
@@ -174,11 +166,13 @@ function RecepcionRapidaPage() {
     const telefono = String(cliente.telefono ?? "").trim();
 
     if (!nombre) {
-      alert("Debe ingresar nombre");
+      alert("Debe ingresar nombre del cliente.");
       return;
     }
 
     try {
+      setCargando(true);
+
       const payload = {
         nombre,
         telefono,
@@ -202,6 +196,8 @@ function RecepcionRapidaPage() {
     } catch (err) {
       console.error("ERROR AL GUARDAR CLIENTE:", err.response?.data || err.message);
       alert("Error al guardar cliente: " + (err.response?.data?.error || err.message));
+    } finally {
+      setCargando(false);
     }
   };
 
@@ -215,16 +211,18 @@ function RecepcionRapidaPage() {
     const vin = String(vehiculo.vin ?? "").trim();
 
     if (!idClienteActual) {
-      alert("Falta cliente del paso 1");
+      alert("Falta cliente del paso 1.");
       return;
     }
 
     if (!patente || !marca || !modelo) {
-      alert("Debe completar Patente, Marca y Modelo");
+      alert("Debe completar Patente, Marca y Modelo.");
       return;
     }
 
     try {
+      setCargando(true);
+
       const payload = {
         patente,
         marca,
@@ -253,32 +251,63 @@ function RecepcionRapidaPage() {
     } catch (err) {
       console.error("ERROR AL GUARDAR VEHÍCULO:", err.response?.data || err.message);
       alert("Error al guardar vehículo: " + (err.response?.data?.error || err.message));
+    } finally {
+      setCargando(false);
     }
+  };
+
+  const construirMotivoIngreso = () => {
+    const servicioSolicitado = String(orden.servicio_solicitado ?? "").trim();
+    const sintomasCliente = String(orden.sintomas_cliente ?? "").trim();
+    const observacionesVisuales = String(orden.observaciones_visuales ?? "").trim();
+
+    return [
+      "=== RECEPCIÓN GMTCH TUNE ===",
+      `Servicio solicitado: ${servicioSolicitado || "No informado"}`,
+      "",
+      "Síntomas indicados por cliente:",
+      sintomasCliente || "No informado",
+      "",
+      "Observaciones visibles de recepción:",
+      observacionesVisuales || "Sin observaciones visibles registradas",
+      "",
+      "Requerimientos iniciales marcados por recepción:",
+      `- Requiere scanner/diagnóstico: ${orden.requiere_scanner ? "SÍ" : "NO"}`,
+      `- Requiere lectura ECU: ${orden.requiere_lectura_ecu ? "SÍ" : "NO"}`,
+      `- Requiere mecánica: ${orden.requiere_mecanica ? "SÍ" : "NO"}`,
+      "",
+      "Nota de flujo:",
+      "Recepción no decide método de lectura ECU. El técnico ECU define si corresponde OBD, BENCH, BOOT o retiro de ECU. El mecánico solo ejecuta instrucciones asignadas por plataforma.",
+    ].join("\n");
   };
 
   const guardarOrden = async () => {
     const idVehiculoActual = vehiculoId || leerStorage("gmtch_vehiculoId");
 
     const kilometraje = limpiarNumero(orden.kilometraje);
-    const motivoIngreso = String(orden.motivo_ingreso ?? "").trim();
+    const servicioSolicitado = String(orden.servicio_solicitado ?? "").trim();
+    const sintomasCliente = String(orden.sintomas_cliente ?? "").trim();
     const montoTotal = limpiarNumero(orden.monto_total);
 
     if (!idVehiculoActual) {
-      alert("Falta vehículo");
+      alert("Falta vehículo.");
       return;
     }
 
-    if (!kilometraje || !motivoIngreso || !montoTotal) {
-      alert("Complete KM, trabajo y monto");
+    if (!kilometraje || !servicioSolicitado || !sintomasCliente || !montoTotal) {
+      alert("Complete kilometraje, servicio solicitado, síntomas y monto.");
       return;
     }
 
     try {
+      setCargando(true);
+
       const payload = {
         vehiculoId: idParaBackend(idVehiculoActual),
         vehiculo_id: idParaBackend(idVehiculoActual),
+        prioridad: orden.prioridad || "MEDIA",
         kilometraje: Number(kilometraje),
-        motivo_ingreso: motivoIngreso,
+        motivo_ingreso: construirMotivoIngreso(),
         monto_total: Number(montoTotal),
         estado: ESTADO_ORDEN_INICIAL,
       };
@@ -303,97 +332,102 @@ function RecepcionRapidaPage() {
     } catch (err) {
       console.error("ERROR AL GUARDAR ORDEN:", err.response?.data || err.message);
       alert("Error al guardar orden: " + (err.response?.data?.error || err.message));
+    } finally {
+      setCargando(false);
     }
   };
 
-  const guardarFoto = async () => {
+  const subirFotosSeleccionadas = async () => {
     const idOrdenActual = obtenerOrdenActual();
 
     if (!idOrdenActual) {
       alert("Falta orden. Vuelve al paso 3 y guarda la orden nuevamente.");
-      return;
+      return false;
     }
 
-    if (!fotoArchivo) {
-      alert("Seleccione foto");
-      return;
+    if (!fotosArchivos.length) {
+      return true;
     }
 
-    try {
+    for (const foto of fotosArchivos) {
       const fd = new FormData();
-      fd.append("foto", fotoArchivo);
+      fd.append("foto", foto);
       fd.append("ordenId", String(idOrdenActual));
       fd.append("orden_id", String(idOrdenActual));
 
-      const res = await api.post("/fotos", fd);
-      console.log("FOTO SUBIDA:", res.data);
-
-      setFotoArchivo(null);
-      siguiente();
-    } catch (err) {
-      console.error("ERROR AL SUBIR FOTO:", err.response?.data || err.message);
-      alert("Error al subir foto: " + (err.response?.data?.error || err.message));
+      await api.post("/fotos", fd);
     }
+
+    console.log("FOTOS SUBIDAS:", fotosArchivos.length);
+    return true;
   };
 
-  const guardarScanner = async () => {
+  const actualizarOrdenAParaDiagnostico = async () => {
     const idOrdenActual = obtenerOrdenActual();
 
     if (!idOrdenActual) {
-      alert("Falta orden");
-      return;
+      return false;
     }
 
+    const payload = {
+      estado: ESTADO_ORDEN_FINAL_RECEPCION,
+    };
+
     try {
-      const payload = {
-        ordenId: idParaBackend(idOrdenActual),
-        orden_id: idParaBackend(idOrdenActual),
-        fallas_detectadas: String(scanner.fallas_detectadas ?? "").trim(),
-        codigos_dtc: String(scanner.codigos_dtc ?? "").trim(),
-      };
+      await api.put(`/ordenes/${idOrdenActual}`, payload);
+      return true;
+    } catch (errorPut) {
+      console.warn("No se pudo actualizar por PUT, intentando PATCH:", errorPut.response?.data || errorPut.message);
 
-      const res = await api.post("/diagnosticos", payload);
-      console.log("SCANNER GUARDADO:", res.data);
-
-      siguiente();
-    } catch (err) {
-      console.error("ERROR AL GUARDAR SCANNER:", err.response?.data || err.message);
-      alert("Error al guardar diagnóstico: " + (err.response?.data?.error || err.message));
+      try {
+        await api.patch(`/ordenes/${idOrdenActual}`, payload);
+        return true;
+      } catch (errorPatch) {
+        console.warn("No se pudo actualizar estado por PATCH:", errorPatch.response?.data || errorPatch.message);
+        return false;
+      }
     }
   };
 
-  const guardarECU = async () => {
+  const finalizarRecepcion = async () => {
     const idOrdenActual = obtenerOrdenActual();
 
     if (!idOrdenActual) {
-      alert("Falta orden");
+      alert("No hay orden activa para finalizar.");
       return;
     }
 
-    if (!ecuOriginal) {
-      alert("Seleccione archivo ECU");
-      return;
+    if (!fotosArchivos.length) {
+      const continuar = window.confirm(
+        "No hay fotos seleccionadas. ¿Deseas finalizar la recepción sin fotos?"
+      );
+
+      if (!continuar) {
+        return;
+      }
     }
 
     try {
-      const fd = new FormData();
+      setCargando(true);
 
-      fd.append("archivo", ecuOriginal);
-      fd.append("ordenId", String(idOrdenActual));
-      fd.append("orden_id", String(idOrdenActual));
-      fd.append("marca_ecu", String(ecuInfo.marca_ecu ?? "").trim());
-      fd.append("modelo_ecu", String(ecuInfo.modelo_ecu ?? "").trim());
-      fd.append("version_software", String(ecuInfo.version_software ?? "").trim());
-      fd.append("observaciones", ecuInfo.dpf_vaciado ? "DPF vaciado / anulado" : "");
+      await subirFotosSeleccionadas();
 
-      const res = await api.post("/archivos-ecu", fd);
-      console.log("ECU GUARDADA:", res.data);
+      const estadoActualizado = await actualizarOrdenAParaDiagnostico();
 
-      alert("Flujo completo registrado correctamente");
+      if (estadoActualizado) {
+        alert("Recepción finalizada. La orden quedó lista para diagnóstico.");
+      } else {
+        alert(
+          "Recepción guardada. No se pudo mover automáticamente a diagnóstico, pero la orden quedó registrada."
+        );
+      }
+
       limpiarFlujo();
     } catch (err) {
-      console.error("ERROR AL GUARDAR ECU:", err.response?.data || err.message);
-      alert("Error al guardar ECU: " + (err.response?.data?.error || err.message));
+      console.error("ERROR AL FINALIZAR RECEPCIÓN:", err.response?.data || err.message);
+      alert("Error al finalizar recepción: " + (err.response?.data?.error || err.message));
+    } finally {
+      setCargando(false);
     }
   };
 
@@ -409,12 +443,7 @@ function RecepcionRapidaPage() {
     setOrden({ ...ESTADO_INICIAL_ORDEN });
     setOrdenId(null);
 
-    setFotoArchivo(null);
-
-    setScanner({ ...ESTADO_INICIAL_SCANNER });
-
-    setEcuOriginal(null);
-    setEcuInfo({ ...ESTADO_INICIAL_ECU });
+    setFotosArchivos([]);
 
     borrarStorage("gmtch_clienteId");
     borrarStorage("gmtch_vehiculoId");
@@ -427,11 +456,16 @@ function RecepcionRapidaPage() {
       case 1:
         return (
           <div className="space-y-4">
-            <h2 className="font-black text-lg uppercase">1. Cliente</h2>
+            <div>
+              <h2 className="font-black text-lg uppercase">1. Cliente</h2>
+              <p className="text-xs font-bold text-gray-500 uppercase">
+                Datos mínimos para iniciar la orden.
+              </p>
+            </div>
 
             <input
               className="border border-black p-3 w-full"
-              placeholder="Nombre"
+              placeholder="Nombre cliente"
               value={cliente.nombre ?? ""}
               onChange={(e) =>
                 setCliente((prev) => ({
@@ -443,7 +477,7 @@ function RecepcionRapidaPage() {
 
             <input
               className="border border-black p-3 w-full"
-              placeholder="Teléfono"
+              placeholder="Teléfono / WhatsApp"
               value={cliente.telefono ?? ""}
               onChange={(e) =>
                 setCliente((prev) => ({
@@ -454,10 +488,12 @@ function RecepcionRapidaPage() {
             />
 
             <button
+              type="button"
               onClick={guardarCliente}
-              className="bg-black text-white px-6 py-3 font-black uppercase text-xs"
+              disabled={cargando}
+              className="bg-black text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
             >
-              Guardar Cliente y Continuar →
+              {cargando ? "Guardando..." : "Guardar Cliente y Continuar →"}
             </button>
           </div>
         );
@@ -465,7 +501,12 @@ function RecepcionRapidaPage() {
       case 2:
         return (
           <div className="space-y-4">
-            <h2 className="font-black text-lg uppercase">2. Vehículo</h2>
+            <div>
+              <h2 className="font-black text-lg uppercase">2. Vehículo</h2>
+              <p className="text-xs font-bold text-gray-500 uppercase">
+                Identificación de la unidad ingresada.
+              </p>
+            </div>
 
             <input
               className="border border-black p-3 w-full"
@@ -527,16 +568,22 @@ function RecepcionRapidaPage() {
               }
             />
 
-            <div className="flex justify-between">
-              <button onClick={anterior} className="text-xs uppercase font-bold">
+            <div className="flex justify-between gap-4">
+              <button
+                type="button"
+                onClick={anterior}
+                className="text-xs uppercase font-bold"
+              >
                 ← Volver
               </button>
 
               <button
+                type="button"
                 onClick={guardarVehiculo}
-                className="bg-black text-white px-6 py-3 font-black uppercase text-xs"
+                disabled={cargando}
+                className="bg-black text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
               >
-                Guardar Vehículo y Continuar →
+                {cargando ? "Guardando..." : "Guardar Vehículo y Continuar →"}
               </button>
             </div>
           </div>
@@ -545,7 +592,12 @@ function RecepcionRapidaPage() {
       case 3:
         return (
           <div className="space-y-4">
-            <h2 className="font-black text-lg uppercase">3. Recepción / Orden</h2>
+            <div>
+              <h2 className="font-black text-lg uppercase">3. Servicio / Síntomas</h2>
+              <p className="text-xs font-bold text-gray-500 uppercase">
+                Recepción registra lo que informa el cliente y lo visible. No diagnostica ECU.
+              </p>
+            </div>
 
             <input
               className="border border-black p-3 w-full"
@@ -560,21 +612,105 @@ function RecepcionRapidaPage() {
               }
             />
 
-            <textarea
-              className="border border-black p-3 w-full"
-              placeholder="Trabajo a realizar"
-              value={orden.motivo_ingreso ?? ""}
+            <select
+              className="border border-black p-3 w-full bg-white font-bold"
+              value={orden.prioridad ?? "MEDIA"}
               onChange={(e) =>
                 setOrden((prev) => ({
                   ...prev,
-                  motivo_ingreso: e.target.value ?? "",
+                  prioridad: e.target.value,
+                }))
+              }
+            >
+              <option value="BAJA">Prioridad baja</option>
+              <option value="MEDIA">Prioridad media</option>
+              <option value="ALTA">Prioridad alta</option>
+              <option value="URGENTE">Urgente</option>
+            </select>
+
+            <textarea
+              className="border border-black p-3 w-full"
+              placeholder="Servicio solicitado por el cliente. Ej: DPF Off, diagnóstico, EGR, AdBlue, Stage 1, lectura ECU, etc."
+              value={orden.servicio_solicitado ?? ""}
+              onChange={(e) =>
+                setOrden((prev) => ({
+                  ...prev,
+                  servicio_solicitado: e.target.value ?? "",
                 }))
               }
             />
 
+            <textarea
+              className="border border-black p-3 w-full"
+              placeholder="Síntomas indicados por el cliente. Ej: pierde fuerza, humo, testigo motor, regeneraciones constantes, no parte, etc."
+              value={orden.sintomas_cliente ?? ""}
+              onChange={(e) =>
+                setOrden((prev) => ({
+                  ...prev,
+                  sintomas_cliente: e.target.value ?? "",
+                }))
+              }
+            />
+
+            <textarea
+              className="border border-black p-3 w-full"
+              placeholder="Observaciones visibles de recepción. Ej: golpes, rayas, testigos encendidos, nivel combustible, accesorios, estado interior."
+              value={orden.observaciones_visuales ?? ""}
+              onChange={(e) =>
+                setOrden((prev) => ({
+                  ...prev,
+                  observaciones_visuales: e.target.value ?? "",
+                }))
+              }
+            />
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label className="flex items-center gap-2 text-xs font-black uppercase border border-black p-3">
+                <input
+                  type="checkbox"
+                  checked={Boolean(orden.requiere_scanner)}
+                  onChange={(e) =>
+                    setOrden((prev) => ({
+                      ...prev,
+                      requiere_scanner: e.target.checked,
+                    }))
+                  }
+                />
+                Requiere Scanner
+              </label>
+
+              <label className="flex items-center gap-2 text-xs font-black uppercase border border-black p-3">
+                <input
+                  type="checkbox"
+                  checked={Boolean(orden.requiere_lectura_ecu)}
+                  onChange={(e) =>
+                    setOrden((prev) => ({
+                      ...prev,
+                      requiere_lectura_ecu: e.target.checked,
+                    }))
+                  }
+                />
+                Requiere Lectura ECU
+              </label>
+
+              <label className="flex items-center gap-2 text-xs font-black uppercase border border-black p-3">
+                <input
+                  type="checkbox"
+                  checked={Boolean(orden.requiere_mecanica)}
+                  onChange={(e) =>
+                    setOrden((prev) => ({
+                      ...prev,
+                      requiere_mecanica: e.target.checked,
+                    }))
+                  }
+                />
+                Requiere Mecánica
+              </label>
+            </div>
+
             <input
               className="border border-black p-3 w-full"
-              placeholder="Monto ($)"
+              placeholder="Monto estimado o total ($)"
               value={orden.monto_total ?? ""}
               onChange={(e) =>
                 setOrden((prev) => ({
@@ -584,16 +720,27 @@ function RecepcionRapidaPage() {
               }
             />
 
-            <div className="flex justify-between">
-              <button onClick={anterior} className="text-xs uppercase font-bold">
+            <div className="bg-yellow-50 border-2 border-yellow-500 p-4 text-xs font-bold uppercase leading-relaxed">
+              El mecánico no decide si se retira la ECU. Esa decisión queda para el técnico ECU /
+              operador de lectura según método OBD, BENCH, BOOT o retiro.
+            </div>
+
+            <div className="flex justify-between gap-4">
+              <button
+                type="button"
+                onClick={anterior}
+                className="text-xs uppercase font-bold"
+              >
                 ← Volver
               </button>
 
               <button
+                type="button"
                 onClick={guardarOrden}
-                className="bg-black text-white px-6 py-3 font-black uppercase text-xs"
+                disabled={cargando}
+                className="bg-black text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
               >
-                Guardar Orden y Continuar →
+                {cargando ? "Guardando..." : "Guardar Orden y Continuar →"}
               </button>
             </div>
           </div>
@@ -602,7 +749,12 @@ function RecepcionRapidaPage() {
       case 4:
         return (
           <div className="space-y-4">
-            <h2 className="font-black text-lg uppercase">4. Fotos de Ingreso</h2>
+            <div>
+              <h2 className="font-black text-lg uppercase">4. Fotos de Ingreso</h2>
+              <p className="text-xs font-bold text-gray-500 uppercase">
+                Fotos de respaldo de recepción. Puedes seleccionar varias.
+              </p>
+            </div>
 
             <div className="border border-black p-3 text-xs font-bold uppercase bg-gray-50">
               Orden actual: {obtenerOrdenActual() || "No detectada"}
@@ -611,20 +763,30 @@ function RecepcionRapidaPage() {
             <input
               type="file"
               accept="image/*"
-              className="w-full text-xs"
-              onChange={(e) => setFotoArchivo(e.target.files?.[0] || null)}
+              multiple
+              className="w-full text-xs border border-black p-3"
+              onChange={(e) => setFotosArchivos(Array.from(e.target.files || []))}
             />
 
-            <div className="flex justify-between">
-              <button onClick={anterior} className="text-xs uppercase font-bold">
+            <div className="bg-slate-50 border border-black p-4 text-xs font-bold uppercase">
+              Fotos seleccionadas: {fotosArchivos.length}
+            </div>
+
+            <div className="flex justify-between gap-4">
+              <button
+                type="button"
+                onClick={anterior}
+                className="text-xs uppercase font-bold"
+              >
                 ← Volver
               </button>
 
               <button
-                onClick={guardarFoto}
+                type="button"
+                onClick={siguiente}
                 className="bg-black text-white px-6 py-3 font-black uppercase text-xs"
               >
-                Subir Foto y Continuar →
+                Continuar a Cierre →
               </button>
             </div>
           </div>
@@ -632,119 +794,45 @@ function RecepcionRapidaPage() {
 
       case 5:
         return (
-          <div className="space-y-4">
-            <h2 className="font-black text-lg uppercase">5. Scanner / DTC</h2>
-
-            <textarea
-              className="border border-black p-3 w-full"
-              placeholder="Fallas detectadas"
-              value={scanner.fallas_detectadas ?? ""}
-              onChange={(e) =>
-                setScanner((prev) => ({
-                  ...prev,
-                  fallas_detectadas: e.target.value ?? "",
-                }))
-              }
-            />
-
-            <input
-              className="border border-black p-3 w-full"
-              placeholder="Códigos DTC (P0401, P2002...)"
-              value={scanner.codigos_dtc ?? ""}
-              onChange={(e) =>
-                setScanner((prev) => ({
-                  ...prev,
-                  codigos_dtc: e.target.value ?? "",
-                }))
-              }
-            />
-
-            <div className="flex justify-between">
-              <button onClick={anterior} className="text-xs uppercase font-bold">
-                ← Volver
-              </button>
-
-              <button
-                onClick={guardarScanner}
-                className="bg-black text-white px-6 py-3 font-black uppercase text-xs"
-              >
-                Guardar Scanner y Continuar →
-              </button>
+          <div className="space-y-6">
+            <div>
+              <h2 className="font-black text-lg uppercase">5. Cierre de Recepción</h2>
+              <p className="text-xs font-bold text-gray-500 uppercase">
+                Al finalizar, la orden queda en cola para diagnóstico.
+              </p>
             </div>
-          </div>
-        );
 
-      case 6:
-        return (
-          <div className="space-y-4">
-            <h2 className="font-black text-lg uppercase">6. ECU Original / DPF</h2>
+            <div className="bg-slate-50 border-4 border-black p-5 space-y-3 text-xs font-bold uppercase">
+              <p>Cliente ID: {clienteId || "—"}</p>
+              <p>Vehículo ID: {vehiculoId || "—"}</p>
+              <p>Orden ID: {ordenId || leerStorage("gmtch_ordenId") || "—"}</p>
+              <p>Estado actual: {ESTADO_ORDEN_INICIAL}</p>
+              <p>Estado siguiente: {ESTADO_ORDEN_FINAL_RECEPCION}</p>
+              <p>Fotos pendientes de subir: {fotosArchivos.length}</p>
+            </div>
 
-            <input
-              className="border border-black p-3 w-full"
-              placeholder="Marca ECU"
-              value={ecuInfo.marca_ecu ?? ""}
-              onChange={(e) =>
-                setEcuInfo((prev) => ({
-                  ...prev,
-                  marca_ecu: e.target.value ?? "",
-                }))
-              }
-            />
+            <div className="bg-blue-50 border-2 border-blue-600 p-4 text-xs font-bold uppercase leading-relaxed">
+              Siguiente etapa: operador de diagnóstico/scanner. Luego el técnico ECU define el
+              método de lectura y si corresponde desmontaje. Mecánica solo ejecuta trabajos
+              asignados por plataforma.
+            </div>
 
-            <input
-              className="border border-black p-3 w-full"
-              placeholder="Modelo ECU"
-              value={ecuInfo.modelo_ecu ?? ""}
-              onChange={(e) =>
-                setEcuInfo((prev) => ({
-                  ...prev,
-                  modelo_ecu: e.target.value ?? "",
-                }))
-              }
-            />
-
-            <input
-              className="border border-black p-3 w-full"
-              placeholder="Versión SW"
-              value={ecuInfo.version_software ?? ""}
-              onChange={(e) =>
-                setEcuInfo((prev) => ({
-                  ...prev,
-                  version_software: e.target.value ?? "",
-                }))
-              }
-            />
-
-            <label className="flex items-center gap-2 text-xs font-black uppercase">
-              <input
-                type="checkbox"
-                checked={Boolean(ecuInfo.dpf_vaciado)}
-                onChange={(e) =>
-                  setEcuInfo((prev) => ({
-                    ...prev,
-                    dpf_vaciado: e.target.checked,
-                  }))
-                }
-              />
-              DPF vaciado / anulado
-            </label>
-
-            <input
-              type="file"
-              className="w-full text-xs"
-              onChange={(e) => setEcuOriginal(e.target.files?.[0] || null)}
-            />
-
-            <div className="flex justify-between">
-              <button onClick={anterior} className="text-xs uppercase font-bold">
+            <div className="flex justify-between gap-4">
+              <button
+                type="button"
+                onClick={anterior}
+                className="text-xs uppercase font-bold"
+              >
                 ← Volver
               </button>
 
               <button
-                onClick={guardarECU}
-                className="bg-black text-white px-6 py-3 font-black uppercase text-xs"
+                type="button"
+                onClick={finalizarRecepcion}
+                disabled={cargando}
+                className="bg-green-600 text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
               >
-                Finalizar Flujo
+                {cargando ? "Finalizando..." : "Finalizar Recepción"}
               </button>
             </div>
           </div>
@@ -756,8 +844,17 @@ function RecepcionRapidaPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto bg-white border-4 border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] p-6">
-      <div className="flex justify-between mb-8">
+    <div className="max-w-5xl mx-auto bg-white border-4 border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] p-6">
+      <div className="mb-8">
+        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter">
+          Recepción Operativa
+        </h1>
+        <p className="text-xs font-black uppercase text-gray-500 mt-2">
+          Ingreso inicial. Scanner, lectura ECU y mecánica se asignan después.
+        </p>
+      </div>
+
+      <div className="flex justify-between mb-8 gap-2">
         {etiquetas.map((label, idx) => {
           const numero = idx + 1;
           const activo = numero === paso;
@@ -779,7 +876,9 @@ function RecepcionRapidaPage() {
                 {numero}
               </div>
 
-              <p className="mt-1 text-[10px] font-black uppercase">{label}</p>
+              <p className="mt-1 text-[9px] md:text-[10px] font-black uppercase">
+                {label}
+              </p>
             </div>
           );
         })}
@@ -787,13 +886,14 @@ function RecepcionRapidaPage() {
 
       {renderPaso()}
 
-      <div className="mt-8 pt-4 border-t border-black flex justify-between items-center">
+      <div className="mt-8 pt-4 border-t border-black flex flex-col md:flex-row justify-between gap-4 md:items-center">
         <div className="text-[10px] uppercase font-bold text-gray-500">
           Cliente ID: {clienteId || "—"} | Vehículo ID: {vehiculoId || "—"} | Orden ID:{" "}
           {ordenId || leerStorage("gmtch_ordenId") || "—"}
         </div>
 
         <button
+          type="button"
           onClick={limpiarFlujo}
           className="text-[10px] uppercase font-black border border-black px-3 py-2"
         >

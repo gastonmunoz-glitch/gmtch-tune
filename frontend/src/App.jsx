@@ -102,7 +102,25 @@ function App() {
                     onClick={closeSidebar}
                     className="block p-3 bg-blue-600 text-white font-black uppercase text-xs rounded-lg hover:bg-white hover:text-black transition"
                   >
-                    🚦 Iniciar Recepción
+                    🚦 Nueva Recepción
+                  </Link>
+                </li>
+
+                <li>
+                  <Link to="/ordenes" onClick={closeSidebar} className={linkStyle}>
+                    🧾 Cola de Trabajo
+                  </Link>
+                </li>
+
+                <li>
+                  <Link to="/diagnosticos" onClick={closeSidebar} className={linkStyle}>
+                    🧠 Diagnóstico / Scanner
+                  </Link>
+                </li>
+
+                <li>
+                  <Link to="/archivos-ecu" onClick={closeSidebar} className={linkStyle}>
+                    📂 File Service / Tuner
                   </Link>
                 </li>
 
@@ -119,26 +137,8 @@ function App() {
                 </li>
 
                 <li>
-                  <Link to="/ordenes" onClick={closeSidebar} className={linkStyle}>
-                    🧾 Órdenes
-                  </Link>
-                </li>
-
-                <li>
-                  <Link to="/archivos-ecu" onClick={closeSidebar} className={linkStyle}>
-                    📂 File Service
-                  </Link>
-                </li>
-
-                <li>
                   <Link to="/fotos" onClick={closeSidebar} className={linkStyle}>
                     📸 Fotos
-                  </Link>
-                </li>
-
-                <li>
-                  <Link to="/diagnosticos" onClick={closeSidebar} className={linkStyle}>
-                    🧠 Diagnósticos
                   </Link>
                 </li>
               </ul>
@@ -217,18 +217,46 @@ function Dashboard() {
 
   return (
     <div className="space-y-10">
-      <h1 className="text-4xl md:text-5xl font-black text-black uppercase tracking-tighter">
-        Panel de Operaciones
-      </h1>
+      <div>
+        <h1 className="text-4xl md:text-5xl font-black text-black uppercase tracking-tighter">
+          Panel de Operaciones
+        </h1>
+        <p className="text-xs font-black uppercase text-gray-500 mt-2">
+          Recepción, diagnóstico, mecánica, lectura ECU y File Service
+        </p>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         <StatCard label="Clientes" val={stats.clientes} color="border-blue-500" />
         <StatCard label="Vehículos" val={stats.vehiculos} color="border-green-500" />
-        <StatCard label="Trabajos" val={stats.ordenes} color="border-yellow-500" />
+        <StatCard label="Órdenes" val={stats.ordenes} color="border-yellow-500" />
         <StatCard
           label="Ventas"
           val={`$${stats.ingresos.toLocaleString("es-CL")}`}
           color="border-black bg-black text-white"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <QuickLink
+          to="/flujo"
+          title="Nueva Recepción"
+          text="Ingreso de cliente, vehículo, síntomas y fotos."
+          icon="🚦"
+        />
+
+        <QuickLink
+          to="/ordenes"
+          title="Cola de Trabajo"
+          text="Ver órdenes activas y estados del proceso."
+          icon="🧾"
+        />
+
+        <QuickLink
+          to="/archivos-ecu"
+          title="File Service"
+          text="Archivos ECU originales y modificados por tuner."
+          icon="📂"
         />
       </div>
     </div>
@@ -242,6 +270,17 @@ const StatCard = ({ label, val, color }) => (
     <p className="text-[10px] font-black uppercase opacity-50">{label}</p>
     <p className="text-4xl font-black mt-2">{val}</p>
   </div>
+);
+
+const QuickLink = ({ to, title, text, icon }) => (
+  <Link
+    to={to}
+    className="bg-white border-4 border-black p-6 rounded-2xl shadow-[10px_10px_0px_0px_rgba(0,0,0,1)] hover:bg-black hover:text-white transition"
+  >
+    <p className="text-4xl mb-4">{icon}</p>
+    <h2 className="text-xl font-black uppercase">{title}</h2>
+    <p className="text-xs font-bold uppercase opacity-60 mt-2">{text}</p>
+  </Link>
 );
 
 export default App;
