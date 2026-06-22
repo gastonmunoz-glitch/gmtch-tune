@@ -6,10 +6,11 @@ const fs = require("fs");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const sequelize = require("./src/config/database");
+const { QueryTypes } = require("sequelize");
 
 dotenv.config();
 
-console.log("🛠️ SERVER VERSION: GARAGE-FILA-PAGOS-V4-2026-06-22");
+console.log("SERVER VERSION: GARAGE-FILA-PAGOS-VEHICULOS-DIRECT-V6-2026-06-22");
 
 const app = express();
 
@@ -114,7 +115,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     message: "Backend Gmtch Tune funcionando",
-    version: "GARAGE-FILA-PAGOS-V4-2026-06-22",
+    version: "GARAGE-FILA-PAGOS-VEHICULOS-DIRECT-V6-2026-06-22",
     environment: process.env.NODE_ENV || "development",
   });
 });
@@ -124,7 +125,6 @@ app.get("/api/health", (req, res) => {
 const authRoutes = require("./src/routes/authRoutes");
 const usuarioRoutes = require("./src/routes/usuarioRoutes");
 const clienteRoutes = require("./src/routes/clienteRoutes");
-const vehiculoRoutes = require("./src/routes/vehiculoRoutes");
 const ordenTrabajoRoutes = require("./src/routes/ordenTrabajoRoutes");
 const diagnosticoRoutes = require("./src/routes/diagnosticoRoutes");
 const archivoECURoutes = require("./src/routes/archivoECURoutes");
@@ -163,7 +163,111 @@ app.use(
   clienteRoutes
 );
 
-app.use(
+// ====================== VEHÍCULOS DIRECTO SQL V6 ======================
+
+const normalizarPatenteDirecta = (patente) => {
+  return String(patente || "").trim().toUpperCase().replace(/\s+/g, "");
+};
+
+const armarVehiculoDesdeRows = (rows = []) => {
+  if (!rows.length) return null;
+
+  const base = rows[0];
+
+  const ordenes = rows
+    .filter((row) => row.orden_id)
+    .map((row) => ({
+      id: row.orden_id,
+      vehiculoId: row.orden_vehiculoId,
+      prioridad: row.orden_prioridad,
+      estado: row.orden_estado,
+      estado_pago: row.orden_estado_pago,
+      medio_pago: row.orden_medio_pago,
+      monto_pagado: row.orden_monto_pagado,
+      fecha_pago: row.orden_fecha_pago,
+      cobrado_por: row.orden_cobrado_por,
+      observacion_pago: row.orden_observacion_pago,
+      kilometraje: row.orden_kilometraje,
+      motivo_ingreso: row.orden_motivo_ingreso,
+      monto_total: row.orden_monto_total,
+      createdAt: row.orden_createdAt,
+      updatedAt: row.orden_updatedAt,
+      Diagnosticos: [],
+      ArchivoECUs: [],
+      FotoVehiculos: [],
+    }));
+
+  return {
+    id: base.id,
+    clienteId: base.clienteId,
+    patente: base.patente,
+    marca: base.marca,
+    modelo: base.modelo,
+    anio: base.anio,
+    vin: base.vin,
+    tipo_unidad: base.tipo_unidad,
+    activo: base.activo,
+    createdAt: base.createdAt,
+    updatedAt: base.updatedAt,
+    Cliente: base.cliente_id
+      ? {
+          id: base.cliente_id,
+          nombre: base.cliente_nombre,
+          telefono: base.cliente_telefono,
+          email: base.cliente_email,
+          direccion: base.cliente_direccion,
+          categoria_cliente: base.cliente_categoria_cliente || "NORMAL",
+          nota_cliente: base.cliente_nota_cliente,
+        }
+      : null,
+    OrdenTrabajos: ordenes,
+  };
+};
+
+const queryVehiculoDetalleSQL = `
+  SELECT
+    v."id",
+    v."clienteId",
+    v."patente",
+    v."marca",
+    v."modelo",
+    v."anio",
+    v."vin",
+    v."tipo_unidad",
+    v."activo",
+    v."createdAt",
+    v."updatedAt",
+
+    c."id" AS "cliente_id",
+    c."nombre" AS "cliente_nombre",
+    c."telefono" AS "cliente_telefono",
+    c."email" AS "cliente_email",
+    c."direccion" AS "cliente_direccion",
+    c."categoria_cliente" AS "cliente_categoria_cliente",
+    c."nota_cliente" AS "cliente_nota_cliente",
+
+    o."id" AS "orden_id",
+    o."vehiculoId" AS "orden_vehiculoId",
+    o."prioridad" AS "orden_prioridad",
+    o."estado" AS "orden_estado",
+    o."estado_pago" AS "orden_estado_pago",
+    o."medio_pago" AS "orden_medio_pago",
+    o."monto_pagado" AS "orden_monto_pagado",
+    o."fecha_pago" AS "orden_fecha_pago",
+    o."cobrado_por" AS "orden_cobrado_por",
+    o."observacion_pago" AS "orden_observacion_pago",
+    o."kilometraje" AS "orden_kilometraje",
+    o."motivo_ingreso" AS "orden_motivo_ingreso",
+    o."monto_total" AS "orden_monto_total",
+    o."createdAt" AS "orden_createdAt",
+    o."updatedAt" AS "orden_updatedAt"
+
+  FROM "vehiculos" v
+  LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+  LEFT JOIN "ordenes_trabajo" o ON o."vehiculoId" = v."id"
+`;
+
+app.get(
   "/api/vehiculos",
   autenticar,
   permitirPorMetodo({
@@ -177,13 +281,533 @@ app.use(
       "MECANICO",
       "TUNER",
     ],
+  }),
+  async (req, res) => {
+    try {
+      console.log("GET /api/vehiculos DIRECT-SERVER-V6");
+
+      const rows = await sequelize.query(
+        `
+        SELECT
+          v."id",
+          v."clienteId",
+          v."patente",
+          v."marca",
+          v."modelo",
+          v."anio",
+          v."vin",
+          v."tipo_unidad",
+          v."activo",
+          v."createdAt",
+          v."updatedAt",
+
+          c."id" AS "cliente_id",
+          c."nombre" AS "cliente_nombre",
+          c."telefono" AS "cliente_telefono",
+          c."email" AS "cliente_email",
+          c."direccion" AS "cliente_direccion",
+          c."categoria_cliente" AS "cliente_categoria_cliente",
+          c."nota_cliente" AS "cliente_nota_cliente",
+
+          (
+            SELECT COUNT(*)::int
+            FROM "ordenes_trabajo" o
+            WHERE o."vehiculoId" = v."id"
+          ) AS "total_ordenes"
+
+        FROM "vehiculos" v
+        LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+        ORDER BY c."nombre" ASC NULLS LAST, v."patente" ASC;
+        `,
+        {
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      const data = rows.map((row) => ({
+        id: row.id,
+        clienteId: row.clienteId,
+        patente: row.patente,
+        marca: row.marca,
+        modelo: row.modelo,
+        anio: row.anio,
+        vin: row.vin,
+        tipo_unidad: row.tipo_unidad,
+        activo: row.activo,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        Cliente: row.cliente_id
+          ? {
+              id: row.cliente_id,
+              nombre: row.cliente_nombre,
+              telefono: row.cliente_telefono,
+              email: row.cliente_email,
+              direccion: row.cliente_direccion,
+              categoria_cliente: row.cliente_categoria_cliente || "NORMAL",
+              nota_cliente: row.cliente_nota_cliente,
+            }
+          : null,
+        OrdenTrabajos: Array.from(
+          { length: Number(row.total_ordenes || 0) },
+          (_, i) => ({ id: `historial-${i + 1}` })
+        ),
+      }));
+
+      res.json(data);
+    } catch (error) {
+      console.error("ERROR GET VEHÍCULOS DIRECT-SERVER-V6:", error);
+
+      res.status(500).json({
+        error: error.message,
+        controller: "DIRECT-SERVER-V6",
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/vehiculos",
+  autenticar,
+  permitirPorMetodo({
     POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
+  }),
+  async (req, res) => {
+    try {
+      console.log("POST /api/vehiculos DIRECT-SERVER-V6 BODY:", req.body);
+
+      const patente = normalizarPatenteDirecta(req.body.patente);
+      const clienteId = req.body.clienteId ? Number(req.body.clienteId) : null;
+      const marca = String(req.body.marca || "SIN MARCA").trim() || "SIN MARCA";
+      const modelo =
+        String(req.body.modelo || "SIN MODELO").trim() || "SIN MODELO";
+      const anio = req.body.anio ? Number(req.body.anio) : null;
+      const vin = String(req.body.vin || "").trim() || null;
+      const tipo_unidad =
+        String(req.body.tipo_unidad || "AUTO").trim() || "AUTO";
+
+      if (!patente) {
+        return res.status(400).json({
+          error: "Falta patente",
+          controller: "DIRECT-SERVER-V6",
+        });
+      }
+
+      if (!clienteId) {
+        return res.status(400).json({
+          error: "Falta clienteId",
+          controller: "DIRECT-SERVER-V6",
+        });
+      }
+
+      const cliente = await sequelize.query(
+        `
+        SELECT "id"
+        FROM "clientes"
+        WHERE "id" = :clienteId
+        LIMIT 1;
+        `,
+        {
+          replacements: { clienteId },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      if (cliente.length === 0) {
+        return res.status(404).json({
+          error: "Cliente no encontrado",
+          controller: "DIRECT-SERVER-V6",
+        });
+      }
+
+      const existente = await sequelize.query(
+        `
+        SELECT "id", "patente"
+        FROM "vehiculos"
+        WHERE UPPER(TRIM("patente")) = :patente
+        LIMIT 1;
+        `,
+        {
+          replacements: { patente },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      if (existente.length > 0) {
+        return res.status(409).json({
+          error: "La patente ya está registrada",
+          controller: "DIRECT-SERVER-V6",
+          vehiculo: existente[0],
+        });
+      }
+
+      const insertado = await sequelize.query(
+        `
+        INSERT INTO "vehiculos"
+          (
+            "clienteId",
+            "patente",
+            "marca",
+            "modelo",
+            "anio",
+            "vin",
+            "tipo_unidad",
+            "activo",
+            "createdAt",
+            "updatedAt"
+          )
+        VALUES
+          (
+            :clienteId,
+            :patente,
+            :marca,
+            :modelo,
+            :anio,
+            :vin,
+            :tipo_unidad,
+            true,
+            NOW(),
+            NOW()
+          )
+        RETURNING *;
+        `,
+        {
+          replacements: {
+            clienteId,
+            patente,
+            marca,
+            modelo,
+            anio,
+            vin,
+            tipo_unidad,
+          },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      res.status(201).json({
+        mensaje: "Vehículo creado correctamente",
+        controller: "DIRECT-SERVER-V6",
+        vehiculo: insertado[0],
+      });
+    } catch (error) {
+      console.error("ERROR POST VEHÍCULO DIRECT-SERVER-V6:", error);
+
+      res.status(500).json({
+        error: error.message,
+        controller: "DIRECT-SERVER-V6",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/vehiculos/patente/:patente",
+  autenticar,
+  permitirPorMetodo({
+    GET: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "RECEPCION",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+      "TUNER",
+    ],
+  }),
+  async (req, res) => {
+    try {
+      const patente = normalizarPatenteDirecta(req.params.patente);
+
+      const rows = await sequelize.query(
+        `
+        ${queryVehiculoDetalleSQL}
+        WHERE UPPER(TRIM(v."patente")) = :patente
+        ORDER BY o."createdAt" DESC NULLS LAST;
+        `,
+        {
+          replacements: { patente },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      const vehiculo = armarVehiculoDesdeRows(rows);
+
+      if (!vehiculo) {
+        return res.status(404).json({
+          error: "Vehículo no encontrado",
+          controller: "DIRECT-SERVER-V6",
+        });
+      }
+
+      res.json(vehiculo);
+    } catch (error) {
+      console.error("ERROR GET VEHÍCULO POR PATENTE DIRECT-SERVER-V6:", error);
+
+      res.status(500).json({
+        error: error.message,
+        controller: "DIRECT-SERVER-V6",
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/vehiculos/:id",
+  autenticar,
+  permitirPorMetodo({
+    GET: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "RECEPCION",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+      "TUNER",
+    ],
+  }),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+
+      const rows = await sequelize.query(
+        `
+        ${queryVehiculoDetalleSQL}
+        WHERE v."id" = :id
+        ORDER BY o."createdAt" DESC NULLS LAST;
+        `,
+        {
+          replacements: { id },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      const vehiculo = armarVehiculoDesdeRows(rows);
+
+      if (!vehiculo) {
+        return res.status(404).json({
+          error: "Vehículo no encontrado",
+          controller: "DIRECT-SERVER-V6",
+        });
+      }
+
+      res.json(vehiculo);
+    } catch (error) {
+      console.error("ERROR GET VEHÍCULO ID DIRECT-SERVER-V6:", error);
+
+      res.status(500).json({
+        error: error.message,
+        controller: "DIRECT-SERVER-V6",
+      });
+    }
+  }
+);
+
+app.put(
+  "/api/vehiculos/:id",
+  autenticar,
+  permitirPorMetodo({
     PUT: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
+  }),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+
+      const existente = await sequelize.query(
+        `
+        SELECT *
+        FROM "vehiculos"
+        WHERE "id" = :id
+        LIMIT 1;
+        `,
+        {
+          replacements: { id },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      if (existente.length === 0) {
+        return res.status(404).json({
+          error: "Vehículo no encontrado",
+          controller: "DIRECT-SERVER-V6",
+        });
+      }
+
+      const actual = existente[0];
+
+      const clienteId =
+        req.body.clienteId !== undefined
+          ? Number(req.body.clienteId)
+          : actual.clienteId;
+
+      const patente =
+        req.body.patente !== undefined
+          ? normalizarPatenteDirecta(req.body.patente)
+          : actual.patente;
+
+      const marca =
+        req.body.marca !== undefined
+          ? String(req.body.marca || actual.marca).trim() || actual.marca
+          : actual.marca;
+
+      const modelo =
+        req.body.modelo !== undefined
+          ? String(req.body.modelo || actual.modelo).trim() || actual.modelo
+          : actual.modelo;
+
+      const anio =
+        req.body.anio !== undefined ? Number(req.body.anio) || null : actual.anio;
+
+      const vin =
+        req.body.vin !== undefined
+          ? String(req.body.vin || "").trim() || null
+          : actual.vin;
+
+      const tipo_unidad =
+        req.body.tipo_unidad !== undefined
+          ? String(req.body.tipo_unidad || "AUTO").trim() || "AUTO"
+          : actual.tipo_unidad;
+
+      const activo =
+        req.body.activo !== undefined ? Boolean(req.body.activo) : actual.activo;
+
+      const actualizado = await sequelize.query(
+        `
+        UPDATE "vehiculos"
+        SET
+          "clienteId" = :clienteId,
+          "patente" = :patente,
+          "marca" = :marca,
+          "modelo" = :modelo,
+          "anio" = :anio,
+          "vin" = :vin,
+          "tipo_unidad" = :tipo_unidad,
+          "activo" = :activo,
+          "updatedAt" = NOW()
+        WHERE "id" = :id
+        RETURNING *;
+        `,
+        {
+          replacements: {
+            id,
+            clienteId,
+            patente,
+            marca,
+            modelo,
+            anio,
+            vin,
+            tipo_unidad,
+            activo,
+          },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      res.json({
+        mensaje: "Vehículo actualizado",
+        controller: "DIRECT-SERVER-V6",
+        vehiculo: actualizado[0],
+      });
+    } catch (error) {
+      console.error("ERROR PUT VEHÍCULO DIRECT-SERVER-V6:", error);
+
+      res.status(500).json({
+        error: error.message,
+        controller: "DIRECT-SERVER-V6",
+      });
+    }
+  }
+);
+
+app.patch(
+  "/api/vehiculos/:id",
+  autenticar,
+  permitirPorMetodo({
     PATCH: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
+  }),
+  async (req, res) => {
+    try {
+      req.method = "PUT";
+      return res.status(405).json({
+        error: "Usa PUT para actualizar vehículo por ahora",
+        controller: "DIRECT-SERVER-V6",
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: error.message,
+        controller: "DIRECT-SERVER-V6",
+      });
+    }
+  }
+);
+
+app.delete(
+  "/api/vehiculos/:id",
+  autenticar,
+  permitirPorMetodo({
     DELETE: ["OWNER"],
   }),
-  vehiculoRoutes
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+
+      const historial = await sequelize.query(
+        `
+        SELECT COUNT(*)::int AS total
+        FROM "ordenes_trabajo"
+        WHERE "vehiculoId" = :id;
+        `,
+        {
+          replacements: { id },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      if ((historial[0]?.total || 0) > 0) {
+        return res.status(400).json({
+          error:
+            "Este vehículo tiene historial de órdenes. Por seguridad no se elimina.",
+          controller: "DIRECT-SERVER-V6",
+        });
+      }
+
+      const eliminado = await sequelize.query(
+        `
+        DELETE FROM "vehiculos"
+        WHERE "id" = :id
+        RETURNING "id";
+        `,
+        {
+          replacements: { id },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      if (eliminado.length === 0) {
+        return res.status(404).json({
+          error: "Vehículo no encontrado",
+          controller: "DIRECT-SERVER-V6",
+        });
+      }
+
+      res.json({
+        mensaje: "Vehículo eliminado correctamente",
+        controller: "DIRECT-SERVER-V6",
+        id,
+      });
+    } catch (error) {
+      console.error("ERROR DELETE VEHÍCULO DIRECT-SERVER-V6:", error);
+
+      res.status(500).json({
+        error: error.message,
+        controller: "DIRECT-SERVER-V6",
+      });
+    }
+  }
 );
+
+// ====================== ÓRDENES ======================
 
 app.use(
   "/api/ordenes",
@@ -303,17 +927,17 @@ app.use(
 try {
   const pagoRoutes = require("./src/routes/pagoRoutes");
   app.use("/api/pagos", autenticar, permitirRoles("OWNER", "ADMIN"), pagoRoutes);
-  console.log("✅ Ruta /api/pagos cargada");
+  console.log("Ruta /api/pagos cargada");
 } catch (error) {
-  console.warn("⚠️ Ruta /api/pagos no cargada:", error.message);
+  console.warn("Ruta /api/pagos no cargada:", error.message);
 }
 
 try {
   const fileRoutes = require("./src/routes/fileRoutes");
   app.use("/api/files", autenticar, permitirRoles("OWNER", "ADMIN"), fileRoutes);
-  console.log("✅ Ruta /api/files cargada");
+  console.log("Ruta /api/files cargada");
 } catch (error) {
-  console.warn("⚠️ Ruta /api/files no cargada:", error.message);
+  console.warn("Ruta /api/files no cargada:", error.message);
 }
 
 // ====================== RUTA NO ENCONTRADA ======================
@@ -342,10 +966,7 @@ const prepararBaseDatos = async () => {
     await sequelize.query(`
       DO $$
       BEGIN
-        -- ======================
         -- USUARIOS
-        -- ======================
-
         IF EXISTS (
           SELECT 1
           FROM information_schema.tables
@@ -412,10 +1033,7 @@ const prepararBaseDatos = async () => {
 
         END IF;
 
-        -- ======================
         -- CLIENTES
-        -- ======================
-
         IF EXISTS (
           SELECT 1
           FROM information_schema.tables
@@ -436,10 +1054,7 @@ const prepararBaseDatos = async () => {
 
         END IF;
 
-        -- ======================
         -- VEHÍCULOS
-        -- ======================
-
         IF EXISTS (
           SELECT 1
           FROM information_schema.tables
@@ -470,10 +1085,7 @@ const prepararBaseDatos = async () => {
 
         END IF;
 
-        -- ======================
-        -- ÓRDENES DE TRABAJO
-        -- ======================
-
+        -- ÓRDENES
         IF EXISTS (
           SELECT 1
           FROM information_schema.tables
@@ -561,9 +1173,9 @@ const prepararBaseDatos = async () => {
       END $$;
     `);
 
-    console.log("✅ Base de datos preparada para garage, fila y pagos");
+    console.log("Base de datos preparada para garage, fila y pagos");
   } catch (error) {
-    console.warn("⚠️ No se pudo preparar base de datos:", error.message);
+    console.warn("No se pudo preparar base de datos:", error.message);
   }
 };
 
@@ -598,7 +1210,7 @@ const crearUsuarioMaestro = async () => {
         }
       );
 
-      console.log("ℹ️ Usuario gaston actualizado como OWNER y password reseteada a 123");
+      console.log("Usuario gaston actualizado como OWNER y password reseteada a 123");
       return;
     }
 
@@ -620,9 +1232,9 @@ const crearUsuarioMaestro = async () => {
       }
     );
 
-    console.log("🚀 ACCESO OWNER CREADO: gaston / 123");
+    console.log("ACCESO OWNER CREADO: gaston / 123");
   } catch (error) {
-    console.error("❌ Error creando usuario maestro:", error);
+    console.error("Error creando usuario maestro:", error);
     throw error;
   }
 };
@@ -633,19 +1245,19 @@ const startServer = async () => {
   try {
     await prepararBaseDatos();
 
-    await sequelize.sync({ alter: true });
-    console.log("✅ BASE DE DATOS SINCRONIZADA");
+    await sequelize.sync();
+    console.log("BASE DE DATOS SINCRONIZADA SIN ALTER AUTOMÁTICO");
 
     await crearUsuarioMaestro();
 
-    console.log("📁 Uploads path:", uploadsPath);
+    console.log("Uploads path:", uploadsPath);
 
     const PORT = process.env.PORT || 5000;
 
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 SERVIDOR ESCUCHANDO EN PUERTO ${PORT}`);
+      console.log(`SERVIDOR ESCUCHANDO EN PUERTO ${PORT}`);
 
-      console.log("📡 Endpoints activos:");
+      console.log("Endpoints activos:");
       console.log("   /");
       console.log("   /api/health");
       console.log("   /api/auth/test");
@@ -653,14 +1265,14 @@ const startServer = async () => {
       console.log("   /api/auth/me");
       console.log("   /api/usuarios");
       console.log("   /api/clientes");
-      console.log("   /api/vehiculos");
+      console.log("   /api/vehiculos DIRECT-SERVER-V6");
       console.log("   /api/ordenes");
       console.log("   /api/diagnosticos");
       console.log("   /api/archivos-ecu");
       console.log("   /api/fotos");
     });
   } catch (error) {
-    console.error("❌ ERROR AL ARRANCAR:", error);
+    console.error("ERROR AL ARRANCAR:", error);
     process.exit(1);
   }
 };
