@@ -3,9 +3,12 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const path = require("path");
 const fs = require("fs");
+const bcrypt = require("bcryptjs");
 const sequelize = require("./src/config/database");
 
 dotenv.config();
+
+console.log("🛠️ SERVER VERSION: FIX-USUARIOS-ID-V2-2026-06-22");
 
 const app = express();
 
@@ -65,6 +68,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     message: "Backend Gmtch Tune funcionando",
+    version: "FIX-USUARIOS-ID-V2-2026-06-22",
     environment: process.env.NODE_ENV || "development",
   });
 });
@@ -121,7 +125,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Reparar autoincremento de Usuarios.id en PostgreSQL
+// Reparar autoincremento de Usuarios.id
 const repararUsuarioIdSequence = async () => {
   try {
     await sequelize.query(`
@@ -145,8 +149,8 @@ const repararUsuarioIdSequence = async () => {
 
           PERFORM setval(
             '"Usuarios_id_seq"',
-            COALESCE((SELECT MAX("id") FROM "Usuarios"), 0) + 1,
-            false
+            GREATEST(COALESCE((SELECT MAX("id") FROM "Usuarios"), 0), 1),
+            true
           );
 
         END IF;
@@ -155,7 +159,54 @@ const repararUsuarioIdSequence = async () => {
 
     console.log("✅ Secuencia Usuarios.id reparada/verificada");
   } catch (error) {
-    console.error("❌ Error reparando secuencia de Usuarios.id:", error);
+    console.error("❌ Error reparando secuencia Usuarios.id:", error);
+    throw error;
+  }
+};
+
+// Crear usuario maestro con SQL directo para evitar error de id null
+const crearUsuarioMaestro = async () => {
+  try {
+    const [usuarios] = await sequelize.query(`
+      SELECT "id", "username"
+      FROM "Usuarios"
+      WHERE "username" = 'gaston'
+      LIMIT 1;
+    `);
+
+    if (usuarios.length > 0) {
+      console.log("ℹ️ EL USUARIO gaston YA EXISTE EN LA BASE DE DATOS");
+      return;
+    }
+
+    const [resultadoId] = await sequelize.query(`
+      SELECT COALESCE(MAX("id"), 0) + 1 AS next_id
+      FROM "Usuarios";
+    `);
+
+    const nextId = Number(resultadoId[0].next_id || 1);
+    const passwordHash = await bcrypt.hash("123", 10);
+
+    await sequelize.query(
+      `
+      INSERT INTO "Usuarios"
+        ("id", "username", "password", "rol", "createdAt", "updatedAt")
+      VALUES
+        (:id, :username, :password, :rol, NOW(), NOW());
+      `,
+      {
+        replacements: {
+          id: nextId,
+          username: "gaston",
+          password: passwordHash,
+          rol: "ADMIN",
+        },
+      }
+    );
+
+    console.log("🚀 ACCESO MAESTRO CREADO: gaston / 123");
+  } catch (error) {
+    console.error("❌ Error creando usuario maestro:", error);
     throw error;
   }
 };
@@ -167,22 +218,7 @@ const startServer = async () => {
     console.log("✅ BASE DE DATOS SINCRONIZADA");
 
     await repararUsuarioIdSequence();
-
-    const Usuario = require("./src/models/Usuario");
-
-    const [, created] = await Usuario.findOrCreate({
-      where: { username: "gaston" },
-      defaults: {
-        password: "123",
-        rol: "ADMIN",
-      },
-    });
-
-    if (created) {
-      console.log("🚀 ACCESO MAESTRO CREADO: gaston / 123");
-    } else {
-      console.log("ℹ️ EL USUARIO gaston YA EXISTE EN LA BASE DE DATOS");
-    }
+    await crearUsuarioMaestro();
 
     console.log("📁 Uploads path:", uploadsPath);
 

@@ -15,7 +15,7 @@ const Usuario = sequelize.define(
     username: {
       type: DataTypes.STRING,
       unique: true,
-      allowNull: true, // Temporal para compatibilidad con tabla antigua
+      allowNull: true,
     },
 
     password: {
