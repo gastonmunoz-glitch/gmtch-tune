@@ -17,27 +17,115 @@ const ESTADO_INICIAL_FORM = {
 };
 
 const SERVICIOS = [
-  "DPF OFF",
-  "EGR OFF",
-  "ADBLUE / SCR OFF",
-  "NOX OFF",
-  "DTC OFF",
-  "STAGE 1",
-  "STAGE 2",
-  "IMMO OFF",
-  "CLONACIÓN ECU",
-  "DIAGNÓSTICO / REVISIÓN ARCHIVO",
-  "OTRO",
+  "🚫 DPF / FAP OFF",
+  "🚫 EGR OFF",
+  "🚫 ADBLUE / SCR / DEF OFF",
+  "🚫 NOX OFF",
+  "🚫 LAMBDA OFF",
+  "🚫 TVA / MARIPOSA OFF",
+  "🚫 DTC OFF ESPECÍFICO",
+
+  "⚡ STAGE 1",
+  "⚡ STAGE 2",
+  "🏁 STAGE 3",
+  "🧬 STAGE CUSTOM",
+  "⛽ ECO TUNE / OPTIMIZACIÓN CONSUMO",
+  "🚚 FLEET TUNE / FLOTA",
+
+  "🔥 POPS & BANGS",
+  "🔥 BURBLE",
+  "🔥 HARDCUT BENCINA",
+  "🔥 POPCORN / HARDCUT DIÉSEL",
+  "🚀 LAUNCH CONTROL",
+  "💥 ANTILAG",
+  "🏎️ VMAX OFF / LIMITADOR VELOCIDAD",
+  "🔧 LIMITADOR RPM",
+
+  "🧠 DIAGNÓSTICO ARCHIVO",
+  "🧠 REVISIÓN MAPA",
+  "🧠 CORRECCIÓN ARCHIVO",
+  "🧠 SEGUNDA VERSIÓN / AJUSTE",
+
+  "🔐 IMMO OFF",
+  "🔐 CLONACIÓN ECU",
+  "🔐 VIRGINIZACIÓN ECU",
+  "💥 AIRBAG CRASH DATA",
+  "🧩 BCM / BSI / FRM / CAS / MÓDULO",
+
+  "🚚 CAMIÓN / MAQUINARIA DPF-EGR-ADBLUE",
+  "🚜 AGRÍCOLA / INDUSTRIAL",
+  "🚤 MARÍTIMO / JETSKI",
+  "🏍️ MOTO / ATV",
+
+  "📂 OTRO FILE SERVICE",
 ];
 
-const METODOS_LECTURA = ["OBD", "BENCH", "BOOT", "ECU RETIRADA"];
+const METODOS_LECTURA = [
+  "OBD",
+  "BENCH",
+  "BOOT",
+  "ECU RETIRADA",
+  "BDM",
+  "JTAG",
+  "SERVICE MODE",
+];
+
+const HERRAMIENTAS = [
+  "",
+  "KESS3",
+  "FLEX",
+  "PCMFlash",
+  "KTAG",
+  "Autotuner",
+  "CMD",
+  "BitBox",
+  "Trasdata",
+  "MPPS",
+  "Galletto",
+  "Xhorse / VVDI",
+  "CG100X",
+  "UPA",
+  "OTRA",
+];
 
 const normalizarTexto = (valor) => String(valor ?? "").trim();
 
-const textoEstado = (estado) => String(estado || "PENDIENTE_TUNER").replace(/_/g, " ");
+const textoEstado = (estado) => {
+  return String(estado || "PENDIENTE_TUNER").replace(/_/g, " ");
+};
+
+const obtenerVehiculoOrden = (orden) => {
+  return orden?.Vehiculo || orden?.vehiculo || orden?.VehiculoOrden || null;
+};
+
+const obtenerClienteOrden = (orden) => {
+  const vehiculo = obtenerVehiculoOrden(orden);
+  return vehiculo?.Cliente || vehiculo?.cliente || orden?.Cliente || orden?.cliente || null;
+};
+
+const obtenerPatenteOrden = (orden) => {
+  const vehiculo = obtenerVehiculoOrden(orden);
+  return vehiculo?.patente || orden?.patente || "SIN PATENTE";
+};
+
+const obtenerTituloOrden = (orden) => {
+  const vehiculo = obtenerVehiculoOrden(orden);
+  const cliente = obtenerClienteOrden(orden);
+
+  const patente = obtenerPatenteOrden(orden);
+  const marca = vehiculo?.marca || "";
+  const modelo = vehiculo?.modelo || "";
+  const anio = vehiculo?.anio || "";
+  const clienteNombre = cliente?.nombre || "Cliente no informado";
+
+  return `${patente} | ${marca} ${modelo} ${anio} | ${clienteNombre} | Orden #${orden.id}`;
+};
 
 function ArchivosECUPage() {
   const [archivos, setArchivos] = useState([]);
+  const [ordenes, setOrdenes] = useState([]);
+  const [busquedaOrden, setBusquedaOrden] = useState("");
+
   const [form, setForm] = useState({ ...ESTADO_INICIAL_FORM });
   const [archivoOriginal, setArchivoOriginal] = useState(null);
   const [archivosModificados, setArchivosModificados] = useState({});
@@ -50,24 +138,62 @@ function ArchivosECUPage() {
     return String(api.defaults.baseURL || "").replace(/\/api\/?$/, "");
   }, []);
 
+  const ordenSeleccionada = useMemo(() => {
+    if (!form.ordenId) return null;
+    return ordenes.find((orden) => String(orden.id) === String(form.ordenId)) || null;
+  }, [ordenes, form.ordenId]);
+
+  const ordenesFiltradas = useMemo(() => {
+    const q = normalizarTexto(busquedaOrden).toLowerCase();
+
+    return ordenes
+      .filter((orden) => {
+        const vehiculo = obtenerVehiculoOrden(orden);
+        const cliente = obtenerClienteOrden(orden);
+
+        const texto = [
+          orden.id,
+          orden.estado,
+          orden.motivo_ingreso,
+          vehiculo?.patente,
+          vehiculo?.marca,
+          vehiculo?.modelo,
+          vehiculo?.anio,
+          vehiculo?.vin,
+          cliente?.nombre,
+          cliente?.telefono,
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        if (!q) return true;
+        return texto.includes(q);
+      })
+      .slice(0, 20);
+  }, [ordenes, busquedaOrden]);
+
   useEffect(() => {
     let activo = true;
 
     const cargarInicial = async () => {
       try {
-        const res = await api.get("/archivos-ecu");
+        const [archivosRes, ordenesRes] = await Promise.all([
+          api.get("/archivos-ecu"),
+          api.get("/ordenes"),
+        ]);
 
         if (!activo) return;
 
-        setArchivos(Array.isArray(res.data) ? res.data : []);
+        setArchivos(Array.isArray(archivosRes.data) ? archivosRes.data : []);
+        setOrdenes(Array.isArray(ordenesRes.data) ? ordenesRes.data : []);
       } catch (err) {
-        console.error("ERROR SISTEMA: Fallo en carga inicial de archivos", err);
+        console.error("ERROR SISTEMA: Fallo en carga inicial File Service", err);
 
         if (!activo) return;
 
         setAviso({
           tipo: "error",
-          mensaje: "No se pudo cargar la matriz de File Service.",
+          mensaje: "No se pudo cargar File Service.",
         });
       }
     };
@@ -84,16 +210,20 @@ function ArchivosECUPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const recargarMatriz = async () => {
+  const recargarTodo = async () => {
     try {
       setCargando(true);
 
-      const res = await api.get("/archivos-ecu");
+      const [archivosRes, ordenesRes] = await Promise.all([
+        api.get("/archivos-ecu"),
+        api.get("/ordenes"),
+      ]);
 
-      setArchivos(Array.isArray(res.data) ? res.data : []);
+      setArchivos(Array.isArray(archivosRes.data) ? archivosRes.data : []);
+      setOrdenes(Array.isArray(ordenesRes.data) ? ordenesRes.data : []);
     } catch (err) {
-      console.error("ERROR SISTEMA: Fallo en sincronización de archivos", err);
-      mostrarAviso("error", "No se pudo cargar la matriz de File Service.");
+      console.error("ERROR SISTEMA: Fallo en sincronización File Service", err);
+      mostrarAviso("error", "No se pudo refrescar File Service.");
     } finally {
       setCargando(false);
     }
@@ -132,9 +262,19 @@ function ArchivosECUPage() {
     }));
   };
 
+  const seleccionarOrden = (orden) => {
+    setForm((prev) => ({
+      ...prev,
+      ordenId: String(orden.id),
+    }));
+
+    setBusquedaOrden(obtenerTituloOrden(orden));
+  };
+
   const limpiarForm = () => {
     setForm({ ...ESTADO_INICIAL_FORM });
     setArchivoOriginal(null);
+    setBusquedaOrden("");
   };
 
   const crearSolicitudFileService = async () => {
@@ -142,7 +282,7 @@ function ArchivosECUPage() {
     const tipoServicio = normalizarTexto(form.tipo_servicio);
 
     if (!ordenId) {
-      mostrarAviso("error", "Debes ingresar el ID de la orden.");
+      mostrarAviso("error", "Debes seleccionar una orden por patente o último ingreso.");
       return;
     }
 
@@ -182,7 +322,7 @@ function ArchivosECUPage() {
 
       mostrarAviso("ok", "Solicitud enviada al File Service correctamente.");
       limpiarForm();
-      await recargarMatriz();
+      await recargarTodo();
     } catch (err) {
       console.error("ERROR CREANDO FILE SERVICE:", err.response?.data || err.message);
 
@@ -243,10 +383,33 @@ function ArchivosECUPage() {
         [id]: "",
       }));
 
-      await recargarMatriz();
+      await recargarTodo();
     } catch (err) {
       console.error("Fallo en carga de archivo modificado:", err.response?.data || err.message);
       mostrarAviso("error", "No se pudo subir el archivo modificado.");
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const eliminarArchivoECU = async (id) => {
+    const confirmar = window.confirm(
+      `¿Eliminar el registro File Service #${id}? Esta acción eliminará el registro de la matriz.`
+    );
+
+    if (!confirmar) return;
+
+    try {
+      setCargando(true);
+      await api.delete(`/archivos-ecu/${id}`);
+      mostrarAviso("ok", `Registro File Service #${id} eliminado.`);
+      await recargarTodo();
+    } catch (err) {
+      console.error("ERROR ELIMINANDO ARCHIVO ECU:", err.response?.data || err.message);
+      mostrarAviso(
+        "error",
+        err.response?.data?.error || "No se pudo eliminar el registro File Service."
+      );
     } finally {
       setCargando(false);
     }
@@ -307,6 +470,53 @@ function ArchivosECUPage() {
     return "bg-black text-white";
   };
 
+  const renderOrdenSeleccionada = () => {
+    if (!ordenSeleccionada) return null;
+
+    const vehiculo = obtenerVehiculoOrden(ordenSeleccionada);
+    const cliente = obtenerClienteOrden(ordenSeleccionada);
+
+    return (
+      <div className="bg-black text-white border-4 border-blue-600 p-5 mt-4">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase text-blue-400">
+              Orden seleccionada
+            </p>
+
+            <h3 className="text-2xl font-black uppercase">
+              #{ordenSeleccionada.id} | {vehiculo?.patente || "SIN PATENTE"}
+            </h3>
+
+            <p className="text-xs font-bold uppercase text-gray-300 mt-1">
+              {vehiculo?.marca || "Marca"} {vehiculo?.modelo || "Modelo"}{" "}
+              {vehiculo?.anio || ""} | Cliente: {cliente?.nombre || "No informado"}
+            </p>
+          </div>
+
+          <div className="text-left xl:text-right">
+            <p className="text-[10px] font-black uppercase text-gray-500">
+              Estado actual
+            </p>
+            <p className="text-sm font-black uppercase text-green-400">
+              {ordenSeleccionada.estado || "SIN ESTADO"}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-700 p-4 mt-4">
+          <p className="text-[10px] font-black uppercase text-gray-500 mb-2">
+            Trabajo / síntomas registrados
+          </p>
+
+          <p className="text-xs font-bold whitespace-pre-wrap">
+            {ordenSeleccionada.motivo_ingreso || "Sin detalle registrado"}
+          </p>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-full mx-auto p-2 space-y-10">
       <div className="bg-black text-white p-8 border-b-8 border-blue-600 shadow-2xl">
@@ -317,7 +527,7 @@ function ArchivosECUPage() {
             </h1>
 
             <p className="text-blue-400 font-bold text-xs uppercase tracking-[.3em] mt-2">
-              Original ECU → Tuner → Modificado → Operador ECU
+              Engineering Matrix · Original ECU → Tuner → Modificado → Operador ECU
             </p>
           </div>
 
@@ -355,29 +565,93 @@ function ArchivosECUPage() {
           </h2>
 
           <p className="text-xs font-bold uppercase text-gray-500 mt-1">
-            Esta sección la usa el técnico ECU después de leer el archivo original.
+            El técnico ECU selecciona la orden por patente o último ingreso. No debe escribir el ID manualmente.
           </p>
         </div>
 
         <div className="bg-yellow-50 border-2 border-yellow-500 p-4 mb-6 text-xs font-bold uppercase leading-relaxed">
-          El técnico ECU define el método de lectura: OBD, BENCH, BOOT o ECU retirada.
-          El mecánico no toma esa decisión; solo ejecuta instrucciones asignadas.
+          Uso sujeto a normativa aplicable y alcance autorizado del servicio. El técnico ECU define el método de lectura:
+          OBD, BENCH, BOOT o ECU retirada. El mecánico no toma esa decisión; solo ejecuta instrucciones asignadas.
+        </div>
+
+        <div className="border-4 border-black p-5 mb-6 bg-slate-50">
+          <h3 className="text-sm font-black uppercase mb-3">
+            Buscar orden por patente, cliente, vehículo o número
+          </h3>
+
+          <input
+            className="border-2 border-black p-4 w-full font-black uppercase bg-white"
+            placeholder="Ej: ABCD12, BMW, Volvo, Econorte, #15..."
+            value={busquedaOrden}
+            onChange={(e) => {
+              setBusquedaOrden(e.target.value);
+              setForm((prev) => ({ ...prev, ordenId: "" }));
+            }}
+          />
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-4 max-h-96 overflow-auto">
+            {ordenesFiltradas.map((orden) => {
+              const vehiculo = obtenerVehiculoOrden(orden);
+              const cliente = obtenerClienteOrden(orden);
+              const activo = String(form.ordenId) === String(orden.id);
+
+              return (
+                <button
+                  key={orden.id}
+                  type="button"
+                  onClick={() => seleccionarOrden(orden)}
+                  className={`text-left border-2 p-4 transition ${
+                    activo
+                      ? "bg-black text-white border-blue-600"
+                      : "bg-white text-black border-black hover:bg-blue-50"
+                  }`}
+                >
+                  <div className="flex justify-between gap-3">
+                    <div>
+                      <p className="text-xl font-black uppercase">
+                        {vehiculo?.patente || "SIN PATENTE"}
+                      </p>
+
+                      <p className="text-xs font-bold uppercase opacity-70">
+                        Orden #{orden.id} · {vehiculo?.marca || "Marca"}{" "}
+                        {vehiculo?.modelo || "Modelo"} {vehiculo?.anio || ""}
+                      </p>
+
+                      <p className="text-xs font-bold uppercase mt-1 opacity-70">
+                        Cliente: {cliente?.nombre || "No informado"}
+                      </p>
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-[10px] font-black uppercase opacity-60">
+                        Estado
+                      </p>
+                      <p className="text-[10px] font-black uppercase">
+                        {orden.estado || "—"}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {ordenesFiltradas.length === 0 && (
+            <p className="text-xs font-black uppercase text-red-600 mt-4">
+              No se encontraron órdenes con esa búsqueda.
+            </p>
+          )}
+
+          {renderOrdenSeleccionada()}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <input
-            className="border border-black p-3 w-full font-bold"
-            placeholder="ID Orden"
-            value={form.ordenId}
-            onChange={(e) => actualizarForm("ordenId", e.target.value)}
-          />
-
           <select
-            className="border border-black p-3 w-full font-bold bg-white"
+            className="border border-black p-3 w-full font-bold bg-white lg:col-span-2"
             value={form.tipo_servicio}
             onChange={(e) => actualizarForm("tipo_servicio", e.target.value)}
           >
-            <option value="">Seleccionar servicio</option>
+            <option value="">Seleccionar servicio GMTCH Tune</option>
             {SERVICIOS.map((servicio) => (
               <option key={servicio} value={servicio}>
                 {servicio}
@@ -408,12 +682,17 @@ function ArchivosECUPage() {
             ))}
           </select>
 
-          <input
-            className="border border-black p-3 w-full font-bold"
-            placeholder="Herramienta lectura: KESS3, FLEX, PCMFlash..."
+          <select
+            className="border border-black p-3 w-full font-bold bg-white"
             value={form.herramienta_lectura}
             onChange={(e) => actualizarForm("herramienta_lectura", e.target.value)}
-          />
+          >
+            {HERRAMIENTAS.map((herramienta) => (
+              <option key={herramienta || "SIN"} value={herramienta}>
+                {herramienta || "Seleccionar herramienta"}
+              </option>
+            ))}
+          </select>
 
           <input
             className="border border-black p-3 w-full font-bold"
@@ -452,7 +731,7 @@ function ArchivosECUPage() {
 
           <textarea
             className="border border-black p-3 w-full font-bold lg:col-span-3"
-            placeholder="Notas del operador ECU para el tuner. Ej: vehículo con DPF vaciado, sin catalizador, DTC presentes, lectura OBD ok, requiere solución urgente..."
+            placeholder="Notas del operador ECU para el tuner. Ej: DTC presentes, DPF vaciado físicamente, lectura OBD ok, sin catalizador, requiere urgencia..."
             value={form.notas_operador}
             onChange={(e) => actualizarForm("notas_operador", e.target.value)}
           />
@@ -529,7 +808,7 @@ function ArchivosECUPage() {
 
           <button
             type="button"
-            onClick={recargarMatriz}
+            onClick={recargarTodo}
             className="px-4 py-2 border-2 border-blue-600 bg-blue-600 text-white font-black text-[10px] uppercase"
           >
             Refrescar
@@ -547,6 +826,9 @@ function ArchivosECUPage() {
         ) : (
           archivosFiltrados.map((arq) => {
             const estado = estadoArchivo(arq);
+            const orden = arq.OrdenTrabajo || arq.orden || null;
+            const vehiculo = orden ? obtenerVehiculoOrden(orden) : null;
+            const cliente = orden ? obtenerClienteOrden(orden) : null;
 
             return (
               <div
@@ -584,19 +866,35 @@ function ArchivosECUPage() {
                     </h2>
 
                     <p className="text-xs font-bold uppercase text-gray-500 mt-1">
+                      {vehiculo?.patente ? `${vehiculo.patente} | ` : ""}
+                      {vehiculo?.marca || ""} {vehiculo?.modelo || ""}{" "}
+                      {cliente?.nombre ? `| Cliente: ${cliente.nombre}` : ""}
+                    </p>
+
+                    <p className="text-xs font-bold uppercase text-gray-500 mt-1">
                       ECU: {arq.marca_ecu || "—"} {arq.modelo_ecu || "—"} | Método:{" "}
                       {arq.metodo_lectura || "—"} | Herramienta:{" "}
                       {arq.herramienta_lectura || "—"}
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => notificarWhatsApp(arq)}
-                    className="bg-green-500 text-black px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black hover:text-white transition"
-                  >
-                    📲 Notificar Máster
-                  </button>
+                  <div className="flex flex-col md:flex-row gap-2">
+                    <button
+                      type="button"
+                      onClick={() => notificarWhatsApp(arq)}
+                      className="bg-green-500 text-black px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black hover:text-white transition"
+                    >
+                      📲 Notificar Máster
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => eliminarArchivoECU(arq.id)}
+                      className="bg-red-600 text-white px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black transition"
+                    >
+                      🗑️ Eliminar
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 xl:grid-cols-3 divide-y-4 xl:divide-y-0 xl:divide-x-4 divide-black">

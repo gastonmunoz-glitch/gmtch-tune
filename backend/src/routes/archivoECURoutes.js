@@ -10,6 +10,7 @@ const {
   obtenerArchivoECUPorId,
   actualizarArchivoECU,
   subirArchivoModificado,
+  eliminarArchivoECU,
 } = require("../controllers/archivoECUController");
 
 const manejarSubidaArchivo = (req, res, next) => {
@@ -45,5 +46,6 @@ router.get("/:id", obtenerArchivoECUPorId);
 router.put("/:id", actualizarArchivoECU);
 router.patch("/:id", actualizarArchivoECU);
 router.post("/:id/modificado", manejarSubidaArchivo, subirArchivoModificado);
+router.delete("/:id", eliminarArchivoECU);
 
 module.exports = router;

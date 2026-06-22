@@ -1,4 +1,4 @@
-const { ArchivoECU, OrdenTrabajo } = require("../models");
+const { ArchivoECU, OrdenTrabajo, Vehiculo, Cliente } = require("../models");
 
 const obtenerOrdenId = (body) => {
   return body.ordenId || body.orden_id || body.ordenTrabajoId || body.orden_trabajo_id;
@@ -12,12 +12,10 @@ const limpiarTexto = (valor) => {
 const obtenerRutaPublicaArchivo = (file) => {
   if (!file) return null;
 
-  // Si viene desde Cloudinary, normalmente viene como URL en file.path
   if (file.path && /^https?:\/\//i.test(file.path)) {
     return file.path;
   }
 
-  // Si es subida local con multer
   if (file.filename) {
     return `/uploads/ecu/${file.filename}`;
   }
@@ -28,6 +26,17 @@ const obtenerRutaPublicaArchivo = (file) => {
 const obtenerArchivosECU = async (req, res) => {
   try {
     const archivos = await ArchivoECU.findAll({
+      include: [
+        {
+          model: OrdenTrabajo,
+          include: [
+            {
+              model: Vehiculo,
+              include: [Cliente],
+            },
+          ],
+        },
+      ],
       order: [["id", "DESC"]],
     });
 
@@ -92,17 +101,10 @@ const crearArchivoECU = async (req, res) => {
       archivo_modificado: null,
     });
 
-    // Movemos la orden a programación/file service sin romper si el enum no acepta otro estado
     try {
-      if (
-        orden.estado === "RECEPCIONADO" ||
-        orden.estado === "PARA_DIAGNOSTICO" ||
-        !orden.estado
-      ) {
-        await orden.update({
-          estado: "EN_PROGRAMACION",
-        });
-      }
+      await orden.update({
+        estado: "EN_PROGRAMACION",
+      });
     } catch (estadoError) {
       console.warn(
         "No se pudo actualizar estado de orden al crear File Service:",
@@ -177,7 +179,19 @@ const subirArchivoModificado = async (req, res) => {
 
 const obtenerArchivoECUPorId = async (req, res) => {
   try {
-    const archivo = await ArchivoECU.findByPk(req.params.id);
+    const archivo = await ArchivoECU.findByPk(req.params.id, {
+      include: [
+        {
+          model: OrdenTrabajo,
+          include: [
+            {
+              model: Vehiculo,
+              include: [Cliente],
+            },
+          ],
+        },
+      ],
+    });
 
     if (!archivo) {
       return res.status(404).json({
@@ -244,10 +258,36 @@ const actualizarArchivoECU = async (req, res) => {
   }
 };
 
+const eliminarArchivoECU = async (req, res) => {
+  try {
+    const archivo = await ArchivoECU.findByPk(req.params.id);
+
+    if (!archivo) {
+      return res.status(404).json({
+        error: "Archivo ECU no encontrado",
+      });
+    }
+
+    await archivo.destroy();
+
+    res.json({
+      mensaje: "Archivo ECU eliminado correctamente",
+      id: req.params.id,
+    });
+  } catch (error) {
+    console.error("ERROR AL ELIMINAR ARCHIVO ECU:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   crearArchivoECU,
   obtenerArchivosECU,
   obtenerArchivoECUPorId,
   actualizarArchivoECU,
   subirArchivoModificado,
+  eliminarArchivoECU,
 };
