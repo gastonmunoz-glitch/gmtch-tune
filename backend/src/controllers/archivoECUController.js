@@ -2,15 +2,17 @@ const { QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
 const { ArchivoECU, OrdenTrabajo } = require("../models");
 
-let columnasPreparadas = false;
+console.log("📂 CONTROLLER_FILE_SERVICE_V2_CARGADO");
 
-const obtenerOrdenId = (body) => {
-  return body.ordenId || body.orden_id || body.ordenTrabajoId || body.orden_trabajo_id;
-};
+let columnasPreparadas = false;
 
 const limpiarTexto = (valor) => {
   if (valor === null || valor === undefined) return "";
   return String(valor).trim();
+};
+
+const obtenerOrdenId = (body = {}) => {
+  return body.ordenId || body.orden_id || body.ordenTrabajoId || body.orden_trabajo_id;
 };
 
 const usuarioActual = (req) => {
@@ -127,8 +129,6 @@ const validarDiagnosticoObligatorio = async (ordenId) => {
     }
   );
 
-  const faltantes = [];
-
   if (!diagnosticos.length) {
     return {
       ok: false,
@@ -142,6 +142,7 @@ const validarDiagnosticoObligatorio = async (ordenId) => {
   }
 
   const diag = diagnosticos[0];
+  const faltantes = [];
 
   const tieneScanner =
     limpiarTexto(diag.informe_scanner) || limpiarTexto(diag.foto_scanner);
@@ -162,13 +163,10 @@ const validarDiagnosticoObligatorio = async (ordenId) => {
   return {
     ok: faltantes.length === 0,
     faltantes,
-    diagnostico: diag,
   };
 };
 
 const mapearArchivoRow = (row) => {
-  if (!row) return null;
-
   return {
     id: row.id,
     ordenId: row.ordenId,
@@ -323,7 +321,6 @@ const crearArchivoECU = async (req, res) => {
 
     const nuevoArchivo = await ArchivoECU.create({
       ordenId,
-
       estado: "ORIGINAL_CARGADO",
       prioridad: limpiarTexto(req.body.prioridad) || "MEDIA",
       tipo_servicio: limpiarTexto(req.body.tipo_servicio),
@@ -379,9 +376,7 @@ const subirArchivoModificado = async (req, res) => {
   try {
     await prepararColumnas();
 
-    const { id } = req.params;
-
-    const archivo = await ArchivoECU.findByPk(id);
+    const archivo = await ArchivoECU.findByPk(req.params.id);
 
     if (!archivo) {
       return res.status(404).json({
@@ -408,7 +403,9 @@ const subirArchivoModificado = async (req, res) => {
 
     const versionesActuales = normalizarVersiones(archivo.versiones_modificadas);
     const versionActual =
-      Number(archivo.ultima_version_modificada || 0) || versionesActuales.length || 0;
+      Number(archivo.ultima_version_modificada || 0) ||
+      versionesActuales.length ||
+      0;
 
     const nuevaVersionNumero = versionActual + 1;
     const rutaArchivo = obtenerRutaPublicaArchivo(req.file);
@@ -573,7 +570,9 @@ const obtenerArchivoECUPorId = async (req, res) => {
       LIMIT 1;
       `,
       {
-        replacements: { id: req.params.id },
+        replacements: {
+          id: req.params.id,
+        },
         type: QueryTypes.SELECT,
       }
     );
@@ -608,7 +607,7 @@ const actualizarArchivoECU = async (req, res) => {
 
     const payload = {};
 
-    const camposPermitidos = [
+    const camposTexto = [
       "estado",
       "prioridad",
       "tipo_servicio",
@@ -626,7 +625,7 @@ const actualizarArchivoECU = async (req, res) => {
       "observacion_correccion",
     ];
 
-    camposPermitidos.forEach((campo) => {
+    camposTexto.forEach((campo) => {
       if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
         payload[campo] = limpiarTexto(req.body[campo]);
       }
