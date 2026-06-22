@@ -1,1416 +1,1489 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../services/api";
 
-const ESTADO_INICIAL_FORM = {
-  ordenId: "",
-  tipo_servicio: "",
-  prioridad: "MEDIA",
-  metodo_lectura: "OBD",
-  herramienta_lectura: "",
-  marca_ecu: "",
-  modelo_ecu: "",
-  hw: "",
-  sw: "",
-  version_software: "",
-  observaciones: "",
-  notas_operador: "",
+const ESTADOS = {
+  ORIGINAL_CARGADO: "Original cargado",
+  NOTIFICADO_MASTER: "Master notificado",
+  MODIFICADO_LISTO: "MOD listo",
+  NOTIFICADO_SLAVE: "Slave notificado",
+  POST_ESCRITURA_PENDIENTE: "Post escritura pendiente",
+  POST_ESCRITURA_OK: "Post escritura OK",
+  REQUIERE_CORRECCION: "Requiere corrección",
+  FINALIZADO: "Finalizado",
+  FINALIZADO_TECNICO: "Finalizado técnico",
+  ARCHIVADO: "Archivado",
 };
 
-const SERVICIOS = [
-  "🚫 DPF / FAP OFF",
-  "🚫 EGR OFF",
-  "🚫 ADBLUE / SCR / DEF OFF",
-  "🚫 NOX OFF",
-  "🚫 LAMBDA OFF",
-  "🚫 TVA / MARIPOSA OFF",
-  "🚫 DTC OFF ESPECÍFICO",
-
-  "⚡ STAGE 1",
-  "⚡ STAGE 2",
-  "🏁 STAGE 3",
-  "🧬 STAGE CUSTOM",
-  "⛽ ECO TUNE / OPTIMIZACIÓN CONSUMO",
-  "🚚 FLEET TUNE / FLOTA",
-
-  "🔥 POPS & BANGS",
-  "🔥 BURBLE",
-  "🔥 HARDCUT BENCINA",
-  "🔥 POPCORN / HARDCUT DIÉSEL",
-  "🚀 LAUNCH CONTROL",
-  "💥 ANTILAG",
-  "🏎️ VMAX OFF / LIMITADOR VELOCIDAD",
-  "🔧 LIMITADOR RPM",
-
-  "🧠 DIAGNÓSTICO ARCHIVO",
-  "🧠 REVISIÓN MAPA",
-  "🧠 CORRECCIÓN ARCHIVO",
-  "🧠 SEGUNDA VERSIÓN / AJUSTE",
-
-  "🔐 IMMO OFF",
-  "🔐 CLONACIÓN ECU",
-  "🔐 VIRGINIZACIÓN ECU",
-  "💥 AIRBAG CRASH DATA",
-  "🧩 BCM / BSI / FRM / CAS / MÓDULO",
-
-  "🚚 CAMIÓN / MAQUINARIA DPF-EGR-ADBLUE",
-  "🚜 AGRÍCOLA / INDUSTRIAL",
-  "🚤 MARÍTIMO / JETSKI",
-  "🏍️ MOTO / ATV",
-
-  "📂 OTRO FILE SERVICE",
+const RESULTADOS_POST_ESCRITURA = [
+  { value: "OK", label: "OK - Sin problemas" },
+  { value: "REQUIERE_CORRECCION", label: "Requiere corrección ECU" },
+  { value: "FALLO_ESCRITURA", label: "Falló escritura" },
+  { value: "EN_PRUEBA", label: "Vehículo en prueba" },
 ];
 
-const METODOS_LECTURA = [
-  "OBD",
-  "BENCH",
-  "BOOT",
-  "ECU RETIRADA",
-  "BDM",
-  "JTAG",
-  "SERVICE MODE",
-];
-
-const HERRAMIENTAS = [
-  "",
-  "KESS3",
-  "FLEX",
-  "PCMFlash",
-  "KTAG",
-  "Autotuner",
-  "CMD",
-  "BitBox",
-  "Trasdata",
-  "MPPS",
-  "Galletto",
-  "Xhorse / VVDI",
-  "CG100X",
-  "UPA",
-  "OTRA",
+const MOTIVOS_ARCHIVO = [
+  { value: "CLIENTE_DESISTE", label: "Cliente desistió" },
+  { value: "SIN_FACTIBILIDAD_TECNICA", label: "Sin factibilidad técnica" },
+  { value: "DUPLICADO", label: "Trabajo duplicado" },
+  { value: "ERROR_INGRESO", label: "Error de ingreso" },
+  { value: "NO_AUTORIZADO", label: "Cliente no autorizó" },
+  { value: "OTRO", label: "Otro" },
 ];
 
 const FILTROS = [
-  "TODOS",
-  "ORIGINAL_CARGADO",
-  "NOTIFICADO_MASTER",
-  "MODIFICADO_LISTO",
-  "NOTIFICADO_SLAVE",
-  "REQUIERE_CORRECCION",
-  "FINALIZADO",
+  { value: "TODOS", label: "Todos" },
+  { value: "PENDIENTE_MASTER", label: "Pendiente Master" },
+  { value: "MOD_LISTO", label: "MOD listo" },
+  { value: "PENDIENTE_POST", label: "Pendiente post escritura" },
+  { value: "CORRECCIONES", label: "Correcciones" },
+  { value: "OK_CIERRE", label: "OK cierre" },
 ];
 
-const normalizarTexto = (valor) => String(valor ?? "").trim();
+const RUTA_DIAGNOSTICO = "/diagnostico";
 
-const textoEstado = (estado) => {
-  return String(estado || "ORIGINAL_CARGADO").replace(/_/g, " ");
+const getApiRoot = () => {
+  const base = api.defaults.baseURL || "";
+  return base.replace(/\/api\/?$/, "");
 };
 
-const obtenerVehiculoOrden = (orden) => {
-  return orden?.Vehiculo || orden?.vehiculo || orden?.VehiculoOrden || null;
-};
+const fileUrl = (ruta) => {
+  if (!ruta) return "#";
+  if (/^https?:\/\//i.test(ruta)) return ruta;
 
-const obtenerClienteOrden = (orden) => {
-  const vehiculo = obtenerVehiculoOrden(orden);
-  return vehiculo?.Cliente || vehiculo?.cliente || orden?.Cliente || orden?.cliente || null;
-};
+  const root = getApiRoot();
 
-const obtenerPatenteOrden = (orden) => {
-  const vehiculo = obtenerVehiculoOrden(orden);
-  return vehiculo?.patente || orden?.patente || "SIN PATENTE";
-};
-
-const obtenerTituloOrden = (orden) => {
-  const vehiculo = obtenerVehiculoOrden(orden);
-  const cliente = obtenerClienteOrden(orden);
-
-  const patente = obtenerPatenteOrden(orden);
-  const marca = vehiculo?.marca || "";
-  const modelo = vehiculo?.modelo || "";
-  const anio = vehiculo?.anio || "";
-  const clienteNombre = cliente?.nombre || "Cliente no informado";
-
-  return `${patente} | ${marca} ${modelo} ${anio} | ${clienteNombre} | Orden #${orden.id}`;
-};
-
-const normalizarVersiones = (valor) => {
-  if (Array.isArray(valor)) return valor;
-
-  if (typeof valor === "string") {
-    try {
-      const parsed = JSON.parse(valor);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+  if (ruta.startsWith("/")) {
+    return `${root}${ruta}`;
   }
 
-  return [];
+  return `${root}/${ruta}`;
 };
 
-function ArchivosECUPage() {
+const formatearFecha = (fecha) => {
+  if (!fecha) return "-";
+
+  try {
+    return new Date(fecha).toLocaleString("es-CL", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  } catch {
+    return fecha;
+  }
+};
+
+const limpiar = (valor) => {
+  if (valor === null || valor === undefined) return "";
+  return String(valor).trim();
+};
+
+const badgeClass = (estado) => {
+  switch (estado) {
+    case "ORIGINAL_CARGADO":
+      return "bg-blue-500/15 text-blue-300 border-blue-500/30";
+    case "NOTIFICADO_MASTER":
+      return "bg-purple-500/15 text-purple-300 border-purple-500/30";
+    case "MODIFICADO_LISTO":
+      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
+    case "NOTIFICADO_SLAVE":
+      return "bg-cyan-500/15 text-cyan-300 border-cyan-500/30";
+    case "POST_ESCRITURA_PENDIENTE":
+      return "bg-yellow-500/15 text-yellow-300 border-yellow-500/30";
+    case "POST_ESCRITURA_OK":
+      return "bg-green-500/15 text-green-300 border-green-500/30";
+    case "REQUIERE_CORRECCION":
+      return "bg-red-500/15 text-red-300 border-red-500/30";
+    case "FINALIZADO":
+    case "FINALIZADO_TECNICO":
+      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
+    case "ARCHIVADO":
+      return "bg-zinc-500/15 text-zinc-400 border-zinc-500/30";
+    default:
+      return "bg-slate-700 text-slate-200 border-slate-600";
+  }
+};
+
+const estadoLabel = (estado) => {
+  return ESTADOS[estado] || estado || "Sin estado";
+};
+
+const obtenerClienteVehiculo = (archivo) => {
+  const orden = archivo?.OrdenTrabajo;
+  const vehiculo = orden?.Vehiculo;
+  const cliente = vehiculo?.Cliente;
+
+  return {
+    orden,
+    vehiculo,
+    cliente,
+    textoCliente: cliente?.nombre || "Cliente no informado",
+    textoVehiculo: vehiculo
+      ? `${vehiculo.patente || "Sin patente"} · ${vehiculo.marca || ""} ${
+          vehiculo.modelo || ""
+        } ${vehiculo.anio || ""}`.trim()
+      : "Vehículo no informado",
+  };
+};
+
+export default function ArchivosECUPage() {
   const [archivos, setArchivos] = useState([]);
   const [ordenes, setOrdenes] = useState([]);
-  const [busquedaOrden, setBusquedaOrden] = useState("");
 
-  const [form, setForm] = useState({ ...ESTADO_INICIAL_FORM });
-  const [archivoOriginal, setArchivoOriginal] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [guardando, setGuardando] = useState(false);
 
-  const [archivosModificados, setArchivosModificados] = useState({});
-  const [instruccionesTuner, setInstruccionesTuner] = useState({});
-  const [marcarFinal, setMarcarFinal] = useState({});
-  const [correcciones, setCorrecciones] = useState({});
+  const [mensaje, setMensaje] = useState("");
+  const [error, setError] = useState("");
+  const [bloqueoDiagnostico, setBloqueoDiagnostico] = useState(null);
 
   const [filtro, setFiltro] = useState("TODOS");
-  const [cargando, setCargando] = useState(false);
-  const [aviso, setAviso] = useState(null);
+  const [busqueda, setBusqueda] = useState("");
 
-  const backendBase = useMemo(() => {
-    return String(api.defaults.baseURL || "").replace(/\/api\/?$/, "");
+  const [nuevo, setNuevo] = useState({
+    ordenId: "",
+    prioridad: "MEDIA",
+    tipo_servicio: "",
+    metodo_lectura: "",
+    herramienta_lectura: "",
+    marca_ecu: "",
+    modelo_ecu: "",
+    hw: "",
+    sw: "",
+    version_software: "",
+    notas_operador: "",
+    instrucciones_tuner: "",
+    observaciones: "",
+    archivo: null,
+  });
+
+  const [modForms, setModForms] = useState({});
+  const [postForms, setPostForms] = useState({});
+  const [archivarForms, setArchivarForms] = useState({});
+
+  const obtenerDatos = useCallback(async () => {
+    const [archivosRes, ordenesRes] = await Promise.allSettled([
+      api.get("/archivos-ecu"),
+      api.get("/ordenes"),
+    ]);
+
+    if (archivosRes.status !== "fulfilled") {
+      throw archivosRes.reason;
+    }
+
+    const archivosData = archivosRes.value.data;
+
+    let ordenesData = [];
+
+    if (ordenesRes.status === "fulfilled") {
+      ordenesData = ordenesRes.value.data;
+    } else {
+      console.warn("No se pudieron cargar órdenes:", ordenesRes.reason);
+    }
+
+    return {
+      archivos: Array.isArray(archivosData)
+        ? archivosData
+        : archivosData.archivos || [],
+      ordenes: Array.isArray(ordenesData)
+        ? ordenesData
+        : ordenesData.ordenes || [],
+    };
   }, []);
 
-  const ordenSeleccionada = useMemo(() => {
-    if (!form.ordenId) return null;
-    return ordenes.find((orden) => String(orden.id) === String(form.ordenId)) || null;
-  }, [ordenes, form.ordenId]);
+  const cargarDatos = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-  const ordenesFiltradas = useMemo(() => {
-    const q = normalizarTexto(busquedaOrden).toLowerCase();
+      const data = await obtenerDatos();
 
-    return ordenes
-      .filter((orden) => {
-        const vehiculo = obtenerVehiculoOrden(orden);
-        const cliente = obtenerClienteOrden(orden);
-
-        const texto = [
-          orden.id,
-          orden.estado,
-          orden.motivo_ingreso,
-          vehiculo?.patente,
-          vehiculo?.marca,
-          vehiculo?.modelo,
-          vehiculo?.anio,
-          vehiculo?.vin,
-          cliente?.nombre,
-          cliente?.telefono,
-        ]
-          .join(" ")
-          .toLowerCase();
-
-        if (!q) return true;
-        return texto.includes(q);
-      })
-      .slice(0, 20);
-  }, [ordenes, busquedaOrden]);
+      setArchivos(data.archivos);
+      setOrdenes(data.ordenes);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err.response?.data?.error ||
+          err.message ||
+          "Error cargando archivos ECU"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [obtenerDatos]);
 
   useEffect(() => {
     let activo = true;
 
-    const cargarInicial = async () => {
+    const iniciarCarga = async () => {
       try {
-        const [archivosRes, ordenesRes] = await Promise.all([
-          api.get("/archivos-ecu"),
-          api.get("/ordenes"),
-        ]);
+        const data = await obtenerDatos();
 
         if (!activo) return;
 
-        setArchivos(Array.isArray(archivosRes.data) ? archivosRes.data : []);
-        setOrdenes(Array.isArray(ordenesRes.data) ? ordenesRes.data : []);
+        setArchivos(data.archivos);
+        setOrdenes(data.ordenes);
       } catch (err) {
-        console.error("ERROR SISTEMA: Fallo en carga inicial File Service", err);
-
         if (!activo) return;
 
-        setAviso({
-          tipo: "error",
-          mensaje: "No se pudo cargar File Service.",
-        });
+        console.error(err);
+        setError(
+          err.response?.data?.error ||
+            err.message ||
+            "Error cargando archivos ECU"
+        );
+      } finally {
+        if (activo) {
+          setLoading(false);
+        }
       }
     };
 
-    cargarInicial();
+    iniciarCarga();
 
     return () => {
       activo = false;
     };
-  }, []);
+  }, [obtenerDatos]);
 
-  const mostrarAviso = (tipo, mensaje) => {
-    setAviso({ tipo, mensaje });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
+  const archivosFiltrados = useMemo(() => {
+    const term = busqueda.toLowerCase().trim();
 
-  const recargarTodo = async () => {
-    try {
-      setCargando(true);
+    return archivos.filter((archivo) => {
+      const { textoCliente, textoVehiculo } = obtenerClienteVehiculo(archivo);
 
-      const [archivosRes, ordenesRes] = await Promise.all([
-        api.get("/archivos-ecu"),
-        api.get("/ordenes"),
-      ]);
+      const matchTexto =
+        !term ||
+        [
+          archivo.id,
+          archivo.ordenId,
+          archivo.estado,
+          archivo.tipo_servicio,
+          archivo.metodo_lectura,
+          archivo.herramienta_lectura,
+          archivo.marca_ecu,
+          archivo.modelo_ecu,
+          archivo.hw,
+          archivo.sw,
+          textoCliente,
+          textoVehiculo,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
 
-      setArchivos(Array.isArray(archivosRes.data) ? archivosRes.data : []);
-      setOrdenes(Array.isArray(ordenesRes.data) ? ordenesRes.data : []);
-    } catch (err) {
-      console.error("ERROR SISTEMA: Fallo en sincronización File Service", err);
-      mostrarAviso("error", "No se pudo refrescar File Service.");
-    } finally {
-      setCargando(false);
-    }
-  };
+      if (!matchTexto) return false;
 
-  const estadoArchivo = (arq) => {
-    if (arq.estado) return arq.estado;
+      if (filtro === "TODOS") return true;
 
-    const versiones = normalizarVersiones(arq.versiones_modificadas);
+      if (filtro === "PENDIENTE_MASTER") {
+        return ["ORIGINAL_CARGADO", "NOTIFICADO_MASTER"].includes(
+          archivo.estado
+        );
+      }
 
-    if (arq.correccion_pendiente) return "REQUIERE_CORRECCION";
-    if (versiones.length > 0 || arq.archivo_modificado) return "MODIFICADO_LISTO";
+      if (filtro === "MOD_LISTO") {
+        return ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE"].includes(
+          archivo.estado
+        );
+      }
 
-    return "ORIGINAL_CARGADO";
-  };
+      if (filtro === "PENDIENTE_POST") {
+        return [
+          "MODIFICADO_LISTO",
+          "NOTIFICADO_SLAVE",
+          "POST_ESCRITURA_PENDIENTE",
+        ].includes(archivo.estado);
+      }
 
-  const archivosFiltrados = archivos.filter((arq) => {
-    if (filtro === "TODOS") return true;
-    return estadoArchivo(arq) === filtro;
-  });
+      if (filtro === "CORRECCIONES") {
+        return archivo.estado === "REQUIERE_CORRECCION";
+      }
 
-  const totalPendientes = archivos.filter((a) =>
-    ["ORIGINAL_CARGADO", "NOTIFICADO_MASTER"].includes(estadoArchivo(a))
-  ).length;
+      if (filtro === "OK_CIERRE") {
+        return archivo.estado === "POST_ESCRITURA_OK";
+      }
 
-  const totalListos = archivos.filter((a) =>
-    ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE"].includes(estadoArchivo(a))
-  ).length;
+      return true;
+    });
+  }, [archivos, filtro, busqueda]);
 
-  const totalCorrecciones = archivos.filter(
-    (a) => estadoArchivo(a) === "REQUIERE_CORRECCION"
-  ).length;
+  const mostrarError = (err, fallback = "Error inesperado") => {
+    console.error(err);
 
-  const urlArchivo = (url) => {
-    if (!url) return "#";
-    if (String(url).startsWith("http")) return url;
-    if (String(url).startsWith("/")) return `${backendBase}${url}`;
-    return `${backendBase}/${url}`;
-  };
+    const data = err.response?.data;
 
-  const actualizarForm = (campo, valor) => {
-    setForm((prev) => ({
-      ...prev,
-      [campo]: valor,
-    }));
-  };
-
-  const seleccionarOrden = (orden) => {
-    setForm((prev) => ({
-      ...prev,
-      ordenId: String(orden.id),
-    }));
-
-    setBusquedaOrden(obtenerTituloOrden(orden));
-  };
-
-  const limpiarForm = () => {
-    setForm({ ...ESTADO_INICIAL_FORM });
-    setArchivoOriginal(null);
-    setBusquedaOrden("");
-  };
-
-  const crearSolicitudFileService = async () => {
-    const ordenId = normalizarTexto(form.ordenId);
-    const tipoServicio = normalizarTexto(form.tipo_servicio);
-
-    if (!ordenId) {
-      mostrarAviso("error", "Debes seleccionar una orden por patente o último ingreso.");
+    if (data?.bloqueo === "DIAGNOSTICO_OBLIGATORIO") {
+      setBloqueoDiagnostico(data);
+      setError(data.error || fallback);
       return;
     }
 
-    if (!tipoServicio) {
-      mostrarAviso("error", "Debes seleccionar el tipo de servicio.");
+    setError(data?.error || err.message || fallback);
+  };
+
+  const limpiarMensajes = () => {
+    setMensaje("");
+    setError("");
+    setBloqueoDiagnostico(null);
+  };
+
+  const crearArchivo = async (e) => {
+    e.preventDefault();
+    limpiarMensajes();
+
+    if (!nuevo.ordenId) {
+      setError("Debes seleccionar una orden");
       return;
     }
 
-    if (!archivoOriginal) {
-      mostrarAviso("error", "Debes seleccionar el archivo original leído de la ECU.");
+    if (!nuevo.archivo) {
+      setError("Debes cargar el archivo original");
       return;
     }
 
     try {
-      setCargando(true);
+      setGuardando(true);
 
       const fd = new FormData();
 
-      fd.append("archivo", archivoOriginal);
-      fd.append("ordenId", ordenId);
-      fd.append("orden_id", ordenId);
+      Object.entries(nuevo).forEach(([key, value]) => {
+        if (key === "archivo") return;
+        fd.append(key, value ?? "");
+      });
 
-      fd.append("tipo_servicio", form.tipo_servicio);
-      fd.append("prioridad", form.prioridad);
-      fd.append("metodo_lectura", form.metodo_lectura);
-      fd.append("herramienta_lectura", form.herramienta_lectura);
-      fd.append("marca_ecu", form.marca_ecu);
-      fd.append("modelo_ecu", form.modelo_ecu);
-      fd.append("hw", form.hw);
-      fd.append("sw", form.sw);
-      fd.append("version_software", form.version_software);
-      fd.append("observaciones", form.observaciones);
-      fd.append("notas_operador", form.notas_operador);
-      fd.append("estado", "ORIGINAL_CARGADO");
+      fd.append("archivo", nuevo.archivo);
 
-      await api.post("/archivos-ecu", fd);
+      await api.post("/archivos-ecu", fd, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
 
-      mostrarAviso("ok", "Solicitud enviada al File Service correctamente.");
-      limpiarForm();
-      await recargarTodo();
+      setMensaje("Archivo original enviado correctamente a File Service");
+
+      setNuevo({
+        ordenId: "",
+        prioridad: "MEDIA",
+        tipo_servicio: "",
+        metodo_lectura: "",
+        herramienta_lectura: "",
+        marca_ecu: "",
+        modelo_ecu: "",
+        hw: "",
+        sw: "",
+        version_software: "",
+        notas_operador: "",
+        instrucciones_tuner: "",
+        observaciones: "",
+        archivo: null,
+      });
+
+      e.target.reset();
+
+      await cargarDatos();
     } catch (err) {
-      console.error("ERROR CREANDO FILE SERVICE:", err.response?.data || err.message);
-
-      const data = err.response?.data;
-
-      if (data?.bloqueo === "DIAGNOSTICO_OBLIGATORIO") {
-        mostrarAviso(
-          "error",
-          `No se puede enviar a File Service. Falta: ${(data.faltantes || []).join(
-            " · "
-          )}`
-        );
-        return;
-      }
-
-      mostrarAviso(
-        "error",
-        data?.error ||
-          data?.message ||
-          "No se pudo crear la solicitud File Service."
-      );
+      mostrarError(err, "Error creando File Service");
     } finally {
-      setCargando(false);
+      setGuardando(false);
     }
   };
 
-  const handleArchivoModificado = (id, file) => {
-    setArchivosModificados((prev) => ({
+  const actualizarModForm = (archivoId, campo, valor) => {
+    setModForms((prev) => ({
       ...prev,
-      [id]: file || null,
-    }));
-  };
-
-  const handleInstrucciones = (id, texto) => {
-    setInstruccionesTuner((prev) => ({
-      ...prev,
-      [id]: texto,
-    }));
-  };
-
-  const handleMarcarFinal = (id, valor) => {
-    setMarcarFinal((prev) => ({
-      ...prev,
-      [id]: valor,
-    }));
-  };
-
-  const handleCorreccion = (id, campo, valor) => {
-    setCorrecciones((prev) => ({
-      ...prev,
-      [id]: {
-        ...(prev[id] || {}),
+      [archivoId]: {
+        ...(prev[archivoId] || {}),
         [campo]: valor,
       },
     }));
   };
 
-  const handleSubirModificado = async (id) => {
-    const fileMod = archivosModificados[id];
+  const actualizarPostForm = (archivoId, campo, valor) => {
+    setPostForms((prev) => ({
+      ...prev,
+      [archivoId]: {
+        post_escritura_estado: "OK",
+        post_escritura_sin_dtc: false,
+        post_escritura_dtc: "",
+        post_escritura_observacion: "",
+        scanner_post_escritura: null,
+        ...(prev[archivoId] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
 
-    if (!fileMod) {
-      mostrarAviso("error", "Seleccione el archivo modificado para esta solicitud.");
+  const actualizarArchivarForm = (archivoId, campo, valor) => {
+    setArchivarForms((prev) => ({
+      ...prev,
+      [archivoId]: {
+        archivado_motivo: "",
+        archivado_comentario: "",
+        ...(prev[archivoId] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const subirModificado = async (archivoId) => {
+    limpiarMensajes();
+
+    const form = modForms[archivoId] || {};
+
+    if (!form.archivo) {
+      setError("Debes seleccionar un archivo modificado");
       return;
     }
 
     try {
-      setCargando(true);
-
       const fd = new FormData();
 
-      fd.append("archivo", fileMod);
-      fd.append("instrucciones_tuner", instruccionesTuner[id] || "");
-      fd.append("observaciones", instruccionesTuner[id] || "");
-      fd.append("es_final", marcarFinal[id] ? "true" : "false");
+      fd.append("archivo", form.archivo);
+      fd.append("instrucciones_tuner", form.instrucciones_tuner || "");
+      fd.append("observaciones", form.observaciones || "");
+      fd.append("es_final", form.es_final ? "true" : "false");
 
-      await api.post(`/archivos-ecu/${id}/modificado`, fd);
+      await api.post(`/archivos-ecu/${archivoId}/modificado`, fd, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
 
-      mostrarAviso("ok", "Archivo modificado cargado como nueva versión.");
+      setMensaje("MOD cargado correctamente");
 
-      setArchivosModificados((prev) => ({
+      setModForms((prev) => ({
         ...prev,
-        [id]: null,
+        [archivoId]: {},
       }));
 
-      setInstruccionesTuner((prev) => ({
-        ...prev,
-        [id]: "",
-      }));
-
-      setMarcarFinal((prev) => ({
-        ...prev,
-        [id]: false,
-      }));
-
-      await recargarTodo();
+      await cargarDatos();
     } catch (err) {
-      console.error("Fallo en carga de archivo modificado:", err.response?.data || err.message);
-      mostrarAviso(
-        "error",
-        err.response?.data?.error || "No se pudo subir el archivo modificado."
-      );
-    } finally {
-      setCargando(false);
+      mostrarError(err, "Error subiendo archivo modificado");
     }
   };
 
-  const handleNotificarMaster = async (arq) => {
+  const notificarMaster = async (archivo) => {
+    limpiarMensajes();
+
     try {
-      setCargando(true);
+      await api.post(`/archivos-ecu/${archivo.id}/notificar-master`);
 
-      await api.post(`/archivos-ecu/${arq.id}/notificar-master`);
+      const { textoCliente, textoVehiculo } = obtenerClienteVehiculo(archivo);
 
-      notificarWhatsAppMaster(arq);
-
-      mostrarAviso("ok", `Master notificado para File #${arq.id}.`);
-      await recargarTodo();
-    } catch (err) {
-      console.error("ERROR NOTIFICANDO MASTER:", err.response?.data || err.message);
-      mostrarAviso(
-        "error",
-        err.response?.data?.error || "No se pudo registrar notificación al Master."
+      const mensajeWhatsApp = encodeURIComponent(
+        `Hola Master, se cargó un archivo original en File Service.\n\n` +
+          `ID File Service: ${archivo.id}\n` +
+          `Orden: ${archivo.ordenId}\n` +
+          `Cliente: ${textoCliente}\n` +
+          `Vehículo: ${textoVehiculo}\n` +
+          `Servicio: ${archivo.tipo_servicio || "-"}\n\n` +
+          `Favor revisar en el portal GMTCH.`
       );
-    } finally {
-      setCargando(false);
+
+      window.open(`https://wa.me/56962267642?text=${mensajeWhatsApp}`, "_blank");
+
+      setMensaje("Master notificado correctamente");
+      await cargarDatos();
+    } catch (err) {
+      mostrarError(err, "Error notificando Master");
     }
   };
 
-  const handleNotificarSlave = async (arq) => {
+  const notificarSlave = async (archivo) => {
+    limpiarMensajes();
+
+    if (!archivo.archivo_modificado) {
+      setError("No puedes notificar al Slave sin MOD cargado");
+      return;
+    }
+
     try {
-      setCargando(true);
+      await api.post(`/archivos-ecu/${archivo.id}/notificar-slave`);
 
-      await api.post(`/archivos-ecu/${arq.id}/notificar-slave`);
+      const { textoCliente, textoVehiculo } = obtenerClienteVehiculo(archivo);
 
-      notificarWhatsAppSlave(arq);
-
-      mostrarAviso("ok", `Slave / Operador ECU notificado para File #${arq.id}.`);
-      await recargarTodo();
-    } catch (err) {
-      console.error("ERROR NOTIFICANDO SLAVE:", err.response?.data || err.message);
-      mostrarAviso(
-        "error",
-        err.response?.data?.error || "No se pudo registrar notificación al Slave."
+      const mensajeWhatsApp = encodeURIComponent(
+        `Hola, el MOD está listo para escritura.\n\n` +
+          `ID File Service: ${archivo.id}\n` +
+          `Orden: ${archivo.ordenId}\n` +
+          `Cliente: ${textoCliente}\n` +
+          `Vehículo: ${textoVehiculo}\n` +
+          `Servicio: ${archivo.tipo_servicio || "-"}\n` +
+          `Última versión: MOD V${archivo.ultima_version_modificada || 1}\n\n` +
+          `IMPORTANTE: Después de escribir, debes registrar scanner post escritura y DTC en el portal.`
       );
-    } finally {
-      setCargando(false);
+
+      window.open(`https://wa.me/56962267642?text=${mensajeWhatsApp}`, "_blank");
+
+      setMensaje("Slave / Operador ECU notificado correctamente");
+      await cargarDatos();
+    } catch (err) {
+      mostrarError(err, "Error notificando Slave");
     }
   };
 
-  const handleSolicitarCorreccion = async (arq) => {
-    const data = correcciones[arq.id] || {};
-    const dtc = normalizarTexto(data.dtc_post_escritura);
-    const obs = normalizarTexto(data.observacion_correccion);
+  const registrarPostEscritura = async (archivoId) => {
+    limpiarMensajes();
 
-    if (!dtc && !obs) {
-      mostrarAviso(
-        "error",
-        "Debes indicar los DTC que quedaron o una observación para solicitar corrección."
+    const form = {
+      post_escritura_estado: "OK",
+      post_escritura_sin_dtc: false,
+      post_escritura_dtc: "",
+      post_escritura_observacion: "",
+      scanner_post_escritura: null,
+      ...(postForms[archivoId] || {}),
+    };
+
+    if (!form.scanner_post_escritura) {
+      setError("La foto/captura del scanner post escritura es obligatoria");
+      return;
+    }
+
+    if (!form.post_escritura_estado) {
+      setError("Debes seleccionar resultado post escritura");
+      return;
+    }
+
+    if (!form.post_escritura_sin_dtc && !limpiar(form.post_escritura_dtc)) {
+      setError(
+        "Debes ingresar DTC post escritura o marcar SIN DTC POST ESCRITURA"
       );
       return;
     }
 
     try {
-      setCargando(true);
+      const fd = new FormData();
 
-      await api.post(`/archivos-ecu/${arq.id}/solicitar-correccion`, {
-        dtc_post_escritura: dtc,
-        observacion_correccion: obs,
+      fd.append("post_escritura_estado", form.post_escritura_estado);
+      fd.append(
+        "post_escritura_sin_dtc",
+        form.post_escritura_sin_dtc ? "true" : "false"
+      );
+      fd.append("post_escritura_dtc", form.post_escritura_dtc || "");
+      fd.append(
+        "post_escritura_observacion",
+        form.post_escritura_observacion || ""
+      );
+      fd.append("scanner_post_escritura", form.scanner_post_escritura);
+
+      await api.post(`/archivos-ecu/${archivoId}/post-escritura`, fd, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
       });
 
-      mostrarAviso("ok", `Corrección solicitada para File #${arq.id}.`);
+      setMensaje("Post escritura registrado correctamente");
 
-      setCorrecciones((prev) => ({
+      setPostForms((prev) => ({
         ...prev,
-        [arq.id]: {
-          dtc_post_escritura: "",
-          observacion_correccion: "",
-        },
+        [archivoId]: {},
       }));
 
-      await recargarTodo();
+      await cargarDatos();
     } catch (err) {
-      console.error("ERROR SOLICITANDO CORRECCION:", err.response?.data || err.message);
-      mostrarAviso(
-        "error",
-        err.response?.data?.error || "No se pudo solicitar corrección."
-      );
-    } finally {
-      setCargando(false);
+      mostrarError(err, "Error registrando post escritura");
     }
   };
 
-  const handleFinalizar = async (arq) => {
-    const confirmar = window.confirm(`¿Marcar File Service #${arq.id} como FINALIZADO?`);
+  const solicitarCorreccion = async (archivoId) => {
+    limpiarMensajes();
+
+    const form = {
+      post_escritura_dtc: "",
+      post_escritura_observacion: "",
+      ...(postForms[archivoId] || {}),
+    };
+
+    if (
+      !limpiar(form.post_escritura_dtc) &&
+      !limpiar(form.post_escritura_observacion)
+    ) {
+      setError("Debes indicar DTC u observación para solicitar corrección");
+      return;
+    }
+
+    try {
+      await api.post(`/archivos-ecu/${archivoId}/solicitar-correccion`, {
+        dtc_post_escritura: form.post_escritura_dtc,
+        observacion_correccion: form.post_escritura_observacion,
+      });
+
+      setMensaje("Corrección solicitada correctamente");
+      await cargarDatos();
+    } catch (err) {
+      mostrarError(err, "Error solicitando corrección");
+    }
+  };
+
+  const finalizarTecnico = async (archivo) => {
+    limpiarMensajes();
+
+    if (archivo.post_escritura_estado !== "OK") {
+      setError(
+        "No puedes finalizar sin post escritura OK, scanner post escritura y DTC registrados"
+      );
+      return;
+    }
+
+    const confirmar = window.confirm(
+      "¿Confirmas finalizar técnicamente este File Service? Esto NO cierra el cobro ni la entrega comercial."
+    );
 
     if (!confirmar) return;
 
     try {
-      setCargando(true);
-
-      await api.patch(`/archivos-ecu/${arq.id}`, {
-        estado: "FINALIZADO",
+      await api.patch(`/archivos-ecu/${archivo.id}`, {
+        estado: "FINALIZADO_TECNICO",
         correccion_pendiente: false,
       });
 
-      mostrarAviso("ok", `File Service #${arq.id} finalizado.`);
-      await recargarTodo();
+      setMensaje("File Service finalizado técnicamente");
+      await cargarDatos();
     } catch (err) {
-      console.error("ERROR FINALIZANDO FILE:", err.response?.data || err.message);
-      mostrarAviso("error", "No se pudo finalizar el File Service.");
-    } finally {
-      setCargando(false);
+      mostrarError(err, "Error finalizando técnicamente");
     }
   };
 
-  const eliminarArchivoECU = async (id) => {
+  const archivarArchivo = async (archivoId) => {
+    limpiarMensajes();
+
+    const form = archivarForms[archivoId] || {};
+
+    if (!form.archivado_motivo) {
+      setError("Debes seleccionar motivo de archivado");
+      return;
+    }
+
     const confirmar = window.confirm(
-      `¿Eliminar el registro File Service #${id}? Esta acción eliminará el registro de la matriz.`
+      "¿Seguro que quieres archivar este File Service? No se eliminará, pero saldrá del listado activo."
     );
 
     if (!confirmar) return;
 
     try {
-      setCargando(true);
-      await api.delete(`/archivos-ecu/${id}`);
-      mostrarAviso("ok", `Registro File Service #${id} eliminado.`);
-      await recargarTodo();
+      await api.post(`/archivos-ecu/${archivoId}/archivar`, {
+        archivado_motivo: form.archivado_motivo,
+        archivado_comentario: form.archivado_comentario || "",
+      });
+
+      setMensaje("File Service archivado correctamente");
+      await cargarDatos();
     } catch (err) {
-      console.error("ERROR ELIMINANDO ARCHIVO ECU:", err.response?.data || err.message);
-      mostrarAviso(
-        "error",
-        err.response?.data?.error || "No se pudo eliminar el registro File Service."
-      );
-    } finally {
-      setCargando(false);
+      mostrarError(err, "Error archivando File Service");
     }
   };
 
-  const notificarWhatsAppMaster = (arq) => {
-    const telefono = "56962267642";
+  const ordenLabel = (orden) => {
+    const vehiculo = orden?.Vehiculo;
+    const cliente = vehiculo?.Cliente;
 
-    const orden = arq.OrdenTrabajo || arq.orden || null;
-    const vehiculo = orden ? obtenerVehiculoOrden(orden) : null;
-    const cliente = orden ? obtenerClienteOrden(orden) : null;
-
-    const texto = [
-      "*SISTEMA GMTCH TUNE*",
-      "---------------------------",
-      "✅ *NUEVO FILE SERVICE PARA MASTER*",
-      `*ID FILE:* #${arq.id}`,
-      `*ID ORDEN:* #${arq.ordenId || arq.orden_id || "SIN ORDEN"}`,
-      `*PATENTE:* ${vehiculo?.patente || "No informada"}`,
-      `*CLIENTE:* ${cliente?.nombre || "No informado"}`,
-      `*SERVICIO:* ${arq.tipo_servicio || "No informado"}`,
-      `*ECU:* ${arq.marca_ecu || ""} ${arq.modelo_ecu || ""}`,
-      `*MÉTODO:* ${arq.metodo_lectura || "No informado"}`,
-      `*HERRAMIENTA:* ${arq.herramienta_lectura || "No informada"}`,
-      `*ESTADO:* ${estadoArchivo(arq)}`,
-      "---------------------------",
-      "_Favor procesar en estación master._",
-    ].join("\n");
-
-    const url = `https://api.whatsapp.com/send?phone=${telefono}&text=${encodeURIComponent(
-      texto
-    )}`;
-
-    window.open(url, "_blank");
-  };
-
-  const notificarWhatsAppSlave = (arq) => {
-    const telefono = "56962267642";
-
-    const versiones = normalizarVersiones(arq.versiones_modificadas);
-    const ultima = versiones[versiones.length - 1];
-
-    const orden = arq.OrdenTrabajo || arq.orden || null;
-    const vehiculo = orden ? obtenerVehiculoOrden(orden) : null;
-    const cliente = orden ? obtenerClienteOrden(orden) : null;
-
-    const texto = [
-      "*SISTEMA GMTCH TUNE*",
-      "---------------------------",
-      "📤 *ARCHIVO MODIFICADO LISTO PARA SLAVE / OPERADOR ECU*",
-      `*ID FILE:* #${arq.id}`,
-      `*ID ORDEN:* #${arq.ordenId || arq.orden_id || "SIN ORDEN"}`,
-      `*PATENTE:* ${vehiculo?.patente || "No informada"}`,
-      `*CLIENTE:* ${cliente?.nombre || "No informado"}`,
-      `*SERVICIO:* ${arq.tipo_servicio || "No informado"}`,
-      `*VERSIÓN:* ${ultima?.etiqueta || `MOD V${arq.ultima_version_modificada || 1}`}`,
-      `*INSTRUCCIONES:* ${arq.instrucciones_tuner || "Sin instrucciones adicionales"}`,
-      "---------------------------",
-      "_Favor descargar, escribir, borrar DTC y registrar resultado post escritura._",
-    ].join("\n");
-
-    const url = `https://api.whatsapp.com/send?phone=${telefono}&text=${encodeURIComponent(
-      texto
-    )}`;
-
-    window.open(url, "_blank");
-  };
-
-  const renderAviso = () => {
-    if (!aviso) return null;
-
-    const estilos =
-      aviso.tipo === "ok"
-        ? "bg-green-100 border-green-600 text-green-900"
-        : "bg-red-100 border-red-600 text-red-900";
-
-    return (
-      <div className={`border-4 p-4 font-black uppercase text-xs mb-6 ${estilos}`}>
-        {aviso.mensaje}
-      </div>
-    );
-  };
-
-  const badgeEstado = (estado) => {
-    if (estado === "MODIFICADO_LISTO") return "bg-green-600 text-white";
-    if (estado === "NOTIFICADO_SLAVE") return "bg-blue-600 text-white";
-    if (estado === "NOTIFICADO_MASTER") return "bg-yellow-500 text-black";
-    if (estado === "REQUIERE_CORRECCION") return "bg-red-600 text-white";
-    if (estado === "FINALIZADO") return "bg-purple-700 text-white";
-
-    return "bg-black text-white";
-  };
-
-  const renderOrdenSeleccionada = () => {
-    if (!ordenSeleccionada) return null;
-
-    const vehiculo = obtenerVehiculoOrden(ordenSeleccionada);
-    const cliente = obtenerClienteOrden(ordenSeleccionada);
-
-    return (
-      <div className="bg-black text-white border-4 border-blue-600 p-5 mt-4">
-        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-          <div>
-            <p className="text-[10px] font-black uppercase text-blue-400">
-              Orden seleccionada
-            </p>
-
-            <h3 className="text-2xl font-black uppercase">
-              #{ordenSeleccionada.id} | {vehiculo?.patente || "SIN PATENTE"}
-            </h3>
-
-            <p className="text-xs font-bold uppercase text-gray-300 mt-1">
-              {vehiculo?.marca || "Marca"} {vehiculo?.modelo || "Modelo"}{" "}
-              {vehiculo?.anio || ""} | Cliente: {cliente?.nombre || "No informado"}
-            </p>
-          </div>
-
-          <div className="text-left xl:text-right">
-            <p className="text-[10px] font-black uppercase text-gray-500">
-              Estado actual
-            </p>
-            <p className="text-sm font-black uppercase text-green-400">
-              {ordenSeleccionada.estado || "SIN ESTADO"}
-            </p>
-          </div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-700 p-4 mt-4">
-          <p className="text-[10px] font-black uppercase text-gray-500 mb-2">
-            Trabajo / síntomas registrados
-          </p>
-
-          <p className="text-xs font-bold whitespace-pre-wrap">
-            {ordenSeleccionada.motivo_ingreso || "Sin detalle registrado"}
-          </p>
-        </div>
-      </div>
-    );
+    return [
+      `Orden #${orden.id}`,
+      cliente?.nombre || "Cliente sin nombre",
+      vehiculo?.patente || "Sin patente",
+      vehiculo?.marca || "",
+      vehiculo?.modelo || "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
   };
 
   return (
-    <div className="max-w-full mx-auto p-2 space-y-10">
-      <div className="bg-black text-white p-8 border-b-8 border-blue-600 shadow-2xl">
-        <div className="flex flex-col xl:flex-row justify-between gap-8 xl:items-center">
+    <div className="min-h-screen bg-slate-950 text-white p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl md:text-5xl font-black italic tracking-tighter uppercase">
-              File Service GMTCH
-            </h1>
-
-            <p className="text-blue-400 font-bold text-xs uppercase tracking-[.3em] mt-2">
-              Original ECU → Master/Tuner → MOD V1/V2/V3 → Slave/Operador ECU
+            <h1 className="text-3xl font-bold">File Service ECU</h1>
+            <p className="text-slate-400 mt-1">
+              Control de original, MOD, correcciones, post escritura y cierre técnico.
             </p>
           </div>
 
-          <div className="grid grid-cols-4 gap-4 text-center">
-            <div className="border-2 border-gray-700 p-4">
-              <p className="text-[10px] font-black text-gray-500 uppercase">
-                Total
-              </p>
-              <p className="text-4xl font-black">{archivos.length}</p>
-            </div>
+          <button
+            onClick={cargarDatos}
+            disabled={loading}
+            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50"
+          >
+            {loading ? "Actualizando..." : "Actualizar"}
+          </button>
+        </header>
 
-            <div className="border-2 border-yellow-500 p-4">
-              <p className="text-[10px] font-black text-yellow-500 uppercase">
-                Pendientes
-              </p>
-              <p className="text-4xl font-black">{totalPendientes}</p>
-            </div>
-
-            <div className="border-2 border-green-500 p-4">
-              <p className="text-[10px] font-black text-green-500 uppercase">
-                Listos
-              </p>
-              <p className="text-4xl font-black">{totalListos}</p>
-            </div>
-
-            <div className="border-2 border-red-600 p-4">
-              <p className="text-[10px] font-black text-red-600 uppercase">
-                Corrección
-              </p>
-              <p className="text-4xl font-black">{totalCorrecciones}</p>
-            </div>
+        {mensaje && (
+          <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 p-4 rounded-2xl">
+            {mensaje}
           </div>
-        </div>
-      </div>
+        )}
 
-      {renderAviso()}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/30 text-red-200 p-4 rounded-2xl space-y-3">
+            <p className="font-semibold">{error}</p>
 
-      <section className="bg-white border-4 border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] p-6">
-        <div className="mb-6">
-          <h2 className="text-2xl font-black uppercase">
-            Crear solicitud File Service
-          </h2>
+            {bloqueoDiagnostico?.faltantes?.length > 0 && (
+              <div>
+                <p className="text-sm text-red-100 mb-2">Falta completar:</p>
+                <ul className="list-disc list-inside text-sm">
+                  {bloqueoDiagnostico.faltantes.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
 
-          <p className="text-xs font-bold uppercase text-gray-500 mt-1">
-            Antes de enviar a File Service, la orden debe tener diagnóstico obligatorio con scanner y DTC.
-          </p>
-        </div>
-
-        <div className="bg-yellow-50 border-2 border-yellow-500 p-4 mb-6 text-xs font-bold uppercase leading-relaxed">
-          Si falta foto scanner, DTC escritos o marca SIN DTC, el sistema bloqueará el envío al File Service.
-        </div>
-
-        <div className="border-4 border-black p-5 mb-6 bg-slate-50">
-          <h3 className="text-sm font-black uppercase mb-3">
-            Buscar orden por patente, cliente, vehículo o número
-          </h3>
-
-          <input
-            className="border-2 border-black p-4 w-full font-black uppercase bg-white"
-            placeholder="Ej: ABCD12, BMW, Volvo, Econorte, #15..."
-            value={busquedaOrden}
-            onChange={(e) => {
-              setBusquedaOrden(e.target.value);
-              setForm((prev) => ({ ...prev, ordenId: "" }));
-            }}
-          />
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-4 max-h-96 overflow-auto">
-            {ordenesFiltradas.map((orden) => {
-              const vehiculo = obtenerVehiculoOrden(orden);
-              const cliente = obtenerClienteOrden(orden);
-              const activo = String(form.ordenId) === String(orden.id);
-
-              return (
                 <button
-                  key={orden.id}
-                  type="button"
-                  onClick={() => seleccionarOrden(orden)}
-                  className={`text-left border-2 p-4 transition ${
-                    activo
-                      ? "bg-black text-white border-blue-600"
-                      : "bg-white text-black border-black hover:bg-blue-50"
-                  }`}
+                  onClick={() => {
+                    window.location.href = RUTA_DIAGNOSTICO;
+                  }}
+                  className="mt-3 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white"
                 >
-                  <div className="flex justify-between gap-3">
-                    <div>
-                      <p className="text-xl font-black uppercase">
-                        {vehiculo?.patente || "SIN PATENTE"}
-                      </p>
-
-                      <p className="text-xs font-bold uppercase opacity-70">
-                        Orden #{orden.id} · {vehiculo?.marca || "Marca"}{" "}
-                        {vehiculo?.modelo || "Modelo"} {vehiculo?.anio || ""}
-                      </p>
-
-                      <p className="text-xs font-bold uppercase mt-1 opacity-70">
-                        Cliente: {cliente?.nombre || "No informado"}
-                      </p>
-                    </div>
-
-                    <div className="text-right">
-                      <p className="text-[10px] font-black uppercase opacity-60">
-                        Estado
-                      </p>
-                      <p className="text-[10px] font-black uppercase">
-                        {orden.estado || "—"}
-                      </p>
-                    </div>
-                  </div>
+                  Ir a diagnóstico obligatorio
                 </button>
-              );
-            })}
-          </div>
-
-          {ordenesFiltradas.length === 0 && (
-            <p className="text-xs font-black uppercase text-red-600 mt-4">
-              No se encontraron órdenes con esa búsqueda.
-            </p>
-          )}
-
-          {renderOrdenSeleccionada()}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <select
-            className="border border-black p-3 w-full font-bold bg-white lg:col-span-2"
-            value={form.tipo_servicio}
-            onChange={(e) => actualizarForm("tipo_servicio", e.target.value)}
-          >
-            <option value="">Seleccionar servicio GMTCH Tune</option>
-            {SERVICIOS.map((servicio) => (
-              <option key={servicio} value={servicio}>
-                {servicio}
-              </option>
-            ))}
-          </select>
-
-          <select
-            className="border border-black p-3 w-full font-bold bg-white"
-            value={form.prioridad}
-            onChange={(e) => actualizarForm("prioridad", e.target.value)}
-          >
-            <option value="BAJA">Prioridad baja</option>
-            <option value="MEDIA">Prioridad media</option>
-            <option value="ALTA">Prioridad alta</option>
-            <option value="URGENTE">Urgente</option>
-          </select>
-
-          <select
-            className="border border-black p-3 w-full font-bold bg-white"
-            value={form.metodo_lectura}
-            onChange={(e) => actualizarForm("metodo_lectura", e.target.value)}
-          >
-            {METODOS_LECTURA.map((metodo) => (
-              <option key={metodo} value={metodo}>
-                {metodo}
-              </option>
-            ))}
-          </select>
-
-          <select
-            className="border border-black p-3 w-full font-bold bg-white"
-            value={form.herramienta_lectura}
-            onChange={(e) => actualizarForm("herramienta_lectura", e.target.value)}
-          >
-            {HERRAMIENTAS.map((herramienta) => (
-              <option key={herramienta || "SIN"} value={herramienta}>
-                {herramienta || "Seleccionar herramienta"}
-              </option>
-            ))}
-          </select>
-
-          <input
-            className="border border-black p-3 w-full font-bold"
-            placeholder="Marca ECU: Bosch, Delphi, Continental..."
-            value={form.marca_ecu}
-            onChange={(e) => actualizarForm("marca_ecu", e.target.value)}
-          />
-
-          <input
-            className="border border-black p-3 w-full font-bold"
-            placeholder="Modelo ECU: EDC17C60, MD1CS003..."
-            value={form.modelo_ecu}
-            onChange={(e) => actualizarForm("modelo_ecu", e.target.value)}
-          />
-
-          <input
-            className="border border-black p-3 w-full font-bold"
-            placeholder="HW"
-            value={form.hw}
-            onChange={(e) => actualizarForm("hw", e.target.value)}
-          />
-
-          <input
-            className="border border-black p-3 w-full font-bold"
-            placeholder="SW"
-            value={form.sw}
-            onChange={(e) => actualizarForm("sw", e.target.value)}
-          />
-
-          <input
-            className="border border-black p-3 w-full font-bold lg:col-span-3"
-            placeholder="Versión software / SW upg / ID lectura"
-            value={form.version_software}
-            onChange={(e) => actualizarForm("version_software", e.target.value)}
-          />
-
-          <textarea
-            className="border border-black p-3 w-full font-bold lg:col-span-3"
-            placeholder="Notas del operador ECU para el tuner. Ej: DTC presentes, lectura estable, método usado, requisitos del trabajo..."
-            value={form.notas_operador}
-            onChange={(e) => actualizarForm("notas_operador", e.target.value)}
-          />
-
-          <textarea
-            className="border border-black p-3 w-full font-bold lg:col-span-3"
-            placeholder="Observaciones generales"
-            value={form.observaciones}
-            onChange={(e) => actualizarForm("observaciones", e.target.value)}
-          />
-
-          <div className="lg:col-span-3 border-4 border-dashed border-gray-400 p-6 bg-slate-50">
-            <label className="block text-xs font-black uppercase mb-3">
-              Archivo original leído de ECU
-            </label>
-
-            <input
-              type="file"
-              className="w-full border-2 border-black p-4 text-xs font-black bg-white"
-              onChange={(e) => setArchivoOriginal(e.target.files?.[0] || null)}
-            />
-
-            {archivoOriginal && (
-              <p className="text-xs font-bold uppercase mt-3">
-                Seleccionado: {archivoOriginal.name}
-              </p>
+              </div>
             )}
           </div>
-        </div>
+        )}
 
-        <div className="flex flex-col md:flex-row gap-4 mt-6">
-          <button
-            type="button"
-            onClick={crearSolicitudFileService}
-            disabled={cargando}
-            className="bg-black text-white px-8 py-4 font-black uppercase text-xs disabled:bg-gray-400"
-          >
-            {cargando ? "Guardando..." : "Enviar a Master / Tuner"}
-          </button>
+        <section className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 shadow-xl">
+          <h2 className="text-xl font-semibold mb-4">Nueva solicitud File Service</h2>
 
-          <button
-            type="button"
-            onClick={limpiarForm}
-            className="border-2 border-black px-8 py-4 font-black uppercase text-xs"
-          >
-            Limpiar Formulario
-          </button>
-        </div>
-      </section>
-
-      <section className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-        <div>
-          <h2 className="text-2xl font-black uppercase">Matriz de archivos</h2>
-          <p className="text-xs font-bold uppercase text-gray-500">
-            Seguimiento de versiones, correcciones y notificaciones.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {FILTROS.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setFiltro(item)}
-              className={`px-4 py-2 border-2 border-black font-black text-[10px] uppercase ${
-                filtro === item ? "bg-black text-white" : "bg-white text-black"
-              }`}
-            >
-              {textoEstado(item)}
-            </button>
-          ))}
-
-          <button
-            type="button"
-            onClick={recargarTodo}
-            className="px-4 py-2 border-2 border-blue-600 bg-blue-600 text-white font-black text-[10px] uppercase"
-          >
-            Refrescar
-          </button>
-        </div>
-      </section>
-
-      <div className="space-y-10">
-        {archivosFiltrados.length === 0 ? (
-          <div className="bg-white border-4 border-black p-10 text-center shadow-[10px_10px_0px_0px_rgba(0,0,0,1)]">
-            <p className="text-xl font-black uppercase">
-              No hay archivos para este filtro
-            </p>
-          </div>
-        ) : (
-          archivosFiltrados.map((arq) => {
-            const estado = estadoArchivo(arq);
-            const orden = arq.OrdenTrabajo || arq.orden || null;
-            const vehiculo = orden ? obtenerVehiculoOrden(orden) : null;
-            const cliente = orden ? obtenerClienteOrden(orden) : null;
-            const versiones = normalizarVersiones(arq.versiones_modificadas);
-            const ultimaVersion = versiones[versiones.length - 1] || null;
-
-            return (
-              <div
-                key={arq.id}
-                className="bg-white border-4 border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] overflow-hidden"
+          <form onSubmit={crearArchivo} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-3">
+              <label className="text-xs text-slate-400 ml-1">Orden de trabajo</label>
+              <select
+                value={nuevo.ordenId}
+                onChange={(e) =>
+                  setNuevo((prev) => ({ ...prev, ordenId: e.target.value }))
+                }
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
               >
-                <div className="bg-gray-100 border-b-4 border-black p-4 flex flex-col xl:flex-row justify-between gap-4 xl:items-center">
-                  <div>
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      <span className="bg-black text-white px-3 py-1 text-[10px] font-black uppercase">
-                        File #{arq.id}
-                      </span>
+                <option value="">-- Selecciona una orden --</option>
+                {ordenes.map((orden) => (
+                  <option key={orden.id} value={orden.id}>
+                    {ordenLabel(orden)}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-                      <span className="bg-blue-600 text-white px-3 py-1 text-[10px] font-black uppercase">
-                        Orden #{arq.ordenId || arq.orden_id || "—"}
-                      </span>
+            <div>
+              <label className="text-xs text-slate-400 ml-1">Prioridad</label>
+              <select
+                value={nuevo.prioridad}
+                onChange={(e) =>
+                  setNuevo((prev) => ({ ...prev, prioridad: e.target.value }))
+                }
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              >
+                <option value="BAJA">Baja</option>
+                <option value="MEDIA">Media</option>
+                <option value="ALTA">Alta</option>
+                <option value="URGENTE">Urgente</option>
+              </select>
+            </div>
 
-                      <span
-                        className={`px-3 py-1 text-[10px] font-black uppercase ${badgeEstado(
-                          estado
-                        )}`}
-                      >
-                        {textoEstado(estado)}
-                      </span>
+            <div>
+              <label className="text-xs text-slate-400 ml-1">Tipo servicio</label>
+              <input
+                value={nuevo.tipo_servicio}
+                onChange={(e) =>
+                  setNuevo((prev) => ({
+                    ...prev,
+                    tipo_servicio: e.target.value,
+                  }))
+                }
+                placeholder="Stage 1, diagnóstico, recuperación, etc."
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
 
-                      {arq.prioridad && (
-                        <span className="bg-yellow-400 text-black px-3 py-1 text-[10px] font-black uppercase">
-                          {arq.prioridad}
+            <div>
+              <label className="text-xs text-slate-400 ml-1">Método lectura</label>
+              <input
+                value={nuevo.metodo_lectura}
+                onChange={(e) =>
+                  setNuevo((prev) => ({
+                    ...prev,
+                    metodo_lectura: e.target.value,
+                  }))
+                }
+                placeholder="OBD, Bench, Boot, BDM..."
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 ml-1">Herramienta</label>
+              <input
+                value={nuevo.herramienta_lectura}
+                onChange={(e) =>
+                  setNuevo((prev) => ({
+                    ...prev,
+                    herramienta_lectura: e.target.value,
+                  }))
+                }
+                placeholder="KESS3, FLEX, PCMFlash..."
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 ml-1">Marca ECU</label>
+              <input
+                value={nuevo.marca_ecu}
+                onChange={(e) =>
+                  setNuevo((prev) => ({ ...prev, marca_ecu: e.target.value }))
+                }
+                placeholder="Bosch, Delphi, Continental..."
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 ml-1">Modelo ECU</label>
+              <input
+                value={nuevo.modelo_ecu}
+                onChange={(e) =>
+                  setNuevo((prev) => ({ ...prev, modelo_ecu: e.target.value }))
+                }
+                placeholder="EDC17, MD1, MED17..."
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 ml-1">HW</label>
+              <input
+                value={nuevo.hw}
+                onChange={(e) =>
+                  setNuevo((prev) => ({ ...prev, hw: e.target.value }))
+                }
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 ml-1">SW</label>
+              <input
+                value={nuevo.sw}
+                onChange={(e) =>
+                  setNuevo((prev) => ({ ...prev, sw: e.target.value }))
+                }
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 ml-1">Versión software</label>
+              <input
+                value={nuevo.version_software}
+                onChange={(e) =>
+                  setNuevo((prev) => ({
+                    ...prev,
+                    version_software: e.target.value,
+                  }))
+                }
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="md:col-span-3">
+              <label className="text-xs text-slate-400 ml-1">
+                Archivo original
+              </label>
+              <input
+                type="file"
+                onChange={(e) =>
+                  setNuevo((prev) => ({
+                    ...prev,
+                    archivo: e.target.files?.[0] || null,
+                  }))
+                }
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="md:col-span-3">
+              <label className="text-xs text-slate-400 ml-1">
+                Notas operador
+              </label>
+              <textarea
+                value={nuevo.notas_operador}
+                onChange={(e) =>
+                  setNuevo((prev) => ({
+                    ...prev,
+                    notas_operador: e.target.value,
+                  }))
+                }
+                rows={2}
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="md:col-span-3">
+              <label className="text-xs text-slate-400 ml-1">
+                Instrucciones para tuner
+              </label>
+              <textarea
+                value={nuevo.instrucciones_tuner}
+                onChange={(e) =>
+                  setNuevo((prev) => ({
+                    ...prev,
+                    instrucciones_tuner: e.target.value,
+                  }))
+                }
+                rows={2}
+                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="md:col-span-3">
+              <button
+                type="submit"
+                disabled={guardando}
+                className="w-full md:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 font-semibold"
+              >
+                {guardando ? "Guardando..." : "Enviar a File Service"}
+              </button>
+
+              <p className="text-xs text-slate-500 mt-3">
+                Regla estricta: antes de enviar a File Service debe existir
+                diagnóstico obligatorio con scanner y DTC o SIN DTC.
+              </p>
+            </div>
+          </form>
+        </section>
+
+        <section className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 shadow-xl">
+          <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between mb-5">
+            <div>
+              <h2 className="text-xl font-semibold">Trabajos File Service</h2>
+              <p className="text-slate-400 text-sm">
+                {archivosFiltrados.length} registros activos
+              </p>
+            </div>
+
+            <div className="flex flex-col md:flex-row gap-3">
+              <input
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar cliente, patente, ECU, orden..."
+                className="bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500 min-w-[260px]"
+              />
+
+              <select
+                value={filtro}
+                onChange={(e) => setFiltro(e.target.value)}
+                className="bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+              >
+                {FILTROS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {loading && (
+            <div className="text-slate-400 p-4">Cargando registros...</div>
+          )}
+
+          {!loading && archivosFiltrados.length === 0 && (
+            <div className="text-slate-400 p-4 border border-dashed border-slate-700 rounded-2xl">
+              No hay archivos ECU activos con este filtro.
+            </div>
+          )}
+
+          <div className="space-y-5">
+            {archivosFiltrados.map((archivo) => {
+              const { textoCliente, textoVehiculo } =
+                obtenerClienteVehiculo(archivo);
+
+              const versiones = Array.isArray(archivo.versiones_modificadas)
+                ? archivo.versiones_modificadas
+                : [];
+
+              const postForm = {
+                post_escritura_estado: "OK",
+                post_escritura_sin_dtc: false,
+                post_escritura_dtc: "",
+                post_escritura_observacion: "",
+                scanner_post_escritura: null,
+                ...(postForms[archivo.id] || {}),
+              };
+
+              const archForm = {
+                archivado_motivo: "",
+                archivado_comentario: "",
+                ...(archivarForms[archivo.id] || {}),
+              };
+
+              const puedeFinalizar = archivo.post_escritura_estado === "OK";
+
+              return (
+                <article
+                  key={archivo.id}
+                  className="border border-slate-800 bg-slate-950/70 rounded-3xl p-5 space-y-5"
+                >
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                    <div>
+                      <div className="flex flex-wrap gap-2 items-center mb-2">
+                        <span className="text-lg font-bold">
+                          File #{archivo.id}
                         </span>
-                      )}
 
-                      {ultimaVersion && (
-                        <span className="bg-green-600 text-white px-3 py-1 text-[10px] font-black uppercase">
-                          {ultimaVersion.etiqueta || `MOD V${ultimaVersion.version}`}
-                        </span>
-                      )}
-                    </div>
-
-                    <h2 className="text-2xl font-black text-black uppercase">
-                      {arq.tipo_servicio || "Servicio no informado"}
-                    </h2>
-
-                    <p className="text-xs font-bold uppercase text-gray-500 mt-1">
-                      {vehiculo?.patente ? `${vehiculo.patente} | ` : ""}
-                      {vehiculo?.marca || ""} {vehiculo?.modelo || ""}{" "}
-                      {cliente?.nombre ? `| Cliente: ${cliente.nombre}` : ""}
-                    </p>
-
-                    <p className="text-xs font-bold uppercase text-gray-500 mt-1">
-                      ECU: {arq.marca_ecu || "—"} {arq.modelo_ecu || "—"} | Método:{" "}
-                      {arq.metodo_lectura || "—"} | Herramienta:{" "}
-                      {arq.herramienta_lectura || "—"}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col md:flex-row gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleNotificarMaster(arq)}
-                      disabled={cargando}
-                      className="bg-green-500 text-black px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black hover:text-white transition disabled:bg-gray-300"
-                    >
-                      📲 Notificar Master
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleNotificarSlave(arq)}
-                      disabled={cargando || !arq.archivo_modificado}
-                      className="bg-blue-600 text-white px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black transition disabled:bg-gray-300 disabled:text-gray-500"
-                    >
-                      📤 Notificar Slave
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleFinalizar(arq)}
-                      disabled={cargando || !arq.archivo_modificado}
-                      className="bg-purple-700 text-white px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black transition disabled:bg-gray-300 disabled:text-gray-500"
-                    >
-                      ✅ Finalizar
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => eliminarArchivoECU(arq.id)}
-                      className="bg-red-600 text-white px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black transition"
-                    >
-                      🗑️ Eliminar
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 xl:grid-cols-3 divide-y-4 xl:divide-y-0 xl:divide-x-4 divide-black">
-                  <div className="p-6 space-y-4">
-                    <h3 className="bg-blue-600 text-white px-4 py-1 font-black text-xs uppercase inline-block">
-                      Datos técnicos
-                    </h3>
-
-                    <Info label="Marca ECU" value={arq.marca_ecu} />
-                    <Info label="Modelo ECU" value={arq.modelo_ecu} />
-                    <Info label="HW" value={arq.hw} />
-                    <Info label="SW" value={arq.sw || arq.version_software} />
-                    <Info label="Método lectura" value={arq.metodo_lectura} />
-                    <Info label="Herramienta" value={arq.herramienta_lectura} />
-
-                    <div className="bg-slate-50 border-2 border-black p-4">
-                      <p className="text-[10px] font-black text-gray-400 uppercase mb-2">
-                        Notas operador ECU
-                      </p>
-
-                      <p className="text-sm font-bold whitespace-pre-wrap">
-                        {arq.notas_operador ||
-                          arq.observaciones ||
-                          "Sin notas registradas."}
-                      </p>
-                    </div>
-
-                    {arq.notificado_master_at && (
-                      <div className="bg-green-50 border-2 border-green-600 p-3 text-[10px] font-black uppercase">
-                        Master notificado por {arq.notificado_master_por || "sistema"} ·{" "}
-                        {new Date(arq.notificado_master_at).toLocaleString()}
-                      </div>
-                    )}
-
-                    {arq.notificado_slave_at && (
-                      <div className="bg-blue-50 border-2 border-blue-600 p-3 text-[10px] font-black uppercase">
-                        Slave notificado por {arq.notificado_slave_por || "sistema"} ·{" "}
-                        {new Date(arq.notificado_slave_at).toLocaleString()}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-6 space-y-5">
-                    <h3 className="bg-black text-white px-4 py-1 font-black text-xs uppercase inline-block">
-                      Entrada: Original ECU
-                    </h3>
-
-                    <div className="bg-slate-50 p-8 border-4 border-dashed border-gray-300 text-center">
-                      <p className="text-[10px] font-black text-gray-400 mb-6 uppercase tracking-widest italic">
-                        Archivo leído por técnico ECU
-                      </p>
-
-                      {arq.archivo_original ? (
-                        <a
-                          href={urlArchivo(arq.archivo_original)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="bg-black text-white px-8 py-4 font-black text-sm uppercase hover:bg-blue-600 transition-all shadow-xl inline-block"
+                        <span
+                          className={`text-xs px-3 py-1 rounded-full border ${badgeClass(
+                            archivo.estado
+                          )}`}
                         >
-                          Descargar Original
-                        </a>
-                      ) : (
-                        <p className="text-red-600 font-black uppercase">
-                          Sin archivo original
-                        </p>
-                      )}
+                          {estadoLabel(archivo.estado)}
+                        </span>
+
+                        {archivo.correccion_pendiente && (
+                          <span className="text-xs px-3 py-1 rounded-full border bg-red-500/15 text-red-300 border-red-500/30">
+                            Corrección pendiente
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-slate-200">{textoCliente}</p>
+                      <p className="text-slate-400 text-sm">{textoVehiculo}</p>
+                      <p className="text-slate-500 text-sm">
+                        Orden #{archivo.ordenId} · Servicio:{" "}
+                        {archivo.tipo_servicio || "-"}
+                      </p>
                     </div>
 
-                    <div className="bg-white border-4 border-black p-5">
-                      <h4 className="text-xs font-black uppercase mb-3">
-                        Historial de versiones modificadas
-                      </h4>
+                    <div className="text-sm text-slate-400 md:text-right">
+                      <p>Creado: {formatearFecha(archivo.createdAt)}</p>
+                      <p>
+                        Original por:{" "}
+                        {archivo.archivo_original_subido_por || "No registrado"}
+                      </p>
+                    </div>
+                  </div>
 
-                      {versiones.length === 0 ? (
-                        <p className="text-xs font-black uppercase text-gray-400">
-                          Aún no hay MOD cargados.
-                        </p>
-                      ) : (
-                        <div className="space-y-3">
-                          {versiones.map((version) => (
-                            <div
-                              key={`${arq.id}-${version.version}-${version.fecha}`}
-                              className="border-2 border-green-600 bg-green-50 p-3"
-                            >
-                              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                                <div>
-                                  <p className="text-sm font-black uppercase text-green-800">
-                                    {version.etiqueta || `MOD V${version.version}`}
-                                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3">
+                      <p className="text-slate-500">Lectura</p>
+                      <p>{archivo.metodo_lectura || "-"}</p>
+                      <p className="text-slate-400">
+                        {archivo.herramienta_lectura || "-"}
+                      </p>
+                    </div>
 
-                                  <p className="text-[10px] font-bold uppercase text-gray-600">
-                                    Cargado por {version.cargado_por || "sistema"} ·{" "}
-                                    {version.fecha
-                                      ? new Date(version.fecha).toLocaleString()
-                                      : "sin fecha"}
-                                  </p>
-                                </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3">
+                      <p className="text-slate-500">ECU</p>
+                      <p>
+                        {archivo.marca_ecu || "-"} {archivo.modelo_ecu || ""}
+                      </p>
+                      <p className="text-slate-400">
+                        HW: {archivo.hw || "-"} · SW: {archivo.sw || "-"}
+                      </p>
+                    </div>
 
-                                <a
-                                  href={urlArchivo(version.archivo)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="bg-green-600 text-white px-4 py-2 font-black text-[10px] uppercase text-center"
-                                >
-                                  Descargar
-                                </a>
-                              </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3">
+                      <p className="text-slate-500">Última versión MOD</p>
+                      <p>MOD V{archivo.ultima_version_modificada || 0}</p>
+                      <p className="text-slate-400">
+                        Versiones: {versiones.length}
+                      </p>
+                    </div>
+                  </div>
 
-                              {version.instrucciones_tuner && (
-                                <p className="text-xs font-bold mt-2 whitespace-pre-wrap">
-                                  {version.instrucciones_tuner}
+                  <div className="flex flex-wrap gap-2">
+                    {archivo.archivo_original && (
+                      <a
+                        href={fileUrl(archivo.archivo_original)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm"
+                      >
+                        Descargar original
+                      </a>
+                    )}
+
+                    {archivo.archivo_modificado && (
+                      <a
+                        href={fileUrl(archivo.archivo_modificado)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-sm"
+                      >
+                        Descargar último MOD
+                      </a>
+                    )}
+
+                    {archivo.post_escritura_scanner && (
+                      <a
+                        href={fileUrl(archivo.post_escritura_scanner)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-600 text-sm"
+                      >
+                        Ver scanner post escritura
+                      </a>
+                    )}
+                  </div>
+
+                  {versiones.length > 0 && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                      <h3 className="font-semibold mb-3">
+                        Historial de MOD cargados
+                      </h3>
+
+                      <div className="space-y-2">
+                        {versiones.map((version, index) => (
+                          <div
+                            key={`${version.version || index}-${
+                              version.fecha || index
+                            }`}
+                            className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 border border-slate-800 rounded-xl p-3"
+                          >
+                            <div>
+                              <p className="font-semibold">
+                                {version.etiqueta || `MOD V${version.version}`}
+                              </p>
+                              <p className="text-xs text-slate-400">
+                                Por {version.cargado_por || "-"} ·{" "}
+                                {formatearFecha(version.fecha)}
+                              </p>
+                              {version.observaciones && (
+                                <p className="text-sm text-slate-300 mt-1">
+                                  {version.observaciones}
                                 </p>
                               )}
                             </div>
-                          ))}
-                        </div>
-                      )}
+
+                            {version.archivo && (
+                              <a
+                                href={fileUrl(version.archivo)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm text-center"
+                              >
+                                Descargar
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  <div className="p-6 bg-slate-50 space-y-5">
-                    <h3 className="bg-green-600 text-white px-4 py-1 font-black text-xs uppercase inline-block">
-                      Salida: Modificado Tuner
-                    </h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                      <h3 className="font-semibold">Subir MOD / nueva versión</h3>
 
-                    {arq.archivo_modificado && (
-                      <div className="space-y-5">
-                        <div className="bg-green-100 p-8 border-4 border-green-600 text-center">
-                          <p className="text-green-800 font-black text-xl mb-6 uppercase italic tracking-tighter">
-                            ✅ Última versión lista para escritura ECU
-                          </p>
-
-                          <a
-                            href={urlArchivo(arq.archivo_modificado)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="bg-green-600 text-white px-8 py-4 font-black text-sm uppercase hover:bg-black transition-all shadow-lg inline-block"
-                          >
-                            Descargar último modificado
-                          </a>
-                        </div>
-
-                        <div className="bg-white p-5 border-4 border-black">
-                          <p className="text-[10px] font-black text-gray-400 uppercase mb-2">
-                            Instrucciones tuner
-                          </p>
-
-                          <p className="text-sm font-black text-black uppercase leading-tight whitespace-pre-wrap">
-                            {arq.instrucciones_tuner ||
-                              arq.observaciones ||
-                              "Cargar sin notas adicionales."}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="space-y-5 bg-white p-5 border-4 border-black">
-                      <div className="bg-yellow-50 border-2 border-yellow-500 p-3 text-[10px] font-black uppercase">
-                        Puedes subir MOD V1, V2, V3 o final. No reemplaza el historial.
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="block text-xs font-black text-black uppercase tracking-tighter italic">
-                          Seleccionar nuevo archivo modificado:
-                        </label>
-
-                        <input
-                          type="file"
-                          className="w-full border-2 border-black p-4 text-xs font-black bg-gray-50"
-                          onChange={(e) =>
-                            handleArchivoModificado(arq.id, e.target.files?.[0] || null)
-                          }
-                        />
-                      </div>
-
-                      <textarea
-                        className="w-full border-2 border-black p-3 text-xs font-bold"
-                        placeholder="Instrucciones para operador ECU. Ej: escribir por OBD, borrar DTC, contacto estable, no cortar corriente..."
-                        value={instruccionesTuner[arq.id] || ""}
-                        onChange={(e) => handleInstrucciones(arq.id, e.target.value)}
+                      <input
+                        type="file"
+                        onChange={(e) =>
+                          actualizarModForm(
+                            archivo.id,
+                            "archivo",
+                            e.target.files?.[0] || null
+                          )
+                        }
+                        className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl"
                       />
 
-                      <label className="flex items-center gap-2 text-xs font-black uppercase">
+                      <textarea
+                        placeholder="Instrucciones / cambios realizados"
+                        value={modForms[archivo.id]?.instrucciones_tuner || ""}
+                        onChange={(e) =>
+                          actualizarModForm(
+                            archivo.id,
+                            "instrucciones_tuner",
+                            e.target.value
+                          )
+                        }
+                        rows={2}
+                        className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                      />
+
+                      <textarea
+                        placeholder="Observaciones del MOD"
+                        value={modForms[archivo.id]?.observaciones || ""}
+                        onChange={(e) =>
+                          actualizarModForm(
+                            archivo.id,
+                            "observaciones",
+                            e.target.value
+                          )
+                        }
+                        rows={2}
+                        className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                      />
+
+                      <label className="flex items-center gap-2 text-sm text-slate-300">
                         <input
                           type="checkbox"
-                          checked={Boolean(marcarFinal[arq.id])}
-                          onChange={(e) => handleMarcarFinal(arq.id, e.target.checked)}
+                          checked={!!modForms[archivo.id]?.es_final}
+                          onChange={(e) =>
+                            actualizarModForm(
+                              archivo.id,
+                              "es_final",
+                              e.target.checked
+                            )
+                          }
                         />
-                        Marcar este archivo como MOD FINAL
+                        Marcar como MOD final
                       </label>
 
                       <button
-                        type="button"
-                        onClick={() => handleSubirModificado(arq.id)}
-                        disabled={cargando}
-                        className={`w-full py-5 font-black uppercase text-sm shadow-2xl transition-all ${
-                          cargando
-                            ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                            : "bg-black text-white hover:bg-green-600"
-                        }`}
+                        onClick={() => subirModificado(archivo.id)}
+                        className="w-full px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500"
                       >
-                        {cargando ? "Procesando..." : "Subir nueva versión MOD"}
+                        Subir MOD V{(archivo.ultima_version_modificada || 0) + 1}
                       </button>
                     </div>
 
-                    <div className="space-y-4 bg-red-50 p-5 border-4 border-red-600">
-                      <h4 className="text-sm font-black uppercase text-red-700">
-                        Solicitar corrección / V2
-                      </h4>
-
-                      <textarea
-                        className="w-full border-2 border-red-600 p-3 text-xs font-bold"
-                        placeholder="DTC post escritura. Ej: P0401, P2002, P20E8..."
-                        value={correcciones[arq.id]?.dtc_post_escritura || ""}
-                        onChange={(e) =>
-                          handleCorreccion(arq.id, "dtc_post_escritura", e.target.value)
-                        }
-                      />
-
-                      <textarea
-                        className="w-full border-2 border-red-600 p-3 text-xs font-bold"
-                        placeholder="Observación de corrección. Ej: quedó testigo motor, no acepta escritura, vuelve DTC, vehículo no desarrolla..."
-                        value={correcciones[arq.id]?.observacion_correccion || ""}
-                        onChange={(e) =>
-                          handleCorreccion(arq.id, "observacion_correccion", e.target.value)
-                        }
-                      />
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                      <h3 className="font-semibold">Notificaciones</h3>
 
                       <button
-                        type="button"
-                        onClick={() => handleSolicitarCorreccion(arq)}
-                        disabled={cargando || !arq.archivo_modificado}
-                        className="w-full bg-red-600 text-white py-4 font-black uppercase text-xs disabled:bg-gray-300 disabled:text-gray-500"
+                        onClick={() => notificarMaster(archivo)}
+                        className="w-full px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500"
                       >
-                        Solicitar corrección al tuner
+                        Notificar Master
                       </button>
 
-                      {arq.correccion_pendiente && (
-                        <div className="bg-white border-2 border-red-600 p-3">
-                          <p className="text-[10px] font-black uppercase text-red-600">
-                            Corrección pendiente
-                          </p>
+                      <button
+                        onClick={() => notificarSlave(archivo)}
+                        disabled={!archivo.archivo_modificado}
+                        className="w-full px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Notificar Slave / Operador ECU
+                      </button>
 
-                          <p className="text-xs font-bold whitespace-pre-wrap">
-                            {arq.dtc_post_escritura || "Sin DTC post escritura"}
-                          </p>
-
-                          <p className="text-xs font-bold whitespace-pre-wrap mt-2">
-                            {arq.observacion_correccion || "Sin observación"}
-                          </p>
-                        </div>
-                      )}
+                      <p className="text-xs text-slate-500">
+                        Por ahora abre WhatsApp y registra la acción. Más adelante
+                        esto será notificación interna automática al responsable.
+                      </p>
                     </div>
                   </div>
-                </div>
-              </div>
-            );
-          })
-        )}
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="font-semibold">
+                          Post escritura obligatorio
+                        </h3>
+                        <p className="text-xs text-slate-500">
+                          Sin scanner post escritura y DTC/SIN DTC no se permite
+                          finalizar.
+                        </p>
+                      </div>
+
+                      {archivo.post_escritura_estado && (
+                        <span
+                          className={`text-xs px-3 py-1 rounded-full border ${badgeClass(
+                            archivo.estado
+                          )}`}
+                        >
+                          {archivo.post_escritura_estado}
+                        </span>
+                      )}
+                    </div>
+
+                    {archivo.post_escritura_at && (
+                      <div className="text-sm text-slate-300 bg-slate-950 border border-slate-800 rounded-xl p-3">
+                        <p>
+                          <strong>Registrado por:</strong>{" "}
+                          {archivo.post_escritura_por || "-"}
+                        </p>
+                        <p>
+                          <strong>Fecha:</strong>{" "}
+                          {formatearFecha(archivo.post_escritura_at)}
+                        </p>
+                        <p>
+                          <strong>DTC post escritura:</strong>{" "}
+                          {archivo.post_escritura_dtc || "-"}
+                        </p>
+                        <p>
+                          <strong>Observación:</strong>{" "}
+                          {archivo.post_escritura_observacion || "-"}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-400 ml-1">
+                          Resultado post escritura
+                        </label>
+                        <select
+                          value={postForm.post_escritura_estado}
+                          onChange={(e) =>
+                            actualizarPostForm(
+                              archivo.id,
+                              "post_escritura_estado",
+                              e.target.value
+                            )
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                        >
+                          {RESULTADOS_POST_ESCRITURA.map((item) => (
+                            <option key={item.value} value={item.value}>
+                              {item.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-slate-400 ml-1">
+                          Foto/captura scanner post escritura
+                        </label>
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          onChange={(e) =>
+                            actualizarPostForm(
+                              archivo.id,
+                              "scanner_post_escritura",
+                              e.target.files?.[0] || null
+                            )
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl"
+                        />
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={!!postForm.post_escritura_sin_dtc}
+                        onChange={(e) =>
+                          actualizarPostForm(
+                            archivo.id,
+                            "post_escritura_sin_dtc",
+                            e.target.checked
+                          )
+                        }
+                      />
+                      SIN DTC POST ESCRITURA
+                    </label>
+
+                    {!postForm.post_escritura_sin_dtc && (
+                      <textarea
+                        placeholder="DTC post escritura. Ej: P0401, P2002, U0100..."
+                        value={postForm.post_escritura_dtc}
+                        onChange={(e) =>
+                          actualizarPostForm(
+                            archivo.id,
+                            "post_escritura_dtc",
+                            e.target.value
+                          )
+                        }
+                        rows={2}
+                        className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                      />
+                    )}
+
+                    <textarea
+                      placeholder="Observación final / resultado de prueba"
+                      value={postForm.post_escritura_observacion}
+                      onChange={(e) =>
+                        actualizarPostForm(
+                          archivo.id,
+                          "post_escritura_observacion",
+                          e.target.value
+                        )
+                      }
+                      rows={2}
+                      className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                    />
+
+                    <div className="flex flex-col md:flex-row gap-2">
+                      <button
+                        onClick={() => registrarPostEscritura(archivo.id)}
+                        disabled={!archivo.archivo_modificado}
+                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40"
+                      >
+                        Registrar post escritura
+                      </button>
+
+                      <button
+                        onClick={() => solicitarCorreccion(archivo.id)}
+                        className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500"
+                      >
+                        Solicitar corrección / V2
+                      </button>
+
+                      <button
+                        onClick={() => finalizarTecnico(archivo)}
+                        disabled={!puedeFinalizar}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Finalizar técnico
+                      </button>
+                    </div>
+
+                    {!puedeFinalizar && (
+                      <p className="text-xs text-yellow-300">
+                        Finalizar técnico está bloqueado hasta registrar post
+                        escritura OK.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <h3 className="font-semibold text-slate-200">
+                      Archivar File Service
+                    </h3>
+
+                    <p className="text-xs text-slate-500">
+                      Archivar reemplaza eliminar. El registro queda guardado
+                      para auditoría, pero sale del listado activo.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <select
+                        value={archForm.archivado_motivo}
+                        onChange={(e) =>
+                          actualizarArchivarForm(
+                            archivo.id,
+                            "archivado_motivo",
+                            e.target.value
+                          )
+                        }
+                        className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                      >
+                        <option value="">-- Motivo de archivado --</option>
+                        {MOTIVOS_ARCHIVO.map((item) => (
+                          <option key={item.value} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      <input
+                        value={archForm.archivado_comentario}
+                        onChange={(e) =>
+                          actualizarArchivarForm(
+                            archivo.id,
+                            "archivado_comentario",
+                            e.target.value
+                          )
+                        }
+                        placeholder="Comentario opcional"
+                        className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                      />
+                    </div>
+
+                    <button
+                      onClick={() => archivarArchivo(archivo.id)}
+                      className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm"
+                    >
+                      Archivar
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
       </div>
     </div>
   );
 }
-
-const Info = ({ label, value }) => (
-  <div className="border-b border-gray-200 pb-2">
-    <p className="text-[10px] font-black uppercase text-gray-400">{label}</p>
-    <p className="text-sm font-black uppercase">{value || "—"}</p>
-  </div>
-);
-
-export default ArchivosECUPage;
