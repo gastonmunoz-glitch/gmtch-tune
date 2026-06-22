@@ -1,15 +1,6 @@
 const { QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
 
-const {
-  Vehiculo,
-  Cliente,
-  OrdenTrabajo,
-  ArchivoECU,
-  FotoVehiculo,
-  Diagnostico,
-} = require("../models");
-
 const normalizarPatente = (patente) => {
   return String(patente || "").trim().toUpperCase().replace(/\s+/g, "");
 };
@@ -18,6 +9,107 @@ const limpiarTexto = (valor) => {
   const texto = String(valor || "").trim();
   return texto || null;
 };
+
+const mapearVehiculos = (rows = []) => {
+  const mapa = new Map();
+
+  rows.forEach((row) => {
+    if (!mapa.has(row.id)) {
+      mapa.set(row.id, {
+        id: row.id,
+        clienteId: row.clienteId,
+        patente: row.patente,
+        marca: row.marca,
+        modelo: row.modelo,
+        anio: row.anio,
+        vin: row.vin,
+        tipo_unidad: row.tipo_unidad,
+        activo: row.activo,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+
+        Cliente: row.cliente_id
+          ? {
+              id: row.cliente_id,
+              nombre: row.cliente_nombre,
+              telefono: row.cliente_telefono,
+              email: row.cliente_email,
+              direccion: row.cliente_direccion,
+              categoria_cliente: row.cliente_categoria_cliente || "NORMAL",
+              nota_cliente: row.cliente_nota_cliente,
+            }
+          : null,
+
+        OrdenTrabajos: [],
+      });
+    }
+
+    if (row.orden_id) {
+      mapa.get(row.id).OrdenTrabajos.push({
+        id: row.orden_id,
+        vehiculoId: row.orden_vehiculoId,
+        prioridad: row.orden_prioridad,
+        estado: row.orden_estado,
+        estado_pago: row.orden_estado_pago,
+        medio_pago: row.orden_medio_pago,
+        monto_pagado: row.orden_monto_pagado,
+        fecha_pago: row.orden_fecha_pago,
+        cobrado_por: row.orden_cobrado_por,
+        observacion_pago: row.orden_observacion_pago,
+        kilometraje: row.orden_kilometraje,
+        motivo_ingreso: row.orden_motivo_ingreso,
+        monto_total: row.orden_monto_total,
+        createdAt: row.orden_createdAt,
+        updatedAt: row.orden_updatedAt,
+      });
+    }
+  });
+
+  return Array.from(mapa.values());
+};
+
+const queryVehiculosBase = `
+  SELECT
+    v."id",
+    v."clienteId",
+    v."patente",
+    v."marca",
+    v."modelo",
+    v."anio",
+    v."vin",
+    v."tipo_unidad",
+    v."activo",
+    v."createdAt",
+    v."updatedAt",
+
+    c."id" AS "cliente_id",
+    c."nombre" AS "cliente_nombre",
+    c."telefono" AS "cliente_telefono",
+    c."email" AS "cliente_email",
+    c."direccion" AS "cliente_direccion",
+    c."categoria_cliente" AS "cliente_categoria_cliente",
+    c."nota_cliente" AS "cliente_nota_cliente",
+
+    o."id" AS "orden_id",
+    o."vehiculoId" AS "orden_vehiculoId",
+    o."prioridad" AS "orden_prioridad",
+    o."estado" AS "orden_estado",
+    o."estado_pago" AS "orden_estado_pago",
+    o."medio_pago" AS "orden_medio_pago",
+    o."monto_pagado" AS "orden_monto_pagado",
+    o."fecha_pago" AS "orden_fecha_pago",
+    o."cobrado_por" AS "orden_cobrado_por",
+    o."observacion_pago" AS "orden_observacion_pago",
+    o."kilometraje" AS "orden_kilometraje",
+    o."motivo_ingreso" AS "orden_motivo_ingreso",
+    o."monto_total" AS "orden_monto_total",
+    o."createdAt" AS "orden_createdAt",
+    o."updatedAt" AS "orden_updatedAt"
+
+  FROM "vehiculos" v
+  LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+  LEFT JOIN "ordenes_trabajo" o ON o."vehiculoId" = v."id"
+`;
 
 const crearVehiculo = async (req, res) => {
   try {
@@ -41,9 +133,20 @@ const crearVehiculo = async (req, res) => {
       });
     }
 
-    const cliente = await Cliente.findByPk(clienteId);
+    const cliente = await sequelize.query(
+      `
+      SELECT "id"
+      FROM "clientes"
+      WHERE "id" = :clienteId
+      LIMIT 1;
+      `,
+      {
+        replacements: { clienteId },
+        type: QueryTypes.SELECT,
+      }
+    );
 
-    if (!cliente) {
+    if (cliente.length === 0) {
       return res.status(404).json({
         error: "Cliente no encontrado",
       });
@@ -51,7 +154,7 @@ const crearVehiculo = async (req, res) => {
 
     const existente = await sequelize.query(
       `
-      SELECT *
+      SELECT "id", "patente"
       FROM "vehiculos"
       WHERE UPPER(TRIM("patente")) = :patente
       LIMIT 1;
@@ -109,15 +212,13 @@ const crearVehiculo = async (req, res) => {
           vin,
           tipo_unidad,
         },
-        type: QueryTypes.INSERT,
+        type: QueryTypes.SELECT,
       }
     );
 
-    const vehiculo = Array.isArray(insertado?.[0]) ? insertado[0][0] : insertado[0];
-
     res.status(201).json({
       mensaje: "Vehículo creado correctamente",
-      vehiculo,
+      vehiculo: insertado[0],
     });
   } catch (error) {
     console.error("ERROR CREANDO VEHÍCULO:", error);
@@ -131,37 +232,20 @@ const crearVehiculo = async (req, res) => {
 
 const obtenerVehiculos = async (req, res) => {
   try {
-    const vehiculos = await Vehiculo.findAll({
-      include: [
-        {
-          model: Cliente,
-          required: false,
-        },
-        {
-          model: OrdenTrabajo,
-          required: false,
-          include: [
-            {
-              model: ArchivoECU,
-              required: false,
-            },
-            {
-              model: FotoVehiculo,
-              required: false,
-            },
-            {
-              model: Diagnostico,
-              required: false,
-            },
-          ],
-        },
-      ],
-      order: [
-        ["patente", "ASC"],
-      ],
-    });
+    const rows = await sequelize.query(
+      `
+      ${queryVehiculosBase}
+      ORDER BY
+        c."nombre" ASC NULLS LAST,
+        v."patente" ASC,
+        o."createdAt" DESC NULLS LAST;
+      `,
+      {
+        type: QueryTypes.SELECT,
+      }
+    );
 
-    res.json(vehiculos);
+    res.json(mapearVehiculos(rows));
   } catch (error) {
     console.error("ERROR OBTENIENDO VEHÍCULOS:", error);
 
@@ -173,40 +257,29 @@ const obtenerVehiculos = async (req, res) => {
 
 const obtenerVehiculoPorId = async (req, res) => {
   try {
-    const vehiculo = await Vehiculo.findByPk(req.params.id, {
-      include: [
-        {
-          model: Cliente,
-          required: false,
-        },
-        {
-          model: OrdenTrabajo,
-          required: false,
-          include: [
-            {
-              model: ArchivoECU,
-              required: false,
-            },
-            {
-              model: FotoVehiculo,
-              required: false,
-            },
-            {
-              model: Diagnostico,
-              required: false,
-            },
-          ],
-        },
-      ],
-    });
+    const id = Number(req.params.id);
 
-    if (!vehiculo) {
+    const rows = await sequelize.query(
+      `
+      ${queryVehiculosBase}
+      WHERE v."id" = :id
+      ORDER BY o."createdAt" DESC NULLS LAST;
+      `,
+      {
+        replacements: { id },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    const vehiculos = mapearVehiculos(rows);
+
+    if (vehiculos.length === 0) {
       return res.status(404).json({
         error: "Vehículo no encontrado",
       });
     }
 
-    res.json(vehiculo);
+    res.json(vehiculos[0]);
   } catch (error) {
     console.error("ERROR OBTENIENDO VEHÍCULO:", error);
 
@@ -220,43 +293,27 @@ const obtenerVehiculoPorPatente = async (req, res) => {
   try {
     const patente = normalizarPatente(req.params.patente);
 
-    const vehiculo = await Vehiculo.findOne({
-      where: {
-        patente,
-      },
-      include: [
-        {
-          model: Cliente,
-          required: false,
-        },
-        {
-          model: OrdenTrabajo,
-          required: false,
-          include: [
-            {
-              model: ArchivoECU,
-              required: false,
-            },
-            {
-              model: FotoVehiculo,
-              required: false,
-            },
-            {
-              model: Diagnostico,
-              required: false,
-            },
-          ],
-        },
-      ],
-    });
+    const rows = await sequelize.query(
+      `
+      ${queryVehiculosBase}
+      WHERE UPPER(TRIM(v."patente")) = :patente
+      ORDER BY o."createdAt" DESC NULLS LAST;
+      `,
+      {
+        replacements: { patente },
+        type: QueryTypes.SELECT,
+      }
+    );
 
-    if (!vehiculo) {
+    const vehiculos = mapearVehiculos(rows);
+
+    if (vehiculos.length === 0) {
       return res.status(404).json({
         error: "Vehículo no encontrado",
       });
     }
 
-    res.json(vehiculo);
+    res.json(vehiculos[0]);
   } catch (error) {
     console.error("ERROR OBTENIENDO VEHÍCULO POR PATENTE:", error);
 
@@ -268,25 +325,88 @@ const obtenerVehiculoPorPatente = async (req, res) => {
 
 const actualizarVehiculo = async (req, res) => {
   try {
-    const vehiculo = await Vehiculo.findByPk(req.params.id);
+    const id = Number(req.params.id);
 
-    if (!vehiculo) {
+    const existente = await sequelize.query(
+      `
+      SELECT *
+      FROM "vehiculos"
+      WHERE "id" = :id
+      LIMIT 1;
+      `,
+      {
+        replacements: { id },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    if (existente.length === 0) {
       return res.status(404).json({
         error: "Vehículo no encontrado",
       });
     }
 
-    const payload = {
-      ...req.body,
-    };
+    const actual = existente[0];
 
-    if (payload.patente) {
-      payload.patente = normalizarPatente(payload.patente);
-    }
+    const clienteId =
+      req.body.clienteId !== undefined ? Number(req.body.clienteId) : actual.clienteId;
 
-    await vehiculo.update(payload);
+    const patente =
+      req.body.patente !== undefined
+        ? normalizarPatente(req.body.patente)
+        : actual.patente;
 
-    res.json(vehiculo);
+    const marca =
+      req.body.marca !== undefined ? limpiarTexto(req.body.marca) || actual.marca : actual.marca;
+
+    const modelo =
+      req.body.modelo !== undefined
+        ? limpiarTexto(req.body.modelo) || actual.modelo
+        : actual.modelo;
+
+    const anio = req.body.anio !== undefined ? Number(req.body.anio) || null : actual.anio;
+    const vin = req.body.vin !== undefined ? limpiarTexto(req.body.vin) : actual.vin;
+
+    const tipo_unidad =
+      req.body.tipo_unidad !== undefined
+        ? limpiarTexto(req.body.tipo_unidad) || "AUTO"
+        : actual.tipo_unidad;
+
+    const activo = req.body.activo !== undefined ? Boolean(req.body.activo) : actual.activo;
+
+    const actualizado = await sequelize.query(
+      `
+      UPDATE "vehiculos"
+      SET
+        "clienteId" = :clienteId,
+        "patente" = :patente,
+        "marca" = :marca,
+        "modelo" = :modelo,
+        "anio" = :anio,
+        "vin" = :vin,
+        "tipo_unidad" = :tipo_unidad,
+        "activo" = :activo,
+        "updatedAt" = NOW()
+      WHERE "id" = :id
+      RETURNING *;
+      `,
+      {
+        replacements: {
+          id,
+          clienteId,
+          patente,
+          marca,
+          modelo,
+          anio,
+          vin,
+          tipo_unidad,
+          activo,
+        },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    res.json(actualizado[0]);
   } catch (error) {
     console.error("ERROR ACTUALIZANDO VEHÍCULO:", error);
 
@@ -299,36 +419,48 @@ const actualizarVehiculo = async (req, res) => {
 
 const eliminarVehiculo = async (req, res) => {
   try {
-    const vehiculo = await Vehiculo.findByPk(req.params.id, {
-      include: [
-        {
-          model: OrdenTrabajo,
-          required: false,
-        },
-      ],
-    });
+    const id = Number(req.params.id);
 
-    if (!vehiculo) {
-      return res.status(404).json({
-        error: "Vehículo no encontrado",
-      });
-    }
+    const historial = await sequelize.query(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM "ordenes_trabajo"
+      WHERE "vehiculoId" = :id;
+      `,
+      {
+        replacements: { id },
+        type: QueryTypes.SELECT,
+      }
+    );
 
-    const tieneHistorial =
-      Array.isArray(vehiculo.OrdenTrabajos) && vehiculo.OrdenTrabajos.length > 0;
-
-    if (tieneHistorial) {
+    if ((historial[0]?.total || 0) > 0) {
       return res.status(400).json({
         error:
           "Este vehículo tiene historial de órdenes. Por seguridad no se elimina.",
       });
     }
 
-    await vehiculo.destroy();
+    const eliminado = await sequelize.query(
+      `
+      DELETE FROM "vehiculos"
+      WHERE "id" = :id
+      RETURNING "id";
+      `,
+      {
+        replacements: { id },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    if (eliminado.length === 0) {
+      return res.status(404).json({
+        error: "Vehículo no encontrado",
+      });
+    }
 
     res.json({
       mensaje: "Vehículo eliminado correctamente",
-      id: req.params.id,
+      id,
     });
   } catch (error) {
     console.error("ERROR ELIMINANDO VEHÍCULO:", error);
