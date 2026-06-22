@@ -1,57 +1,60 @@
-const crearUsuarioMaestro = async () => {
-  try {
-    const passwordHash = await bcrypt.hash("123", 10);
+// ====================== CORS ======================
 
-    const [usuarios] = await sequelize.query(`
-      SELECT "id", "username", "rol"
-      FROM "Usuarios"
-      WHERE "username" = 'gaston'
-      LIMIT 1;
-    `);
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://abundant-emotion-production-830a.up.railway.app",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
 
-    if (usuarios.length > 0) {
-      await sequelize.query(
-        `
-        UPDATE "Usuarios"
-        SET "rol" = 'OWNER',
-            "nombre" = COALESCE("nombre", 'Gastón Muñoz'),
-            "password" = :password,
-            "activo" = true,
-            "updatedAt" = NOW()
-        WHERE "username" = 'gaston';
-        `,
-        {
-          replacements: {
-            password: passwordHash,
-          },
-        }
-      );
-
-      console.log("ℹ️ Usuario gaston actualizado como OWNER y password reseteada a 123");
-      return;
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) {
+      return callback(null, true);
     }
 
-    await sequelize.query(
-      `
-      INSERT INTO "Usuarios"
-        ("id", "nombre", "username", "password", "rol", "activo", "createdAt", "updatedAt")
-      VALUES
-        (:id, :nombre, :username, :password, :rol, true, NOW(), NOW());
-      `,
-      {
-        replacements: {
-          id: crypto.randomUUID(),
-          nombre: "Gastón Muñoz",
-          username: "gaston",
-          password: passwordHash,
-          rol: "OWNER",
-        },
-      }
-    );
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-    console.log("🚀 ACCESO OWNER CREADO: gaston / 123");
-  } catch (error) {
-    console.error("❌ Error creando usuario maestro:", error);
-    throw error;
-  }
+    console.warn("CORS permitido temporalmente para origin:", origin);
+    return callback(null, true);
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "Accept",
+    "Origin",
+  ],
+  credentials: true,
+  optionsSuccessStatus: 204,
 };
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (origin) {
+    res.header("Access-Control-Allow-Origin", origin);
+  }
+
+  res.header("Vary", "Origin");
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+  );
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With, Accept, Origin"
+  );
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
+app.use(cors(corsOptions));
