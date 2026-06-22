@@ -19,6 +19,33 @@ const ArchivoECU = sequelize.define(
       },
     },
 
+    estado: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      defaultValue: "PENDIENTE_TUNER",
+    },
+
+    prioridad: {
+      type: DataTypes.STRING(30),
+      allowNull: true,
+      defaultValue: "MEDIA",
+    },
+
+    tipo_servicio: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+    },
+
+    metodo_lectura: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+
+    herramienta_lectura: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
     archivo_original: {
       type: DataTypes.TEXT,
       allowNull: true,
@@ -39,8 +66,28 @@ const ArchivoECU = sequelize.define(
       allowNull: true,
     },
 
+    hw: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    sw: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
     version_software: {
       type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    notas_operador: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    instrucciones_tuner: {
+      type: DataTypes.TEXT,
       allowNull: true,
     },
 

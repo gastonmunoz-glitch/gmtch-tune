@@ -43,6 +43,7 @@ router.post("/", manejarSubidaArchivo, crearArchivoECU);
 router.get("/", obtenerArchivosECU);
 router.get("/:id", obtenerArchivoECUPorId);
 router.put("/:id", actualizarArchivoECU);
+router.patch("/:id", actualizarArchivoECU);
 router.post("/:id/modificado", manejarSubidaArchivo, subirArchivoModificado);
 
 module.exports = router;
