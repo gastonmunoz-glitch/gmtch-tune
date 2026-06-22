@@ -87,7 +87,7 @@ app.use("/api/diagnosticos", diagnosticoRoutes);
 app.use("/api/archivos-ecu", archivoECURoutes);
 app.use("/api/fotos", fotoVehiculoRoutes);
 
-// Rutas opcionales, para que no rompan el servidor si un archivo no existe
+// Rutas opcionales
 try {
   const pagoRoutes = require("./src/routes/pagoRoutes");
   app.use("/api/pagos", pagoRoutes);
@@ -121,11 +121,52 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Reparar autoincremento de Usuarios.id en PostgreSQL
+const repararUsuarioIdSequence = async () => {
+  try {
+    await sequelize.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+          AND table_name = 'Usuarios'
+        ) THEN
+
+          CREATE SEQUENCE IF NOT EXISTS "Usuarios_id_seq";
+
+          ALTER TABLE "Usuarios"
+          ALTER COLUMN "id"
+          SET DEFAULT nextval('"Usuarios_id_seq"'::regclass);
+
+          ALTER SEQUENCE "Usuarios_id_seq"
+          OWNED BY "Usuarios"."id";
+
+          PERFORM setval(
+            '"Usuarios_id_seq"',
+            COALESCE((SELECT MAX("id") FROM "Usuarios"), 0) + 1,
+            false
+          );
+
+        END IF;
+      END $$;
+    `);
+
+    console.log("✅ Secuencia Usuarios.id reparada/verificada");
+  } catch (error) {
+    console.error("❌ Error reparando secuencia de Usuarios.id:", error);
+    throw error;
+  }
+};
+
 // Iniciar servidor
 const startServer = async () => {
   try {
     await sequelize.sync({ alter: true });
     console.log("✅ BASE DE DATOS SINCRONIZADA");
+
+    await repararUsuarioIdSequence();
 
     const Usuario = require("./src/models/Usuario");
 
