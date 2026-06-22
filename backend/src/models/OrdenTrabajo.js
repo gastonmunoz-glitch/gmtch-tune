@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/database");
 
-const Vehiculo = sequelize.define(
-  "Vehiculo",
+const OrdenTrabajo = sequelize.define(
+  "OrdenTrabajo",
   {
     id: {
       type: DataTypes.INTEGER,
@@ -10,53 +10,75 @@ const Vehiculo = sequelize.define(
       autoIncrement: true,
     },
 
-    clienteId: {
+    vehiculoId: {
       type: DataTypes.INTEGER,
-      allowNull: true,
-    },
-
-    patente: {
-      type: DataTypes.STRING(20),
-      allowNull: false,
-      unique: true,
-    },
-
-    marca: {
-      type: DataTypes.STRING(50),
       allowNull: false,
     },
 
-    modelo: {
+    prioridad: {
+      type: DataTypes.STRING(30),
+      allowNull: false,
+      defaultValue: "MEDIA",
+    },
+
+    estado: {
       type: DataTypes.STRING(50),
       allowNull: false,
+      defaultValue: "RECEPCIONADO",
     },
 
-    anio: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
+    estado_pago: {
+      type: DataTypes.STRING(30),
+      allowNull: false,
+      defaultValue: "PENDIENTE",
     },
 
-    vin: {
-      type: DataTypes.STRING(50),
-      allowNull: true,
-    },
-
-    tipo_unidad: {
+    medio_pago: {
       type: DataTypes.STRING(40),
       allowNull: false,
-      defaultValue: "AUTO",
+      defaultValue: "PENDIENTE",
     },
 
-    activo: {
-      type: DataTypes.BOOLEAN,
+    monto_pagado: {
+      type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
-      defaultValue: true,
+      defaultValue: 0,
+    },
+
+    fecha_pago: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    cobrado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    observacion_pago: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    kilometraje: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    motivo_ingreso: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    monto_total: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
     },
   },
   {
-    tableName: "vehiculos",
+    tableName: "ordenes_trabajo",
     timestamps: true,
   }
 );
 
-module.exports = Vehiculo;
+module.exports = OrdenTrabajo;
