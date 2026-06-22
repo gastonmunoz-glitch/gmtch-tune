@@ -1,9 +1,9 @@
 const express = require("express");
 const router = express.Router();
 
-const { login } = require("../controllers/authController");
+const { login, me } = require("../controllers/authController");
+const { autenticar } = require("../middleware/authMiddleware");
 
-// Ruta de prueba para verificar que authRoutes está cargando
 router.get("/test", (req, res) => {
   res.json({
     ok: true,
@@ -11,7 +11,7 @@ router.get("/test", (req, res) => {
   });
 });
 
-// Login
 router.post("/login", login);
+router.get("/me", autenticar, me);
 
 module.exports = router;

@@ -12,10 +12,15 @@ const Usuario = sequelize.define(
       allowNull: false,
     },
 
-    username: {
-      type: DataTypes.STRING,
-      unique: true,
+    nombre: {
+      type: DataTypes.STRING(120),
       allowNull: true,
+    },
+
+    username: {
+      type: DataTypes.STRING(80),
+      unique: true,
+      allowNull: false,
     },
 
     password: {
@@ -24,8 +29,15 @@ const Usuario = sequelize.define(
     },
 
     rol: {
-      type: DataTypes.ENUM("ADMIN", "TALLER"),
-      defaultValue: "TALLER",
+      type: DataTypes.STRING(50),
+      allowNull: false,
+      defaultValue: "RECEPCION",
+    },
+
+    activo: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
     },
   },
   {
@@ -33,7 +45,6 @@ const Usuario = sequelize.define(
   }
 );
 
-// Encriptar clave antes de crear usuario
 Usuario.beforeCreate(async (user) => {
   if (
     user.password &&
@@ -44,7 +55,6 @@ Usuario.beforeCreate(async (user) => {
   }
 });
 
-// Encriptar clave si se actualiza
 Usuario.beforeUpdate(async (user) => {
   if (user.changed("password")) {
     if (
