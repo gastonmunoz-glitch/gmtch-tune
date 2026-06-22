@@ -4,11 +4,12 @@ const dotenv = require("dotenv");
 const path = require("path");
 const fs = require("fs");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const sequelize = require("./src/config/database");
 
 dotenv.config();
 
-console.log("🛠️ SERVER VERSION: FIX-USUARIOS-ID-V2-2026-06-22");
+console.log("🛠️ SERVER VERSION: FIX-USUARIOS-UUID-V3-2026-06-22");
 
 const app = express();
 
@@ -68,7 +69,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     message: "Backend Gmtch Tune funcionando",
-    version: "FIX-USUARIOS-ID-V2-2026-06-22",
+    version: "FIX-USUARIOS-UUID-V3-2026-06-22",
     environment: process.env.NODE_ENV || "development",
   });
 });
@@ -125,46 +126,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Reparar autoincremento de Usuarios.id
-const repararUsuarioIdSequence = async () => {
-  try {
-    await sequelize.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (
-          SELECT 1
-          FROM information_schema.tables
-          WHERE table_schema = 'public'
-          AND table_name = 'Usuarios'
-        ) THEN
-
-          CREATE SEQUENCE IF NOT EXISTS "Usuarios_id_seq";
-
-          ALTER TABLE "Usuarios"
-          ALTER COLUMN "id"
-          SET DEFAULT nextval('"Usuarios_id_seq"'::regclass);
-
-          ALTER SEQUENCE "Usuarios_id_seq"
-          OWNED BY "Usuarios"."id";
-
-          PERFORM setval(
-            '"Usuarios_id_seq"',
-            GREATEST(COALESCE((SELECT MAX("id") FROM "Usuarios"), 0), 1),
-            true
-          );
-
-        END IF;
-      END $$;
-    `);
-
-    console.log("✅ Secuencia Usuarios.id reparada/verificada");
-  } catch (error) {
-    console.error("❌ Error reparando secuencia Usuarios.id:", error);
-    throw error;
-  }
-};
-
-// Crear usuario maestro con SQL directo para evitar error de id null
+// Crear usuario maestro compatible con UUID
 const crearUsuarioMaestro = async () => {
   try {
     const [usuarios] = await sequelize.query(`
@@ -179,12 +141,6 @@ const crearUsuarioMaestro = async () => {
       return;
     }
 
-    const [resultadoId] = await sequelize.query(`
-      SELECT COALESCE(MAX("id"), 0) + 1 AS next_id
-      FROM "Usuarios";
-    `);
-
-    const nextId = Number(resultadoId[0].next_id || 1);
     const passwordHash = await bcrypt.hash("123", 10);
 
     await sequelize.query(
@@ -196,7 +152,7 @@ const crearUsuarioMaestro = async () => {
       `,
       {
         replacements: {
-          id: nextId,
+          id: crypto.randomUUID(),
           username: "gaston",
           password: passwordHash,
           rol: "ADMIN",
@@ -217,7 +173,6 @@ const startServer = async () => {
     await sequelize.sync({ alter: true });
     console.log("✅ BASE DE DATOS SINCRONIZADA");
 
-    await repararUsuarioIdSequence();
     await crearUsuarioMaestro();
 
     console.log("📁 Uploads path:", uploadsPath);
