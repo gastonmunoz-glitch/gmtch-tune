@@ -4,6 +4,11 @@ const obtenerOrdenId = (body) => {
   return body.ordenId || body.orden_id || body.ordenTrabajoId || body.orden_trabajo_id;
 };
 
+const limpiarTexto = (valor) => {
+  if (valor === null || valor === undefined) return "";
+  return String(valor).trim();
+};
+
 const obtenerRutaPublicaArchivo = (file) => {
   if (!file) return null;
 
@@ -65,13 +70,45 @@ const crearArchivoECU = async (req, res) => {
 
     const nuevoArchivo = await ArchivoECU.create({
       ordenId,
-      marca_ecu: req.body.marca_ecu || "",
-      modelo_ecu: req.body.modelo_ecu || "",
-      version_software: req.body.version_software || "",
-      observaciones: req.body.observaciones || "",
+
+      estado: limpiarTexto(req.body.estado) || "PENDIENTE_TUNER",
+      prioridad: limpiarTexto(req.body.prioridad) || "MEDIA",
+      tipo_servicio: limpiarTexto(req.body.tipo_servicio),
+
+      metodo_lectura: limpiarTexto(req.body.metodo_lectura),
+      herramienta_lectura: limpiarTexto(req.body.herramienta_lectura),
+
+      marca_ecu: limpiarTexto(req.body.marca_ecu),
+      modelo_ecu: limpiarTexto(req.body.modelo_ecu),
+      hw: limpiarTexto(req.body.hw),
+      sw: limpiarTexto(req.body.sw),
+      version_software: limpiarTexto(req.body.version_software),
+
+      notas_operador: limpiarTexto(req.body.notas_operador),
+      instrucciones_tuner: limpiarTexto(req.body.instrucciones_tuner),
+      observaciones: limpiarTexto(req.body.observaciones),
+
       archivo_original: obtenerRutaPublicaArchivo(req.file),
       archivo_modificado: null,
     });
+
+    // Movemos la orden a programación/file service sin romper si el enum no acepta otro estado
+    try {
+      if (
+        orden.estado === "RECEPCIONADO" ||
+        orden.estado === "PARA_DIAGNOSTICO" ||
+        !orden.estado
+      ) {
+        await orden.update({
+          estado: "EN_PROGRAMACION",
+        });
+      }
+    } catch (estadoError) {
+      console.warn(
+        "No se pudo actualizar estado de orden al crear File Service:",
+        estadoError.message
+      );
+    }
 
     res.status(201).json({
       mensaje: "Archivo ECU guardado correctamente",
@@ -89,10 +126,9 @@ const crearArchivoECU = async (req, res) => {
   }
 };
 
-// Función para que GASTON suba el archivo ya modificado
 const subirArchivoModificado = async (req, res) => {
   try {
-    const { id } = req.params; // ID del registro del archivo
+    const { id } = req.params;
 
     const archivo = await ArchivoECU.findByPk(id);
 
@@ -108,14 +144,26 @@ const subirArchivoModificado = async (req, res) => {
       });
     }
 
-    // Actualizamos el registro con la URL del archivo modificado de Cloudinary
+    const instruccionesTuner =
+      limpiarTexto(req.body.instrucciones_tuner) ||
+      limpiarTexto(req.body.instrucciones) ||
+      "";
+
+    const observaciones =
+      limpiarTexto(req.body.observaciones) ||
+      instruccionesTuner ||
+      archivo.observaciones ||
+      "";
+
     await archivo.update({
       archivo_modificado: obtenerRutaPublicaArchivo(req.file),
-      observaciones: req.body.observaciones || archivo.observaciones,
+      instrucciones_tuner: instruccionesTuner || archivo.instrucciones_tuner,
+      observaciones,
+      estado: limpiarTexto(req.body.estado) || "MODIFICADO_LISTO",
     });
 
     res.json({
-      mensaje: "Software modificado inyectado con éxito",
+      mensaje: "Software modificado cargado con éxito",
       archivo,
     });
   } catch (error) {
@@ -157,7 +205,31 @@ const actualizarArchivoECU = async (req, res) => {
       });
     }
 
-    await archivo.update(req.body);
+    const payload = {};
+
+    const camposPermitidos = [
+      "estado",
+      "prioridad",
+      "tipo_servicio",
+      "metodo_lectura",
+      "herramienta_lectura",
+      "marca_ecu",
+      "modelo_ecu",
+      "hw",
+      "sw",
+      "version_software",
+      "notas_operador",
+      "instrucciones_tuner",
+      "observaciones",
+    ];
+
+    camposPermitidos.forEach((campo) => {
+      if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
+        payload[campo] = limpiarTexto(req.body[campo]);
+      }
+    });
+
+    await archivo.update(payload);
 
     res.json({
       mensaje: "Archivo ECU actualizado",
