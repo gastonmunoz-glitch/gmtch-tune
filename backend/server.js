@@ -9,9 +9,11 @@ const sequelize = require("./src/config/database");
 
 dotenv.config();
 
-console.log("🛠️ SERVER VERSION: ROLES-PERMISSIONS-V1-2026-06-22");
+console.log("🛠️ SERVER VERSION: ROLES-PERMISSIONS-FIX-USUARIOS-NULL-V2-2026-06-22");
 
 const app = express();
+
+// ====================== CARPETAS UPLOADS ======================
 
 const uploadsPath = path.join(__dirname, "src", "uploads");
 const fotosPath = path.join(__dirname, "src", "uploads", "fotos");
@@ -23,6 +25,8 @@ if (!fs.existsSync(uploadsPath)) {
 if (!fs.existsSync(fotosPath)) {
   fs.mkdirSync(fotosPath, { recursive: true });
 }
+
+// ====================== CORS ======================
 
 const allowedOrigins = [
   "http://localhost:5173",
@@ -47,10 +51,15 @@ app.use(
   })
 );
 
+// ====================== MIDDLEWARES BASE ======================
+
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
+// Servir archivos subidos
 app.use("/uploads", express.static(uploadsPath));
+
+// ====================== MODELOS ======================
 
 require("./src/models");
 
@@ -60,6 +69,8 @@ const {
   permitirPorMetodo,
 } = require("./src/middleware/authMiddleware");
 
+// ====================== RUTAS BASE ======================
+
 app.get("/", (req, res) => {
   res.send("GMTCH TUNE SERVER ONLINE");
 });
@@ -68,10 +79,12 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     message: "Backend Gmtch Tune funcionando",
-    version: "ROLES-PERMISSIONS-V1-2026-06-22",
+    version: "ROLES-PERMISSIONS-FIX-USUARIOS-NULL-V2-2026-06-22",
     environment: process.env.NODE_ENV || "development",
   });
 });
+
+// ====================== IMPORTAR RUTAS ======================
 
 const authRoutes = require("./src/routes/authRoutes");
 const usuarioRoutes = require("./src/routes/usuarioRoutes");
@@ -82,7 +95,11 @@ const diagnosticoRoutes = require("./src/routes/diagnosticoRoutes");
 const archivoECURoutes = require("./src/routes/archivoECURoutes");
 const fotoVehiculoRoutes = require("./src/routes/fotoVehiculoRoutes");
 
+// ====================== RUTAS PÚBLICAS ======================
+
 app.use("/api/auth", authRoutes);
+
+// ====================== RUTAS PROTEGIDAS POR ROLES ======================
 
 app.use(
   "/api/usuarios",
@@ -148,8 +165,22 @@ app.use(
       "TUNER",
     ],
     POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
-    PUT: ["OWNER", "ADMIN", "SUPERVISOR", "OPERADOR_SCANNER", "OPERADOR_ECU", "MECANICO"],
-    PATCH: ["OWNER", "ADMIN", "SUPERVISOR", "OPERADOR_SCANNER", "OPERADOR_ECU", "MECANICO"],
+    PUT: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+    ],
+    PATCH: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+    ],
     DELETE: ["OWNER"],
   }),
   ordenTrabajoRoutes
@@ -167,9 +198,30 @@ app.use(
       "OPERADOR_ECU",
       "MECANICO",
     ],
-    POST: ["OWNER", "ADMIN", "SUPERVISOR", "OPERADOR_SCANNER", "OPERADOR_ECU", "MECANICO"],
-    PUT: ["OWNER", "ADMIN", "SUPERVISOR", "OPERADOR_SCANNER", "OPERADOR_ECU", "MECANICO"],
-    PATCH: ["OWNER", "ADMIN", "SUPERVISOR", "OPERADOR_SCANNER", "OPERADOR_ECU", "MECANICO"],
+    POST: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+    ],
+    PUT: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+    ],
+    PATCH: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+    ],
     DELETE: ["OWNER"],
   }),
   diagnosticoRoutes
@@ -192,7 +244,15 @@ app.use(
   "/api/fotos",
   autenticar,
   permitirPorMetodo({
-    GET: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION", "OPERADOR_SCANNER", "OPERADOR_ECU", "MECANICO"],
+    GET: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "RECEPCION",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+    ],
     POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
     PUT: ["OWNER", "ADMIN", "SUPERVISOR"],
     PATCH: ["OWNER", "ADMIN", "SUPERVISOR"],
@@ -200,6 +260,8 @@ app.use(
   }),
   fotoVehiculoRoutes
 );
+
+// ====================== RUTAS OPCIONALES ======================
 
 try {
   const pagoRoutes = require("./src/routes/pagoRoutes");
@@ -217,12 +279,16 @@ try {
   console.warn("⚠️ Ruta /api/files no cargada:", error.message);
 }
 
+// ====================== RUTA NO ENCONTRADA ======================
+
 app.use((req, res) => {
   res.status(404).json({
     error: "Ruta no encontrada",
     path: req.originalUrl,
   });
 });
+
+// ====================== MANEJO GENERAL DE ERRORES ======================
 
 app.use((err, req, res, next) => {
   console.error("ERROR GENERAL BACKEND:", err);
@@ -232,6 +298,8 @@ app.use((err, req, res, next) => {
   });
 });
 
+// ====================== PREPARAR TABLA USUARIOS ======================
+
 const prepararBaseUsuarios = async () => {
   try {
     await sequelize.query(`
@@ -240,27 +308,80 @@ const prepararBaseUsuarios = async () => {
         IF EXISTS (
           SELECT 1
           FROM information_schema.tables
-          WHERE table_name = 'Usuarios'
+          WHERE table_schema = 'public'
+          AND table_name = 'Usuarios'
         ) THEN
+
+          ALTER TABLE "Usuarios"
+          ADD COLUMN IF NOT EXISTS "nombre" VARCHAR(120);
+
+          ALTER TABLE "Usuarios"
+          ADD COLUMN IF NOT EXISTS "activo" BOOLEAN DEFAULT true;
+
+          UPDATE "Usuarios"
+          SET "activo" = true
+          WHERE "activo" IS NULL;
+
           IF EXISTS (
             SELECT 1
             FROM information_schema.columns
-            WHERE table_name = 'Usuarios'
+            WHERE table_schema = 'public'
+            AND table_name = 'Usuarios'
+            AND column_name = 'username'
+          ) THEN
+
+            UPDATE "Usuarios"
+            SET "username" = CONCAT('usuario_', LEFT("id"::text, 8))
+            WHERE "username" IS NULL
+               OR TRIM("username") = '';
+
+            WITH duplicados AS (
+              SELECT
+                "id",
+                "username",
+                ROW_NUMBER() OVER (
+                  PARTITION BY LOWER(TRIM("username"))
+                  ORDER BY "createdAt" ASC NULLS LAST, "id" ASC
+                ) AS rn
+              FROM "Usuarios"
+              WHERE "username" IS NOT NULL
+            )
+            UPDATE "Usuarios" u
+            SET "username" = CONCAT(d."username", '_', d.rn)
+            FROM duplicados d
+            WHERE u."id" = d."id"
+            AND d.rn > 1;
+
+          END IF;
+
+          IF EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            AND table_name = 'Usuarios'
             AND column_name = 'rol'
           ) THEN
             ALTER TABLE "Usuarios" ALTER COLUMN "rol" DROP DEFAULT;
             ALTER TABLE "Usuarios" ALTER COLUMN "rol" TYPE VARCHAR(50) USING "rol"::text;
             ALTER TABLE "Usuarios" ALTER COLUMN "rol" SET DEFAULT 'RECEPCION';
+
+            UPDATE "Usuarios"
+            SET "rol" = 'RECEPCION'
+            WHERE "rol" IS NULL
+               OR TRIM("rol") = '';
           END IF;
+
         END IF;
       END $$;
     `);
 
-    console.log("✅ Columna Usuarios.rol preparada como VARCHAR");
+    console.log("✅ Base Usuarios preparada para roles");
   } catch (error) {
-    console.warn("⚠️ No se pudo preparar Usuarios.rol:", error.message);
+    console.warn("⚠️ No se pudo preparar Usuarios:", error.message);
   }
 };
+
+// ====================== CREAR / ACTUALIZAR OWNER ======================
 
 const crearUsuarioMaestro = async () => {
   try {
@@ -312,6 +433,8 @@ const crearUsuarioMaestro = async () => {
   }
 };
 
+// ====================== INICIAR SERVIDOR ======================
+
 const startServer = async () => {
   try {
     await prepararBaseUsuarios();
@@ -327,6 +450,7 @@ const startServer = async () => {
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 SERVIDOR ESCUCHANDO EN PUERTO ${PORT}`);
+
       console.log("📡 Endpoints activos:");
       console.log("   /");
       console.log("   /api/health");
