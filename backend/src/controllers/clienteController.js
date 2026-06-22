@@ -3,9 +3,27 @@ const { Cliente, Vehiculo, OrdenTrabajo } = require("../models");
 const normalizarCategoria = (categoria) => {
   const valor = String(categoria || "NORMAL").trim().toUpperCase();
 
-  const permitidas = ["NORMAL", "VIP", "FLOTA", "MAYORISTA", "PROVEEDOR", "INTERNO"];
+  const permitidas = [
+    "NORMAL",
+    "VIP",
+    "FLOTA",
+    "MAYORISTA",
+    "PROVEEDOR",
+    "INTERNO",
+  ];
 
   return permitidas.includes(valor) ? valor : "NORMAL";
+};
+
+const limpiarPayloadCliente = (body = {}) => {
+  return {
+    nombre: body.nombre || "",
+    telefono: body.telefono || null,
+    email: body.email || null,
+    direccion: body.direccion || null,
+    categoria_cliente: normalizarCategoria(body.categoria_cliente),
+    nota_cliente: body.nota_cliente || null,
+  };
 };
 
 const obtenerClientes = async (req, res) => {
@@ -14,7 +32,13 @@ const obtenerClientes = async (req, res) => {
       include: [
         {
           model: Vehiculo,
-          include: [OrdenTrabajo],
+          required: false,
+          include: [
+            {
+              model: OrdenTrabajo,
+              required: false,
+            },
+          ],
         },
       ],
       order: [["nombre", "ASC"]],
@@ -26,16 +50,22 @@ const obtenerClientes = async (req, res) => {
 
     res.status(500).json({
       error: error.message,
+      detalle: error.errors?.map((e) => e.message) || null,
     });
   }
 };
 
 const crearCliente = async (req, res) => {
   try {
-    const nuevoCliente = await Cliente.create({
-      ...req.body,
-      categoria_cliente: normalizarCategoria(req.body.categoria_cliente),
-    });
+    const payload = limpiarPayloadCliente(req.body);
+
+    if (!payload.nombre || !payload.nombre.trim()) {
+      return res.status(400).json({
+        error: "El nombre del cliente es obligatorio",
+      });
+    }
+
+    const nuevoCliente = await Cliente.create(payload);
 
     res.status(201).json(nuevoCliente);
   } catch (error) {
@@ -58,11 +88,10 @@ const actualizarCliente = async (req, res) => {
       });
     }
 
-    const payload = { ...req.body };
-
-    if (Object.prototype.hasOwnProperty.call(payload, "categoria_cliente")) {
-      payload.categoria_cliente = normalizarCategoria(payload.categoria_cliente);
-    }
+    const payload = limpiarPayloadCliente({
+      ...cliente.toJSON(),
+      ...req.body,
+    });
 
     await cliente.update(payload);
 
@@ -83,7 +112,13 @@ const eliminarCliente = async (req, res) => {
       include: [
         {
           model: Vehiculo,
-          include: [OrdenTrabajo],
+          required: false,
+          include: [
+            {
+              model: OrdenTrabajo,
+              required: false,
+            },
+          ],
         },
       ],
     });
@@ -94,7 +129,8 @@ const eliminarCliente = async (req, res) => {
       });
     }
 
-    const tieneVehiculos = Array.isArray(cliente.Vehiculos) && cliente.Vehiculos.length > 0;
+    const tieneVehiculos =
+      Array.isArray(cliente.Vehiculos) && cliente.Vehiculos.length > 0;
 
     if (tieneVehiculos) {
       return res.status(400).json({

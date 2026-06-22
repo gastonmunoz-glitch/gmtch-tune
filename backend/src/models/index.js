@@ -6,7 +6,6 @@ const ArchivoECU = require("./ArchivoECU");
 const FotoVehiculo = require("./FotoVehiculo");
 const Usuario = require("./Usuario");
 
-// Modelos opcionales
 let FileService = null;
 let Operador = null;
 
@@ -22,34 +21,29 @@ try {
   console.warn("⚠️ Modelo Operador no cargado:", error.message);
 }
 
-// ======================
-// RELACIONES CLIENTE / VEHÍCULO
-// ======================
-
+// Cliente / Vehículo
 Cliente.hasMany(Vehiculo, {
   foreignKey: "clienteId",
+  constraints: false,
 });
 
 Vehiculo.belongsTo(Cliente, {
   foreignKey: "clienteId",
+  constraints: false,
 });
 
-// ======================
-// RELACIONES VEHÍCULO / ÓRDENES
-// ======================
-
+// Vehículo / Orden
 Vehiculo.hasMany(OrdenTrabajo, {
   foreignKey: "vehiculoId",
+  constraints: false,
 });
 
 OrdenTrabajo.belongsTo(Vehiculo, {
   foreignKey: "vehiculoId",
+  constraints: false,
 });
 
-// ======================
-// RELACIONES ORDEN / DIAGNÓSTICO
-// ======================
-
+// Orden / Diagnóstico
 OrdenTrabajo.hasMany(Diagnostico, {
   foreignKey: "ordenTrabajoId",
   constraints: false,
@@ -60,10 +54,7 @@ Diagnostico.belongsTo(OrdenTrabajo, {
   constraints: false,
 });
 
-// ======================
-// RELACIONES ORDEN / ARCHIVOS ECU
-// ======================
-
+// Orden / Archivo ECU
 OrdenTrabajo.hasMany(ArchivoECU, {
   foreignKey: "ordenTrabajoId",
   constraints: false,
@@ -74,10 +65,7 @@ ArchivoECU.belongsTo(OrdenTrabajo, {
   constraints: false,
 });
 
-// ======================
-// RELACIONES ORDEN / FOTOS
-// ======================
-
+// Orden / Fotos
 OrdenTrabajo.hasMany(FotoVehiculo, {
   foreignKey: "ordenTrabajoId",
   constraints: false,
@@ -88,21 +76,8 @@ FotoVehiculo.belongsTo(OrdenTrabajo, {
   constraints: false,
 });
 
-// ======================
-// RELACIONES OPCIONALES FILE SERVICE
-// ======================
-
+// FileService opcional
 if (FileService) {
-  Usuario.hasMany(FileService, {
-    foreignKey: "usuarioId",
-    constraints: false,
-  });
-
-  FileService.belongsTo(Usuario, {
-    foreignKey: "usuarioId",
-    constraints: false,
-  });
-
   OrdenTrabajo.hasMany(FileService, {
     foreignKey: "ordenTrabajoId",
     constraints: false,
