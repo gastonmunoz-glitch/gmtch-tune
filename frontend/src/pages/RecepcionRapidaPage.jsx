@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api from "../services/api";
 
 const ESTADO_ORDEN_INICIAL = "RECEPCIONADO";
@@ -71,8 +71,11 @@ const calcularPasoInicial = () => {
 };
 
 function RecepcionRapidaPage() {
+  const fotosInputRef = useRef(null);
+
   const [paso, setPaso] = useState(() => calcularPasoInicial());
   const [cargando, setCargando] = useState(false);
+  const [aviso, setAviso] = useState(null);
 
   const [cliente, setCliente] = useState({ ...ESTADO_INICIAL_CLIENTE });
   const [clienteId, setClienteId] = useState(() => leerStorage("gmtch_clienteId"));
@@ -91,11 +94,22 @@ function RecepcionRapidaPage() {
     escribirStorage("gmtch_paso_recepcion", paso);
   }, [paso]);
 
+  const mostrarAviso = (tipo, mensaje) => {
+    setAviso({ tipo, mensaje });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const limpiarAviso = () => {
+    setAviso(null);
+  };
+
   const siguiente = () => {
+    limpiarAviso();
     setPaso((p) => Math.min(5, p + 1));
   };
 
   const anterior = () => {
+    limpiarAviso();
     setPaso((p) => Math.max(1, p - 1));
   };
 
@@ -161,17 +175,41 @@ function RecepcionRapidaPage() {
     return ordenId || leerStorage("gmtch_ordenId") || null;
   };
 
+  const mensajeErrorAmigable = (err, entidad) => {
+    const status = err.response?.status;
+    const data = err.response?.data;
+    const mensaje = String(
+      data?.error || data?.message || err.message || "Error desconocido"
+    );
+
+    const texto = mensaje.toLowerCase();
+
+    if (
+      status === 409 ||
+      texto.includes("duplicate") ||
+      texto.includes("unique") ||
+      texto.includes("ya existe") ||
+      texto.includes("registrado") ||
+      texto.includes("validation error")
+    ) {
+      return `${entidad} ya existe o hay un dato duplicado en la base. Revisa si ya fue registrado antes.`;
+    }
+
+    return mensaje;
+  };
+
   const guardarCliente = async () => {
     const nombre = String(cliente.nombre ?? "").trim();
     const telefono = String(cliente.telefono ?? "").trim();
 
     if (!nombre) {
-      alert("Debe ingresar nombre del cliente.");
+      mostrarAviso("error", "Debe ingresar nombre del cliente.");
       return;
     }
 
     try {
       setCargando(true);
+      limpiarAviso();
 
       const payload = {
         nombre,
@@ -184,7 +222,7 @@ function RecepcionRapidaPage() {
       const nuevoClienteId = obtenerClienteId(res.data);
 
       if (!nuevoClienteId) {
-        alert("Cliente guardado, pero el backend no devolvió el ID.");
+        mostrarAviso("error", "Cliente guardado, pero el backend no devolvió el ID.");
         console.error("Respuesta sin ID de cliente:", res.data);
         return;
       }
@@ -192,10 +230,11 @@ function RecepcionRapidaPage() {
       setClienteId(nuevoClienteId);
       escribirStorage("gmtch_clienteId", nuevoClienteId);
 
-      siguiente();
+      mostrarAviso("ok", "Cliente guardado correctamente. Continúa con el vehículo.");
+      setPaso(2);
     } catch (err) {
       console.error("ERROR AL GUARDAR CLIENTE:", err.response?.data || err.message);
-      alert("Error al guardar cliente: " + (err.response?.data?.error || err.message));
+      mostrarAviso("error", mensajeErrorAmigable(err, "Cliente"));
     } finally {
       setCargando(false);
     }
@@ -211,17 +250,18 @@ function RecepcionRapidaPage() {
     const vin = String(vehiculo.vin ?? "").trim();
 
     if (!idClienteActual) {
-      alert("Falta cliente del paso 1.");
+      mostrarAviso("error", "Falta cliente del paso 1.");
       return;
     }
 
     if (!patente || !marca || !modelo) {
-      alert("Debe completar Patente, Marca y Modelo.");
+      mostrarAviso("error", "Debe completar Patente, Marca y Modelo.");
       return;
     }
 
     try {
       setCargando(true);
+      limpiarAviso();
 
       const payload = {
         patente,
@@ -239,7 +279,7 @@ function RecepcionRapidaPage() {
       const nuevoVehiculoId = obtenerVehiculoId(res.data);
 
       if (!nuevoVehiculoId) {
-        alert("Vehículo guardado, pero el backend no devolvió el ID.");
+        mostrarAviso("error", "Vehículo guardado, pero el backend no devolvió el ID.");
         console.error("Respuesta sin ID de vehículo:", res.data);
         return;
       }
@@ -247,10 +287,11 @@ function RecepcionRapidaPage() {
       setVehiculoId(nuevoVehiculoId);
       escribirStorage("gmtch_vehiculoId", nuevoVehiculoId);
 
-      siguiente();
+      mostrarAviso("ok", "Vehículo guardado correctamente. Continúa con servicio y síntomas.");
+      setPaso(3);
     } catch (err) {
       console.error("ERROR AL GUARDAR VEHÍCULO:", err.response?.data || err.message);
-      alert("Error al guardar vehículo: " + (err.response?.data?.error || err.message));
+      mostrarAviso("error", mensajeErrorAmigable(err, "Vehículo"));
     } finally {
       setCargando(false);
     }
@@ -290,17 +331,18 @@ function RecepcionRapidaPage() {
     const montoTotal = limpiarNumero(orden.monto_total);
 
     if (!idVehiculoActual) {
-      alert("Falta vehículo.");
+      mostrarAviso("error", "Falta vehículo.");
       return;
     }
 
     if (!kilometraje || !servicioSolicitado || !sintomasCliente || !montoTotal) {
-      alert("Complete kilometraje, servicio solicitado, síntomas y monto.");
+      mostrarAviso("error", "Complete kilometraje, servicio solicitado, síntomas y monto.");
       return;
     }
 
     try {
       setCargando(true);
+      limpiarAviso();
 
       const payload = {
         vehiculoId: idParaBackend(idVehiculoActual),
@@ -320,7 +362,7 @@ function RecepcionRapidaPage() {
       const nuevaOrdenId = obtenerOrdenId(res.data);
 
       if (!nuevaOrdenId) {
-        alert("La orden se guardó, pero no se recibió el ID. Revisa la consola.");
+        mostrarAviso("error", "La orden se guardó, pero no se recibió el ID.");
         console.error("Respuesta sin ID de orden:", res.data);
         return;
       }
@@ -328,10 +370,11 @@ function RecepcionRapidaPage() {
       setOrdenId(nuevaOrdenId);
       escribirStorage("gmtch_ordenId", nuevaOrdenId);
 
-      siguiente();
+      mostrarAviso("ok", "Orden creada correctamente. Continúa con las fotos de respaldo.");
+      setPaso(4);
     } catch (err) {
       console.error("ERROR AL GUARDAR ORDEN:", err.response?.data || err.message);
-      alert("Error al guardar orden: " + (err.response?.data?.error || err.message));
+      mostrarAviso("error", mensajeErrorAmigable(err, "Orden"));
     } finally {
       setCargando(false);
     }
@@ -341,7 +384,7 @@ function RecepcionRapidaPage() {
     const idOrdenActual = obtenerOrdenActual();
 
     if (!idOrdenActual) {
-      alert("Falta orden. Vuelve al paso 3 y guarda la orden nuevamente.");
+      mostrarAviso("error", "Falta orden. Vuelve al paso 3 y guarda la orden nuevamente.");
       return false;
     }
 
@@ -377,13 +420,19 @@ function RecepcionRapidaPage() {
       await api.put(`/ordenes/${idOrdenActual}`, payload);
       return true;
     } catch (errorPut) {
-      console.warn("No se pudo actualizar por PUT, intentando PATCH:", errorPut.response?.data || errorPut.message);
+      console.warn(
+        "No se pudo actualizar por PUT, intentando PATCH:",
+        errorPut.response?.data || errorPut.message
+      );
 
       try {
         await api.patch(`/ordenes/${idOrdenActual}`, payload);
         return true;
       } catch (errorPatch) {
-        console.warn("No se pudo actualizar estado por PATCH:", errorPatch.response?.data || errorPatch.message);
+        console.warn(
+          "No se pudo actualizar estado por PATCH:",
+          errorPatch.response?.data || errorPatch.message
+        );
         return false;
       }
     }
@@ -393,13 +442,13 @@ function RecepcionRapidaPage() {
     const idOrdenActual = obtenerOrdenActual();
 
     if (!idOrdenActual) {
-      alert("No hay orden activa para finalizar.");
+      mostrarAviso("error", "No hay orden activa para finalizar.");
       return;
     }
 
     if (!fotosArchivos.length) {
       const continuar = window.confirm(
-        "No hay fotos seleccionadas. ¿Deseas finalizar la recepción sin fotos?"
+        "No hay fotos seleccionadas. Lo recomendado es subir respaldo exterior e interior. ¿Deseas finalizar sin fotos?"
       );
 
       if (!continuar) {
@@ -409,6 +458,7 @@ function RecepcionRapidaPage() {
 
     try {
       setCargando(true);
+      limpiarAviso();
 
       await subirFotosSeleccionadas();
 
@@ -425,7 +475,7 @@ function RecepcionRapidaPage() {
       limpiarFlujo();
     } catch (err) {
       console.error("ERROR AL FINALIZAR RECEPCIÓN:", err.response?.data || err.message);
-      alert("Error al finalizar recepción: " + (err.response?.data?.error || err.message));
+      mostrarAviso("error", mensajeErrorAmigable(err, "Recepción"));
     } finally {
       setCargando(false);
     }
@@ -433,6 +483,7 @@ function RecepcionRapidaPage() {
 
   const limpiarFlujo = () => {
     setPaso(1);
+    setAviso(null);
 
     setCliente({ ...ESTADO_INICIAL_CLIENTE });
     setClienteId(null);
@@ -449,6 +500,25 @@ function RecepcionRapidaPage() {
     borrarStorage("gmtch_vehiculoId");
     borrarStorage("gmtch_ordenId");
     borrarStorage("gmtch_paso_recepcion");
+  };
+
+  const abrirSelectorFotos = () => {
+    fotosInputRef.current?.click();
+  };
+
+  const renderAviso = () => {
+    if (!aviso) return null;
+
+    const estilos =
+      aviso.tipo === "ok"
+        ? "bg-green-100 border-green-600 text-green-900"
+        : "bg-red-100 border-red-600 text-red-900";
+
+    return (
+      <div className={`mb-6 border-4 p-4 font-black uppercase text-xs ${estilos}`}>
+        {aviso.mensaje}
+      </div>
+    );
   };
 
   const renderPaso = () => {
@@ -748,11 +818,11 @@ function RecepcionRapidaPage() {
 
       case 4:
         return (
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div>
               <h2 className="font-black text-lg uppercase">4. Fotos de Ingreso</h2>
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Fotos de respaldo de recepción. Puedes seleccionar varias.
+                Respaldo visual del estado del vehículo al momento de recepción.
               </p>
             </div>
 
@@ -760,16 +830,57 @@ function RecepcionRapidaPage() {
               Orden actual: {obtenerOrdenActual() || "No detectada"}
             </div>
 
+            <div className="bg-blue-50 border-4 border-blue-600 p-5">
+              <h3 className="text-sm font-black uppercase mb-3">
+                Guía rápida de fotos recomendadas
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-bold uppercase">
+                <div className="bg-white border border-black p-3">✅ Frente completo</div>
+                <div className="bg-white border border-black p-3">✅ Parte trasera completa</div>
+                <div className="bg-white border border-black p-3">✅ Lateral izquierdo</div>
+                <div className="bg-white border border-black p-3">✅ Lateral derecho</div>
+                <div className="bg-white border border-black p-3">✅ Tablero con KM</div>
+                <div className="bg-white border border-black p-3">✅ Testigos encendidos</div>
+                <div className="bg-white border border-black p-3">✅ Rayones, golpes o detalles</div>
+                <div className="bg-white border border-black p-3">✅ Motor / zona ECU si aplica</div>
+              </div>
+
+              <p className="text-[11px] font-bold uppercase mt-4 leading-relaxed">
+                Estas fotos sirven como respaldo si el cliente reclama golpes, rayones,
+                daños previos o diferencias al momento de entrega.
+              </p>
+            </div>
+
             <input
+              ref={fotosInputRef}
               type="file"
               accept="image/*"
               multiple
-              className="w-full text-xs border border-black p-3"
+              className="hidden"
               onChange={(e) => setFotosArchivos(Array.from(e.target.files || []))}
             />
 
-            <div className="bg-slate-50 border border-black p-4 text-xs font-bold uppercase">
-              Fotos seleccionadas: {fotosArchivos.length}
+            <button
+              type="button"
+              onClick={abrirSelectorFotos}
+              className="w-full bg-black text-white border-4 border-black py-5 px-6 font-black uppercase text-sm hover:bg-blue-600 transition"
+            >
+              📸 Seleccionar Fotos de Recepción
+            </button>
+
+            <div className="bg-slate-50 border-4 border-black p-4">
+              <p className="text-xs font-black uppercase">
+                Fotos seleccionadas: {fotosArchivos.length}
+              </p>
+
+              {fotosArchivos.length > 0 && (
+                <ul className="mt-3 space-y-1 text-[11px] font-bold text-gray-600">
+                  {fotosArchivos.map((foto, index) => (
+                    <li key={`${foto.name}-${index}`}>• {foto.name}</li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div className="flex justify-between gap-4">
@@ -853,6 +964,8 @@ function RecepcionRapidaPage() {
           Ingreso inicial. Scanner, lectura ECU y mecánica se asignan después.
         </p>
       </div>
+
+      {renderAviso()}
 
       <div className="flex justify-between mb-8 gap-2">
         {etiquetas.map((label, idx) => {
