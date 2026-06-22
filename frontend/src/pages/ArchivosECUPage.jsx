@@ -88,10 +88,20 @@ const HERRAMIENTAS = [
   "OTRA",
 ];
 
+const FILTROS = [
+  "TODOS",
+  "ORIGINAL_CARGADO",
+  "NOTIFICADO_MASTER",
+  "MODIFICADO_LISTO",
+  "NOTIFICADO_SLAVE",
+  "REQUIERE_CORRECCION",
+  "FINALIZADO",
+];
+
 const normalizarTexto = (valor) => String(valor ?? "").trim();
 
 const textoEstado = (estado) => {
-  return String(estado || "PENDIENTE_TUNER").replace(/_/g, " ");
+  return String(estado || "ORIGINAL_CARGADO").replace(/_/g, " ");
 };
 
 const obtenerVehiculoOrden = (orden) => {
@@ -121,6 +131,21 @@ const obtenerTituloOrden = (orden) => {
   return `${patente} | ${marca} ${modelo} ${anio} | ${clienteNombre} | Orden #${orden.id}`;
 };
 
+const normalizarVersiones = (valor) => {
+  if (Array.isArray(valor)) return valor;
+
+  if (typeof valor === "string") {
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+};
+
 function ArchivosECUPage() {
   const [archivos, setArchivos] = useState([]);
   const [ordenes, setOrdenes] = useState([]);
@@ -128,8 +153,12 @@ function ArchivosECUPage() {
 
   const [form, setForm] = useState({ ...ESTADO_INICIAL_FORM });
   const [archivoOriginal, setArchivoOriginal] = useState(null);
+
   const [archivosModificados, setArchivosModificados] = useState({});
   const [instruccionesTuner, setInstruccionesTuner] = useState({});
+  const [marcarFinal, setMarcarFinal] = useState({});
+  const [correcciones, setCorrecciones] = useState({});
+
   const [filtro, setFiltro] = useState("TODOS");
   const [cargando, setCargando] = useState(false);
   const [aviso, setAviso] = useState(null);
@@ -231,8 +260,13 @@ function ArchivosECUPage() {
 
   const estadoArchivo = (arq) => {
     if (arq.estado) return arq.estado;
-    if (arq.archivo_modificado) return "MODIFICADO_LISTO";
-    return "PENDIENTE_TUNER";
+
+    const versiones = normalizarVersiones(arq.versiones_modificadas);
+
+    if (arq.correccion_pendiente) return "REQUIERE_CORRECCION";
+    if (versiones.length > 0 || arq.archivo_modificado) return "MODIFICADO_LISTO";
+
+    return "ORIGINAL_CARGADO";
   };
 
   const archivosFiltrados = archivos.filter((arq) => {
@@ -240,12 +274,16 @@ function ArchivosECUPage() {
     return estadoArchivo(arq) === filtro;
   });
 
-  const totalPendientes = archivos.filter(
-    (a) => estadoArchivo(a) === "PENDIENTE_TUNER"
+  const totalPendientes = archivos.filter((a) =>
+    ["ORIGINAL_CARGADO", "NOTIFICADO_MASTER"].includes(estadoArchivo(a))
   ).length;
 
-  const totalListos = archivos.filter(
-    (a) => estadoArchivo(a) === "MODIFICADO_LISTO"
+  const totalListos = archivos.filter((a) =>
+    ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE"].includes(estadoArchivo(a))
+  ).length;
+
+  const totalCorrecciones = archivos.filter(
+    (a) => estadoArchivo(a) === "REQUIERE_CORRECCION"
   ).length;
 
   const urlArchivo = (url) => {
@@ -316,7 +354,7 @@ function ArchivosECUPage() {
       fd.append("version_software", form.version_software);
       fd.append("observaciones", form.observaciones);
       fd.append("notas_operador", form.notas_operador);
-      fd.append("estado", "PENDIENTE_TUNER");
+      fd.append("estado", "ORIGINAL_CARGADO");
 
       await api.post("/archivos-ecu", fd);
 
@@ -326,10 +364,22 @@ function ArchivosECUPage() {
     } catch (err) {
       console.error("ERROR CREANDO FILE SERVICE:", err.response?.data || err.message);
 
+      const data = err.response?.data;
+
+      if (data?.bloqueo === "DIAGNOSTICO_OBLIGATORIO") {
+        mostrarAviso(
+          "error",
+          `No se puede enviar a File Service. Falta: ${(data.faltantes || []).join(
+            " · "
+          )}`
+        );
+        return;
+      }
+
       mostrarAviso(
         "error",
-        err.response?.data?.error ||
-          err.response?.data?.message ||
+        data?.error ||
+          data?.message ||
           "No se pudo crear la solicitud File Service."
       );
     } finally {
@@ -351,7 +401,24 @@ function ArchivosECUPage() {
     }));
   };
 
-  const handleInyectarModificado = async (id) => {
+  const handleMarcarFinal = (id, valor) => {
+    setMarcarFinal((prev) => ({
+      ...prev,
+      [id]: valor,
+    }));
+  };
+
+  const handleCorreccion = (id, campo, valor) => {
+    setCorrecciones((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const handleSubirModificado = async (id) => {
     const fileMod = archivosModificados[id];
 
     if (!fileMod) {
@@ -367,11 +434,11 @@ function ArchivosECUPage() {
       fd.append("archivo", fileMod);
       fd.append("instrucciones_tuner", instruccionesTuner[id] || "");
       fd.append("observaciones", instruccionesTuner[id] || "");
-      fd.append("estado", "MODIFICADO_LISTO");
+      fd.append("es_final", marcarFinal[id] ? "true" : "false");
 
       await api.post(`/archivos-ecu/${id}/modificado`, fd);
 
-      mostrarAviso("ok", "Archivo modificado enviado al operador ECU.");
+      mostrarAviso("ok", "Archivo modificado cargado como nueva versión.");
 
       setArchivosModificados((prev) => ({
         ...prev,
@@ -383,10 +450,126 @@ function ArchivosECUPage() {
         [id]: "",
       }));
 
+      setMarcarFinal((prev) => ({
+        ...prev,
+        [id]: false,
+      }));
+
       await recargarTodo();
     } catch (err) {
       console.error("Fallo en carga de archivo modificado:", err.response?.data || err.message);
-      mostrarAviso("error", "No se pudo subir el archivo modificado.");
+      mostrarAviso(
+        "error",
+        err.response?.data?.error || "No se pudo subir el archivo modificado."
+      );
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const handleNotificarMaster = async (arq) => {
+    try {
+      setCargando(true);
+
+      await api.post(`/archivos-ecu/${arq.id}/notificar-master`);
+
+      notificarWhatsAppMaster(arq);
+
+      mostrarAviso("ok", `Master notificado para File #${arq.id}.`);
+      await recargarTodo();
+    } catch (err) {
+      console.error("ERROR NOTIFICANDO MASTER:", err.response?.data || err.message);
+      mostrarAviso(
+        "error",
+        err.response?.data?.error || "No se pudo registrar notificación al Master."
+      );
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const handleNotificarSlave = async (arq) => {
+    try {
+      setCargando(true);
+
+      await api.post(`/archivos-ecu/${arq.id}/notificar-slave`);
+
+      notificarWhatsAppSlave(arq);
+
+      mostrarAviso("ok", `Slave / Operador ECU notificado para File #${arq.id}.`);
+      await recargarTodo();
+    } catch (err) {
+      console.error("ERROR NOTIFICANDO SLAVE:", err.response?.data || err.message);
+      mostrarAviso(
+        "error",
+        err.response?.data?.error || "No se pudo registrar notificación al Slave."
+      );
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const handleSolicitarCorreccion = async (arq) => {
+    const data = correcciones[arq.id] || {};
+    const dtc = normalizarTexto(data.dtc_post_escritura);
+    const obs = normalizarTexto(data.observacion_correccion);
+
+    if (!dtc && !obs) {
+      mostrarAviso(
+        "error",
+        "Debes indicar los DTC que quedaron o una observación para solicitar corrección."
+      );
+      return;
+    }
+
+    try {
+      setCargando(true);
+
+      await api.post(`/archivos-ecu/${arq.id}/solicitar-correccion`, {
+        dtc_post_escritura: dtc,
+        observacion_correccion: obs,
+      });
+
+      mostrarAviso("ok", `Corrección solicitada para File #${arq.id}.`);
+
+      setCorrecciones((prev) => ({
+        ...prev,
+        [arq.id]: {
+          dtc_post_escritura: "",
+          observacion_correccion: "",
+        },
+      }));
+
+      await recargarTodo();
+    } catch (err) {
+      console.error("ERROR SOLICITANDO CORRECCION:", err.response?.data || err.message);
+      mostrarAviso(
+        "error",
+        err.response?.data?.error || "No se pudo solicitar corrección."
+      );
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const handleFinalizar = async (arq) => {
+    const confirmar = window.confirm(`¿Marcar File Service #${arq.id} como FINALIZADO?`);
+
+    if (!confirmar) return;
+
+    try {
+      setCargando(true);
+
+      await api.patch(`/archivos-ecu/${arq.id}`, {
+        estado: "FINALIZADO",
+        correccion_pendiente: false,
+      });
+
+      mostrarAviso("ok", `File Service #${arq.id} finalizado.`);
+      await recargarTodo();
+    } catch (err) {
+      console.error("ERROR FINALIZANDO FILE:", err.response?.data || err.message);
+      mostrarAviso("error", "No se pudo finalizar el File Service.");
     } finally {
       setCargando(false);
     }
@@ -415,21 +598,60 @@ function ArchivosECUPage() {
     }
   };
 
-  const notificarWhatsApp = (arq) => {
+  const notificarWhatsAppMaster = (arq) => {
     const telefono = "56962267642";
+
+    const orden = arq.OrdenTrabajo || arq.orden || null;
+    const vehiculo = orden ? obtenerVehiculoOrden(orden) : null;
+    const cliente = orden ? obtenerClienteOrden(orden) : null;
 
     const texto = [
       "*SISTEMA GMTCH TUNE*",
       "---------------------------",
-      "✅ *NUEVO FILE SERVICE*",
+      "✅ *NUEVO FILE SERVICE PARA MASTER*",
       `*ID FILE:* #${arq.id}`,
       `*ID ORDEN:* #${arq.ordenId || arq.orden_id || "SIN ORDEN"}`,
+      `*PATENTE:* ${vehiculo?.patente || "No informada"}`,
+      `*CLIENTE:* ${cliente?.nombre || "No informado"}`,
       `*SERVICIO:* ${arq.tipo_servicio || "No informado"}`,
       `*ECU:* ${arq.marca_ecu || ""} ${arq.modelo_ecu || ""}`,
       `*MÉTODO:* ${arq.metodo_lectura || "No informado"}`,
+      `*HERRAMIENTA:* ${arq.herramienta_lectura || "No informada"}`,
       `*ESTADO:* ${estadoArchivo(arq)}`,
       "---------------------------",
       "_Favor procesar en estación master._",
+    ].join("\n");
+
+    const url = `https://api.whatsapp.com/send?phone=${telefono}&text=${encodeURIComponent(
+      texto
+    )}`;
+
+    window.open(url, "_blank");
+  };
+
+  const notificarWhatsAppSlave = (arq) => {
+    const telefono = "56962267642";
+
+    const versiones = normalizarVersiones(arq.versiones_modificadas);
+    const ultima = versiones[versiones.length - 1];
+
+    const orden = arq.OrdenTrabajo || arq.orden || null;
+    const vehiculo = orden ? obtenerVehiculoOrden(orden) : null;
+    const cliente = orden ? obtenerClienteOrden(orden) : null;
+
+    const texto = [
+      "*SISTEMA GMTCH TUNE*",
+      "---------------------------",
+      "📤 *ARCHIVO MODIFICADO LISTO PARA SLAVE / OPERADOR ECU*",
+      `*ID FILE:* #${arq.id}`,
+      `*ID ORDEN:* #${arq.ordenId || arq.orden_id || "SIN ORDEN"}`,
+      `*PATENTE:* ${vehiculo?.patente || "No informada"}`,
+      `*CLIENTE:* ${cliente?.nombre || "No informado"}`,
+      `*SERVICIO:* ${arq.tipo_servicio || "No informado"}`,
+      `*VERSIÓN:* ${ultima?.etiqueta || `MOD V${arq.ultima_version_modificada || 1}`}`,
+      `*INSTRUCCIONES:* ${arq.instrucciones_tuner || "Sin instrucciones adicionales"}`,
+      "---------------------------",
+      "_Favor descargar, escribir, borrar DTC y registrar resultado post escritura._",
     ].join("\n");
 
     const url = `https://api.whatsapp.com/send?phone=${telefono}&text=${encodeURIComponent(
@@ -455,17 +677,11 @@ function ArchivosECUPage() {
   };
 
   const badgeEstado = (estado) => {
-    if (estado === "MODIFICADO_LISTO") {
-      return "bg-green-600 text-white";
-    }
-
-    if (estado === "EN_PROCESO_TUNER") {
-      return "bg-yellow-500 text-black";
-    }
-
-    if (estado === "ENTREGADO_OPERADOR") {
-      return "bg-blue-600 text-white";
-    }
+    if (estado === "MODIFICADO_LISTO") return "bg-green-600 text-white";
+    if (estado === "NOTIFICADO_SLAVE") return "bg-blue-600 text-white";
+    if (estado === "NOTIFICADO_MASTER") return "bg-yellow-500 text-black";
+    if (estado === "REQUIERE_CORRECCION") return "bg-red-600 text-white";
+    if (estado === "FINALIZADO") return "bg-purple-700 text-white";
 
     return "bg-black text-white";
   };
@@ -527,11 +743,11 @@ function ArchivosECUPage() {
             </h1>
 
             <p className="text-blue-400 font-bold text-xs uppercase tracking-[.3em] mt-2">
-              Engineering Matrix · Original ECU → Tuner → Modificado → Operador ECU
+              Original ECU → Master/Tuner → MOD V1/V2/V3 → Slave/Operador ECU
             </p>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 text-center">
+          <div className="grid grid-cols-4 gap-4 text-center">
             <div className="border-2 border-gray-700 p-4">
               <p className="text-[10px] font-black text-gray-500 uppercase">
                 Total
@@ -552,6 +768,13 @@ function ArchivosECUPage() {
               </p>
               <p className="text-4xl font-black">{totalListos}</p>
             </div>
+
+            <div className="border-2 border-red-600 p-4">
+              <p className="text-[10px] font-black text-red-600 uppercase">
+                Corrección
+              </p>
+              <p className="text-4xl font-black">{totalCorrecciones}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -565,13 +788,12 @@ function ArchivosECUPage() {
           </h2>
 
           <p className="text-xs font-bold uppercase text-gray-500 mt-1">
-            El técnico ECU selecciona la orden por patente o último ingreso. No debe escribir el ID manualmente.
+            Antes de enviar a File Service, la orden debe tener diagnóstico obligatorio con scanner y DTC.
           </p>
         </div>
 
         <div className="bg-yellow-50 border-2 border-yellow-500 p-4 mb-6 text-xs font-bold uppercase leading-relaxed">
-          Uso sujeto a normativa aplicable y alcance autorizado del servicio. El técnico ECU define el método de lectura:
-          OBD, BENCH, BOOT o ECU retirada. El mecánico no toma esa decisión; solo ejecuta instrucciones asignadas.
+          Si falta foto scanner, DTC escritos o marca SIN DTC, el sistema bloqueará el envío al File Service.
         </div>
 
         <div className="border-4 border-black p-5 mb-6 bg-slate-50">
@@ -731,7 +953,7 @@ function ArchivosECUPage() {
 
           <textarea
             className="border border-black p-3 w-full font-bold lg:col-span-3"
-            placeholder="Notas del operador ECU para el tuner. Ej: DTC presentes, DPF vaciado físicamente, lectura OBD ok, sin catalizador, requiere urgencia..."
+            placeholder="Notas del operador ECU para el tuner. Ej: DTC presentes, lectura estable, método usado, requisitos del trabajo..."
             value={form.notas_operador}
             onChange={(e) => actualizarForm("notas_operador", e.target.value)}
           />
@@ -769,7 +991,7 @@ function ArchivosECUPage() {
             disabled={cargando}
             className="bg-black text-white px-8 py-4 font-black uppercase text-xs disabled:bg-gray-400"
           >
-            {cargando ? "Guardando..." : "Enviar a Tuner"}
+            {cargando ? "Guardando..." : "Enviar a Master / Tuner"}
           </button>
 
           <button
@@ -786,25 +1008,23 @@ function ArchivosECUPage() {
         <div>
           <h2 className="text-2xl font-black uppercase">Matriz de archivos</h2>
           <p className="text-xs font-bold uppercase text-gray-500">
-            Seguimiento de solicitudes activas.
+            Seguimiento de versiones, correcciones y notificaciones.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {["TODOS", "PENDIENTE_TUNER", "EN_PROCESO_TUNER", "MODIFICADO_LISTO"].map(
-            (item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setFiltro(item)}
-                className={`px-4 py-2 border-2 border-black font-black text-[10px] uppercase ${
-                  filtro === item ? "bg-black text-white" : "bg-white text-black"
-                }`}
-              >
-                {textoEstado(item)}
-              </button>
-            )
-          )}
+          {FILTROS.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setFiltro(item)}
+              className={`px-4 py-2 border-2 border-black font-black text-[10px] uppercase ${
+                filtro === item ? "bg-black text-white" : "bg-white text-black"
+              }`}
+            >
+              {textoEstado(item)}
+            </button>
+          ))}
 
           <button
             type="button"
@@ -829,6 +1049,8 @@ function ArchivosECUPage() {
             const orden = arq.OrdenTrabajo || arq.orden || null;
             const vehiculo = orden ? obtenerVehiculoOrden(orden) : null;
             const cliente = orden ? obtenerClienteOrden(orden) : null;
+            const versiones = normalizarVersiones(arq.versiones_modificadas);
+            const ultimaVersion = versiones[versiones.length - 1] || null;
 
             return (
               <div
@@ -859,6 +1081,12 @@ function ArchivosECUPage() {
                           {arq.prioridad}
                         </span>
                       )}
+
+                      {ultimaVersion && (
+                        <span className="bg-green-600 text-white px-3 py-1 text-[10px] font-black uppercase">
+                          {ultimaVersion.etiqueta || `MOD V${ultimaVersion.version}`}
+                        </span>
+                      )}
                     </div>
 
                     <h2 className="text-2xl font-black text-black uppercase">
@@ -881,10 +1109,29 @@ function ArchivosECUPage() {
                   <div className="flex flex-col md:flex-row gap-2">
                     <button
                       type="button"
-                      onClick={() => notificarWhatsApp(arq)}
-                      className="bg-green-500 text-black px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black hover:text-white transition"
+                      onClick={() => handleNotificarMaster(arq)}
+                      disabled={cargando}
+                      className="bg-green-500 text-black px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black hover:text-white transition disabled:bg-gray-300"
                     >
-                      📲 Notificar Máster
+                      📲 Notificar Master
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleNotificarSlave(arq)}
+                      disabled={cargando || !arq.archivo_modificado}
+                      className="bg-blue-600 text-white px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black transition disabled:bg-gray-300 disabled:text-gray-500"
+                    >
+                      📤 Notificar Slave
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleFinalizar(arq)}
+                      disabled={cargando || !arq.archivo_modificado}
+                      className="bg-purple-700 text-white px-4 py-3 border-2 border-black font-black text-[10px] uppercase hover:bg-black transition disabled:bg-gray-300 disabled:text-gray-500"
+                    >
+                      ✅ Finalizar
                     </button>
 
                     <button
@@ -921,6 +1168,20 @@ function ArchivosECUPage() {
                           "Sin notas registradas."}
                       </p>
                     </div>
+
+                    {arq.notificado_master_at && (
+                      <div className="bg-green-50 border-2 border-green-600 p-3 text-[10px] font-black uppercase">
+                        Master notificado por {arq.notificado_master_por || "sistema"} ·{" "}
+                        {new Date(arq.notificado_master_at).toLocaleString()}
+                      </div>
+                    )}
+
+                    {arq.notificado_slave_at && (
+                      <div className="bg-blue-50 border-2 border-blue-600 p-3 text-[10px] font-black uppercase">
+                        Slave notificado por {arq.notificado_slave_por || "sistema"} ·{" "}
+                        {new Date(arq.notificado_slave_at).toLocaleString()}
+                      </div>
+                    )}
                   </div>
 
                   <div className="p-6 space-y-5">
@@ -948,6 +1209,57 @@ function ArchivosECUPage() {
                         </p>
                       )}
                     </div>
+
+                    <div className="bg-white border-4 border-black p-5">
+                      <h4 className="text-xs font-black uppercase mb-3">
+                        Historial de versiones modificadas
+                      </h4>
+
+                      {versiones.length === 0 ? (
+                        <p className="text-xs font-black uppercase text-gray-400">
+                          Aún no hay MOD cargados.
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          {versiones.map((version) => (
+                            <div
+                              key={`${arq.id}-${version.version}-${version.fecha}`}
+                              className="border-2 border-green-600 bg-green-50 p-3"
+                            >
+                              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-black uppercase text-green-800">
+                                    {version.etiqueta || `MOD V${version.version}`}
+                                  </p>
+
+                                  <p className="text-[10px] font-bold uppercase text-gray-600">
+                                    Cargado por {version.cargado_por || "sistema"} ·{" "}
+                                    {version.fecha
+                                      ? new Date(version.fecha).toLocaleString()
+                                      : "sin fecha"}
+                                  </p>
+                                </div>
+
+                                <a
+                                  href={urlArchivo(version.archivo)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="bg-green-600 text-white px-4 py-2 font-black text-[10px] uppercase text-center"
+                                >
+                                  Descargar
+                                </a>
+                              </div>
+
+                              {version.instrucciones_tuner && (
+                                <p className="text-xs font-bold mt-2 whitespace-pre-wrap">
+                                  {version.instrucciones_tuner}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="p-6 bg-slate-50 space-y-5">
@@ -955,11 +1267,11 @@ function ArchivosECUPage() {
                       Salida: Modificado Tuner
                     </h3>
 
-                    {arq.archivo_modificado ? (
+                    {arq.archivo_modificado && (
                       <div className="space-y-5">
                         <div className="bg-green-100 p-8 border-4 border-green-600 text-center">
                           <p className="text-green-800 font-black text-xl mb-6 uppercase italic tracking-tighter">
-                            ✅ Listo para escritura ECU
+                            ✅ Última versión lista para escritura ECU
                           </p>
 
                           <a
@@ -968,7 +1280,7 @@ function ArchivosECUPage() {
                             rel="noreferrer"
                             className="bg-green-600 text-white px-8 py-4 font-black text-sm uppercase hover:bg-black transition-all shadow-lg inline-block"
                           >
-                            Descargar Modificado
+                            Descargar último modificado
                           </a>
                         </div>
 
@@ -984,43 +1296,105 @@ function ArchivosECUPage() {
                           </p>
                         </div>
                       </div>
-                    ) : (
-                      <div className="space-y-5 bg-white p-5 border-4 border-black">
-                        <div className="space-y-2">
-                          <label className="block text-xs font-black text-black uppercase tracking-tighter italic">
-                            Seleccionar archivo modificado:
-                          </label>
-
-                          <input
-                            type="file"
-                            className="w-full border-2 border-black p-4 text-xs font-black bg-gray-50"
-                            onChange={(e) =>
-                              handleArchivoModificado(arq.id, e.target.files?.[0] || null)
-                            }
-                          />
-                        </div>
-
-                        <textarea
-                          className="w-full border-2 border-black p-3 text-xs font-bold"
-                          placeholder="Instrucciones para operador ECU. Ej: escribir por OBD, borrar DTC, contacto estable, no cortar corriente..."
-                          value={instruccionesTuner[arq.id] || ""}
-                          onChange={(e) => handleInstrucciones(arq.id, e.target.value)}
-                        />
-
-                        <button
-                          type="button"
-                          onClick={() => handleInyectarModificado(arq.id)}
-                          disabled={cargando}
-                          className={`w-full py-5 font-black uppercase text-sm shadow-2xl transition-all ${
-                            cargando
-                              ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                              : "bg-black text-white hover:bg-green-600"
-                          }`}
-                        >
-                          {cargando ? "Procesando..." : "Subir Modificado"}
-                        </button>
-                      </div>
                     )}
+
+                    <div className="space-y-5 bg-white p-5 border-4 border-black">
+                      <div className="bg-yellow-50 border-2 border-yellow-500 p-3 text-[10px] font-black uppercase">
+                        Puedes subir MOD V1, V2, V3 o final. No reemplaza el historial.
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-xs font-black text-black uppercase tracking-tighter italic">
+                          Seleccionar nuevo archivo modificado:
+                        </label>
+
+                        <input
+                          type="file"
+                          className="w-full border-2 border-black p-4 text-xs font-black bg-gray-50"
+                          onChange={(e) =>
+                            handleArchivoModificado(arq.id, e.target.files?.[0] || null)
+                          }
+                        />
+                      </div>
+
+                      <textarea
+                        className="w-full border-2 border-black p-3 text-xs font-bold"
+                        placeholder="Instrucciones para operador ECU. Ej: escribir por OBD, borrar DTC, contacto estable, no cortar corriente..."
+                        value={instruccionesTuner[arq.id] || ""}
+                        onChange={(e) => handleInstrucciones(arq.id, e.target.value)}
+                      />
+
+                      <label className="flex items-center gap-2 text-xs font-black uppercase">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(marcarFinal[arq.id])}
+                          onChange={(e) => handleMarcarFinal(arq.id, e.target.checked)}
+                        />
+                        Marcar este archivo como MOD FINAL
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSubirModificado(arq.id)}
+                        disabled={cargando}
+                        className={`w-full py-5 font-black uppercase text-sm shadow-2xl transition-all ${
+                          cargando
+                            ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                            : "bg-black text-white hover:bg-green-600"
+                        }`}
+                      >
+                        {cargando ? "Procesando..." : "Subir nueva versión MOD"}
+                      </button>
+                    </div>
+
+                    <div className="space-y-4 bg-red-50 p-5 border-4 border-red-600">
+                      <h4 className="text-sm font-black uppercase text-red-700">
+                        Solicitar corrección / V2
+                      </h4>
+
+                      <textarea
+                        className="w-full border-2 border-red-600 p-3 text-xs font-bold"
+                        placeholder="DTC post escritura. Ej: P0401, P2002, P20E8..."
+                        value={correcciones[arq.id]?.dtc_post_escritura || ""}
+                        onChange={(e) =>
+                          handleCorreccion(arq.id, "dtc_post_escritura", e.target.value)
+                        }
+                      />
+
+                      <textarea
+                        className="w-full border-2 border-red-600 p-3 text-xs font-bold"
+                        placeholder="Observación de corrección. Ej: quedó testigo motor, no acepta escritura, vuelve DTC, vehículo no desarrolla..."
+                        value={correcciones[arq.id]?.observacion_correccion || ""}
+                        onChange={(e) =>
+                          handleCorreccion(arq.id, "observacion_correccion", e.target.value)
+                        }
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => handleSolicitarCorreccion(arq)}
+                        disabled={cargando || !arq.archivo_modificado}
+                        className="w-full bg-red-600 text-white py-4 font-black uppercase text-xs disabled:bg-gray-300 disabled:text-gray-500"
+                      >
+                        Solicitar corrección al tuner
+                      </button>
+
+                      {arq.correccion_pendiente && (
+                        <div className="bg-white border-2 border-red-600 p-3">
+                          <p className="text-[10px] font-black uppercase text-red-600">
+                            Corrección pendiente
+                          </p>
+
+                          <p className="text-xs font-bold whitespace-pre-wrap">
+                            {arq.dtc_post_escritura || "Sin DTC post escritura"}
+                          </p>
+
+                          <p className="text-xs font-bold whitespace-pre-wrap mt-2">
+                            {arq.observacion_correccion || "Sin observación"}
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
