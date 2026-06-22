@@ -22,7 +22,7 @@ const ArchivoECU = sequelize.define(
     estado: {
       type: DataTypes.STRING(50),
       allowNull: true,
-      defaultValue: "PENDIENTE_TUNER",
+      defaultValue: "ORIGINAL_CARGADO",
     },
 
     prioridad: {
@@ -52,6 +52,54 @@ const ArchivoECU = sequelize.define(
     },
 
     archivo_modificado: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    versiones_modificadas: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: [],
+    },
+
+    ultima_version_modificada: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+    },
+
+    notificado_master_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    notificado_master_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    notificado_slave_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    notificado_slave_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    correccion_pendiente: {
+      type: DataTypes.BOOLEAN,
+      allowNull: true,
+      defaultValue: false,
+    },
+
+    dtc_post_escritura: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    observacion_correccion: {
       type: DataTypes.TEXT,
       allowNull: true,
     },
