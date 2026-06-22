@@ -2,7 +2,7 @@ const { QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
 const { ArchivoECU, OrdenTrabajo } = require("../models");
 
-console.log("📂 CONTROLLER_FILE_SERVICE_V2_CARGADO");
+console.log("📂 CONTROLLER_FILE_SERVICE_POST_ESCRITURA_V3_CARGADO");
 
 let columnasPreparadas = false;
 
@@ -21,6 +21,8 @@ const usuarioActual = (req) => {
     req.user?.username ||
     req.usuario?.nombre ||
     req.user?.nombre ||
+    req.usuario?.rol ||
+    req.user?.rol ||
     "sistema"
   );
 };
@@ -84,6 +86,48 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "archivos_ecu"
     ADD COLUMN IF NOT EXISTS "observacion_correccion" TEXT;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "archivo_original_subido_por" VARCHAR(100);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "archivo_original_subido_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "post_escritura_estado" VARCHAR(60);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "post_escritura_dtc" TEXT;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "post_escritura_sin_dtc" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "post_escritura_scanner" TEXT;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "post_escritura_observacion" TEXT;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "post_escritura_por" VARCHAR(100);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "post_escritura_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "archivado" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "archivado_motivo" VARCHAR(120);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "archivado_comentario" TEXT;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "archivado_por" VARCHAR(100);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "archivado_at" TIMESTAMP WITH TIME ZONE;
 
     ALTER TABLE "diagnosticos"
     ADD COLUMN IF NOT EXISTS "sin_dtc" BOOLEAN DEFAULT false;
@@ -153,6 +197,7 @@ const validarDiagnosticoObligatorio = async (ordenId) => {
     limpiarTexto(diag.codigos_dtc).toUpperCase().includes("SIN DTC");
 
   const tieneDtc = sinDtc || limpiarTexto(diag.codigos_dtc);
+
   const tieneObservacion =
     limpiarTexto(diag.observaciones) || limpiarTexto(diag.fallas_detectadas);
 
@@ -167,33 +212,59 @@ const validarDiagnosticoObligatorio = async (ordenId) => {
 };
 
 const mapearArchivoRow = (row) => {
+  if (!row) return null;
+
   return {
     id: row.id,
     ordenId: row.ordenId,
+
     estado: row.estado,
     prioridad: row.prioridad,
     tipo_servicio: row.tipo_servicio,
     metodo_lectura: row.metodo_lectura,
     herramienta_lectura: row.herramienta_lectura,
+
     archivo_original: row.archivo_original,
+    archivo_original_subido_por: row.archivo_original_subido_por,
+    archivo_original_subido_at: row.archivo_original_subido_at,
+
     archivo_modificado: row.archivo_modificado,
     versiones_modificadas: normalizarVersiones(row.versiones_modificadas),
     ultima_version_modificada: row.ultima_version_modificada || 0,
+
     notificado_master_at: row.notificado_master_at,
     notificado_master_por: row.notificado_master_por,
     notificado_slave_at: row.notificado_slave_at,
     notificado_slave_por: row.notificado_slave_por,
+
     correccion_pendiente: row.correccion_pendiente,
     dtc_post_escritura: row.dtc_post_escritura,
     observacion_correccion: row.observacion_correccion,
+
+    post_escritura_estado: row.post_escritura_estado,
+    post_escritura_dtc: row.post_escritura_dtc,
+    post_escritura_sin_dtc: row.post_escritura_sin_dtc,
+    post_escritura_scanner: row.post_escritura_scanner,
+    post_escritura_observacion: row.post_escritura_observacion,
+    post_escritura_por: row.post_escritura_por,
+    post_escritura_at: row.post_escritura_at,
+
+    archivado: row.archivado,
+    archivado_motivo: row.archivado_motivo,
+    archivado_comentario: row.archivado_comentario,
+    archivado_por: row.archivado_por,
+    archivado_at: row.archivado_at,
+
     marca_ecu: row.marca_ecu,
     modelo_ecu: row.modelo_ecu,
     hw: row.hw,
     sw: row.sw,
     version_software: row.version_software,
+
     notas_operador: row.notas_operador,
     instrucciones_tuner: row.instrucciones_tuner,
     observaciones: row.observaciones,
+
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
 
@@ -266,6 +337,7 @@ const obtenerArchivosECU = async (req, res) => {
     const rows = await sequelize.query(
       `
       ${queryArchivosBase}
+      WHERE COALESCE(a."archivado", false) = false
       ORDER BY a."id" DESC;
       `,
       {
@@ -321,6 +393,7 @@ const crearArchivoECU = async (req, res) => {
 
     const nuevoArchivo = await ArchivoECU.create({
       ordenId,
+
       estado: "ORIGINAL_CARGADO",
       prioridad: limpiarTexto(req.body.prioridad) || "MEDIA",
       tipo_servicio: limpiarTexto(req.body.tipo_servicio),
@@ -339,10 +412,24 @@ const crearArchivoECU = async (req, res) => {
       observaciones: limpiarTexto(req.body.observaciones),
 
       archivo_original: obtenerRutaPublicaArchivo(req.file),
+      archivo_original_subido_por: usuarioActual(req),
+      archivo_original_subido_at: new Date(),
+
       archivo_modificado: null,
       versiones_modificadas: [],
       ultima_version_modificada: 0,
+
       correccion_pendiente: false,
+
+      post_escritura_estado: null,
+      post_escritura_dtc: null,
+      post_escritura_sin_dtc: false,
+      post_escritura_scanner: null,
+      post_escritura_observacion: null,
+      post_escritura_por: null,
+      post_escritura_at: null,
+
+      archivado: false,
     });
 
     try {
@@ -384,6 +471,12 @@ const subirArchivoModificado = async (req, res) => {
       });
     }
 
+    if (archivo.archivado) {
+      return res.status(400).json({
+        error: "No puedes subir modificaciones a un archivo archivado",
+      });
+    }
+
     if (!req.file) {
       return res.status(400).json({
         error: "No se cargó el archivo modificado",
@@ -402,6 +495,7 @@ const subirArchivoModificado = async (req, res) => {
       "";
 
     const versionesActuales = normalizarVersiones(archivo.versiones_modificadas);
+
     const versionActual =
       Number(archivo.ultima_version_modificada || 0) ||
       versionesActuales.length ||
@@ -434,6 +528,14 @@ const subirArchivoModificado = async (req, res) => {
       observaciones,
       estado: "MODIFICADO_LISTO",
       correccion_pendiente: false,
+
+      post_escritura_estado: null,
+      post_escritura_dtc: null,
+      post_escritura_sin_dtc: false,
+      post_escritura_scanner: null,
+      post_escritura_observacion: null,
+      post_escritura_por: null,
+      post_escritura_at: null,
     });
 
     res.json({
@@ -459,6 +561,12 @@ const notificarMaster = async (req, res) => {
     if (!archivo) {
       return res.status(404).json({
         error: "Archivo ECU no encontrado",
+      });
+    }
+
+    if (archivo.archivado) {
+      return res.status(400).json({
+        error: "No puedes notificar un archivo archivado",
       });
     }
 
@@ -490,6 +598,12 @@ const notificarSlave = async (req, res) => {
     if (!archivo) {
       return res.status(404).json({
         error: "Archivo ECU no encontrado",
+      });
+    }
+
+    if (archivo.archivado) {
+      return res.status(400).json({
+        error: "No puedes notificar un archivo archivado",
       });
     }
 
@@ -530,6 +644,12 @@ const solicitarCorreccion = async (req, res) => {
       });
     }
 
+    if (archivo.archivado) {
+      return res.status(400).json({
+        error: "No puedes solicitar corrección de un archivo archivado",
+      });
+    }
+
     const dtcPost = limpiarTexto(req.body.dtc_post_escritura);
     const observacion = limpiarTexto(req.body.observacion_correccion);
 
@@ -552,6 +672,190 @@ const solicitarCorreccion = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR SOLICITANDO CORRECCIÓN:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const registrarPostEscritura = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const archivo = await ArchivoECU.findByPk(req.params.id);
+
+    if (!archivo) {
+      return res.status(404).json({
+        error: "Archivo ECU no encontrado",
+      });
+    }
+
+    if (archivo.archivado) {
+      return res.status(400).json({
+        error: "No puedes registrar post escritura en un archivo archivado",
+      });
+    }
+
+    if (!archivo.archivo_modificado) {
+      return res.status(400).json({
+        error: "No puedes registrar post escritura sin archivo modificado cargado",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        error: "La foto/captura del scanner post escritura es obligatoria",
+      });
+    }
+
+    const resultado = limpiarTexto(req.body.post_escritura_estado);
+    const dtc = limpiarTexto(req.body.post_escritura_dtc);
+    const observacion = limpiarTexto(req.body.post_escritura_observacion);
+
+    const sinDtc =
+      req.body.post_escritura_sin_dtc === true ||
+      String(req.body.post_escritura_sin_dtc).toLowerCase() === "true" ||
+      String(req.body.post_escritura_sin_dtc) === "1";
+
+    if (!resultado) {
+      return res.status(400).json({
+        error: "Debes indicar resultado post escritura",
+      });
+    }
+
+    const resultadosPermitidos = [
+      "OK",
+      "REQUIERE_CORRECCION",
+      "FALLO_ESCRITURA",
+      "EN_PRUEBA",
+    ];
+
+    if (!resultadosPermitidos.includes(resultado)) {
+      return res.status(400).json({
+        error: "Resultado post escritura inválido",
+        permitidos: resultadosPermitidos,
+      });
+    }
+
+    if (!sinDtc && !dtc) {
+      return res.status(400).json({
+        error: "Debes ingresar DTC post escritura o marcar SIN DTC POST ESCRITURA",
+      });
+    }
+
+    let nuevoEstado = "POST_ESCRITURA_PENDIENTE";
+    let correccionPendiente = false;
+
+    if (resultado === "OK") {
+      nuevoEstado = "POST_ESCRITURA_OK";
+      correccionPendiente = false;
+    }
+
+    if (resultado === "REQUIERE_CORRECCION" || resultado === "FALLO_ESCRITURA") {
+      nuevoEstado = "REQUIERE_CORRECCION";
+      correccionPendiente = true;
+    }
+
+    if (resultado === "EN_PRUEBA") {
+      nuevoEstado = "POST_ESCRITURA_PENDIENTE";
+      correccionPendiente = false;
+    }
+
+    const rutaScanner = obtenerRutaPublicaArchivo(req.file);
+    const textoDtc = sinDtc ? "SIN DTC POST ESCRITURA" : dtc;
+
+    await archivo.update({
+      estado: nuevoEstado,
+
+      post_escritura_estado: resultado,
+      post_escritura_dtc: textoDtc,
+      post_escritura_sin_dtc: sinDtc,
+      post_escritura_scanner: rutaScanner,
+      post_escritura_observacion: observacion,
+      post_escritura_por: usuarioActual(req),
+      post_escritura_at: new Date(),
+
+      correccion_pendiente: correccionPendiente,
+
+      dtc_post_escritura: textoDtc,
+
+      observacion_correccion:
+        resultado === "REQUIERE_CORRECCION" || resultado === "FALLO_ESCRITURA"
+          ? observacion
+          : archivo.observacion_correccion,
+    });
+
+    res.json({
+      mensaje:
+        resultado === "OK"
+          ? "Post escritura registrado correctamente. Archivo listo para cierre técnico."
+          : "Post escritura registrado. Revisa el estado del trabajo.",
+      archivo,
+    });
+  } catch (error) {
+    console.error("ERROR REGISTRANDO POST ESCRITURA:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const archivarArchivoECU = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const archivo = await ArchivoECU.findByPk(req.params.id);
+
+    if (!archivo) {
+      return res.status(404).json({
+        error: "Archivo ECU no encontrado",
+      });
+    }
+
+    const motivo = limpiarTexto(req.body.archivado_motivo || req.body.motivo);
+    const comentario = limpiarTexto(
+      req.body.archivado_comentario || req.body.comentario
+    );
+
+    if (!motivo) {
+      return res.status(400).json({
+        error: "Debes indicar motivo de archivado",
+      });
+    }
+
+    const motivosPermitidos = [
+      "CLIENTE_DESISTE",
+      "SIN_FACTIBILIDAD_TECNICA",
+      "DUPLICADO",
+      "ERROR_INGRESO",
+      "NO_AUTORIZADO",
+      "OTRO",
+    ];
+
+    if (!motivosPermitidos.includes(motivo)) {
+      return res.status(400).json({
+        error: "Motivo de archivado inválido",
+        permitidos: motivosPermitidos,
+      });
+    }
+
+    await archivo.update({
+      estado: "ARCHIVADO",
+      archivado: true,
+      archivado_motivo: motivo,
+      archivado_comentario: comentario,
+      archivado_por: usuarioActual(req),
+      archivado_at: new Date(),
+    });
+
+    res.json({
+      mensaje: "Archivo ECU archivado correctamente",
+      archivo,
+    });
+  } catch (error) {
+    console.error("ERROR ARCHIVANDO ARCHIVO ECU:", error);
 
     res.status(500).json({
       error: error.message,
@@ -605,6 +909,23 @@ const actualizarArchivoECU = async (req, res) => {
       });
     }
 
+    if (archivo.archivado) {
+      return res.status(400).json({
+        error: "No puedes modificar un archivo archivado",
+      });
+    }
+
+    const nuevoEstado = limpiarTexto(req.body.estado);
+
+    if (nuevoEstado === "FINALIZADO" || nuevoEstado === "FINALIZADO_TECNICO") {
+      if (archivo.post_escritura_estado !== "OK") {
+        return res.status(400).json({
+          error:
+            "No puedes finalizar sin post escritura OK, scanner post escritura y DTC post escritura registrados",
+        });
+      }
+    }
+
     const payload = {};
 
     const camposTexto = [
@@ -654,6 +975,8 @@ const actualizarArchivoECU = async (req, res) => {
 
 const eliminarArchivoECU = async (req, res) => {
   try {
+    await prepararColumnas();
+
     const archivo = await ArchivoECU.findByPk(req.params.id);
 
     if (!archivo) {
@@ -662,14 +985,23 @@ const eliminarArchivoECU = async (req, res) => {
       });
     }
 
-    await archivo.destroy();
+    await archivo.update({
+      estado: "ARCHIVADO",
+      archivado: true,
+      archivado_motivo: "ELIMINADO_COMPATIBILIDAD",
+      archivado_comentario:
+        "Este registro fue archivado usando la ruta antigua DELETE. No fue eliminado físicamente.",
+      archivado_por: usuarioActual(req),
+      archivado_at: new Date(),
+    });
 
     res.json({
-      mensaje: "Archivo ECU eliminado correctamente",
+      mensaje:
+        "Archivo ECU archivado correctamente. La eliminación física fue reemplazada por archivado.",
       id: req.params.id,
     });
   } catch (error) {
-    console.error("ERROR AL ELIMINAR ARCHIVO ECU:", error);
+    console.error("ERROR AL ARCHIVAR DESDE DELETE:", error);
 
     res.status(500).json({
       error: error.message,
@@ -686,5 +1018,7 @@ module.exports = {
   notificarMaster,
   notificarSlave,
   solicitarCorreccion,
+  registrarPostEscritura,
+  archivarArchivoECU,
   eliminarArchivoECU,
 };

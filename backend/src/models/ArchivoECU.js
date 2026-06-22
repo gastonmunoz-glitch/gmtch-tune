@@ -13,21 +13,17 @@ const ArchivoECU = sequelize.define(
     ordenId: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: {
-        model: "ordenes_trabajo",
-        key: "id",
-      },
     },
 
     estado: {
-      type: DataTypes.STRING(50),
-      allowNull: true,
+      type: DataTypes.STRING(60),
+      allowNull: false,
       defaultValue: "ORIGINAL_CARGADO",
     },
 
     prioridad: {
       type: DataTypes.STRING(30),
-      allowNull: true,
+      allowNull: false,
       defaultValue: "MEDIA",
     },
 
@@ -37,17 +33,27 @@ const ArchivoECU = sequelize.define(
     },
 
     metodo_lectura: {
-      type: DataTypes.STRING(50),
+      type: DataTypes.STRING(80),
       allowNull: true,
     },
 
     herramienta_lectura: {
-      type: DataTypes.STRING(100),
+      type: DataTypes.STRING(80),
       allowNull: true,
     },
 
     archivo_original: {
       type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    archivo_original_subido_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    archivo_original_subido_at: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
 
@@ -58,50 +64,14 @@ const ArchivoECU = sequelize.define(
 
     versiones_modificadas: {
       type: DataTypes.JSONB,
-      allowNull: true,
+      allowNull: false,
       defaultValue: [],
     },
 
     ultima_version_modificada: {
       type: DataTypes.INTEGER,
-      allowNull: true,
+      allowNull: false,
       defaultValue: 0,
-    },
-
-    notificado_master_at: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
-
-    notificado_master_por: {
-      type: DataTypes.STRING(100),
-      allowNull: true,
-    },
-
-    notificado_slave_at: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
-
-    notificado_slave_por: {
-      type: DataTypes.STRING(100),
-      allowNull: true,
-    },
-
-    correccion_pendiente: {
-      type: DataTypes.BOOLEAN,
-      allowNull: true,
-      defaultValue: false,
-    },
-
-    dtc_post_escritura: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-
-    observacion_correccion: {
-      type: DataTypes.TEXT,
-      allowNull: true,
     },
 
     marca_ecu: {
@@ -141,6 +111,104 @@ const ArchivoECU = sequelize.define(
 
     observaciones: {
       type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    notificado_master_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    notificado_master_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    notificado_slave_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    notificado_slave_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    correccion_pendiente: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    dtc_post_escritura: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    observacion_correccion: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    post_escritura_estado: {
+      type: DataTypes.STRING(60),
+      allowNull: true,
+    },
+
+    post_escritura_dtc: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    post_escritura_sin_dtc: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    post_escritura_scanner: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    post_escritura_observacion: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    post_escritura_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    post_escritura_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    archivado: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    archivado_motivo: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+    },
+
+    archivado_comentario: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    archivado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    archivado_at: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
   },

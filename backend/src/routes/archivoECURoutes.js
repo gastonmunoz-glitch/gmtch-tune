@@ -1,8 +1,7 @@
 const express = require("express");
 const multer = require("multer");
-const router = express.Router();
-
-const uploadArchivo = require("../middleware/uploadArchivoMiddleware");
+const path = require("path");
+const fs = require("fs");
 
 const {
   crearArchivoECU,
@@ -13,47 +12,64 @@ const {
   notificarMaster,
   notificarSlave,
   solicitarCorreccion,
+  registrarPostEscritura,
+  archivarArchivoECU,
   eliminarArchivoECU,
 } = require("../controllers/archivoECUController");
 
-const manejarSubidaArchivo = (req, res, next) => {
-  const subir = uploadArchivo.single("archivo");
+const router = express.Router();
 
-  subir(req, res, (error) => {
-    if (error instanceof multer.MulterError) {
-      console.error("ERROR MULTER ECU:", error);
+const uploadsDir = path.join(__dirname, "..", "uploads", "ecu");
 
-      return res.status(400).json({
-        error: "Error al subir archivo ECU",
-        detalle: error.message,
-        codigo: error.code,
-      });
-    }
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
-    if (error) {
-      console.error("ERROR GENERAL SUBIDA ECU:", error);
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname || "");
+    const base = path
+      .basename(file.originalname || "archivo", ext)
+      .replace(/[^a-zA-Z0-9-_]/g, "_")
+      .slice(0, 40);
 
-      return res.status(400).json({
-        error: "Error al procesar archivo ECU",
-        detalle: error.message,
-      });
-    }
+    cb(null, `${Date.now()}-${base}${ext}`);
+  },
+});
 
-    next();
-  });
-};
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 80 * 1024 * 1024,
+  },
+});
+
+const manejarSubidaArchivo = upload.single("archivo");
+const manejarPostEscritura = upload.single("scanner_post_escritura");
 
 router.post("/", manejarSubidaArchivo, crearArchivoECU);
+
 router.get("/", obtenerArchivosECU);
 router.get("/:id", obtenerArchivoECUPorId);
+
 router.put("/:id", actualizarArchivoECU);
 router.patch("/:id", actualizarArchivoECU);
 
 router.post("/:id/modificado", manejarSubidaArchivo, subirArchivoModificado);
+
 router.post("/:id/notificar-master", notificarMaster);
 router.post("/:id/notificar-slave", notificarSlave);
+
 router.post("/:id/solicitar-correccion", solicitarCorreccion);
 
+router.post("/:id/post-escritura", manejarPostEscritura, registrarPostEscritura);
+
+router.post("/:id/archivar", archivarArchivoECU);
+
+// Se mantiene por compatibilidad, pero en frontend lo vamos a reemplazar por archivar.
 router.delete("/:id", eliminarArchivoECU);
 
 module.exports = router;
