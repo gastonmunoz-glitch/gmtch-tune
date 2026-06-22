@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_URL = "https://URL-REAL-DE-TU-BACKEND.up.railway.app/api";
+const API_URL = "https://abundant-emotion-production-830a.up.railway.app/api/auth/login";
 
 const api = axios.create({
   baseURL: API_URL,
