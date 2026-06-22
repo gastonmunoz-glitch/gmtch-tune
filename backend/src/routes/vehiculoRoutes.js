@@ -1,17 +1,62 @@
-const express = require('express');
-const router = express.Router();
-const { 
-  crearVehiculo, 
-  obtenerVehiculos, 
-  obtenerVehiculoPorId, 
-  obtenerVehiculoPorPatente,
-  actualizarVehiculo 
-} = require('../controllers/vehiculoController');
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-router.post('/', crearVehiculo);
-router.get('/', obtenerVehiculos);
-router.get('/:id', obtenerVehiculoPorId);
-router.get('/patente/:patente', obtenerVehiculoPorPatente);
-router.put('/:id', actualizarVehiculo);
+const Vehiculo = sequelize.define(
+  "Vehiculo",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
 
-module.exports = router;
+    clienteId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    patente: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      unique: true,
+    },
+
+    marca: {
+      type: DataTypes.STRING(50),
+      allowNull: false,
+    },
+
+    modelo: {
+      type: DataTypes.STRING(50),
+      allowNull: false,
+    },
+
+    anio: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    vin: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+
+    tipo_unidad: {
+      type: DataTypes.STRING(40),
+      allowNull: false,
+      defaultValue: "AUTO",
+    },
+
+    activo: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
+  },
+  {
+    tableName: "vehiculos",
+    timestamps: true,
+  }
+);
+
+module.exports = Vehiculo;

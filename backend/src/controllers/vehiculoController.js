@@ -1,53 +1,62 @@
-const { Vehiculo, Cliente, OrdenTrabajo, ArchivoECU, FotoVehiculo, Diagnostico } = require('../models');
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const crearVehiculo = async (req, res) => {
-  try {
-    const nuevo = await Vehiculo.create(req.body);
-    res.status(201).json(nuevo);
-  } catch (error) { res.status(500).json({ error: error.message }); }
-};
+const Vehiculo = sequelize.define(
+  "Vehiculo",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
 
-const obtenerVehiculos = async (req, res) => {
-  try {
-    const vehiculos = await Vehiculo.findAll({ include: [Cliente] });
-    res.json(vehiculos);
-  } catch (error) { res.status(500).json({ error: error.message }); }
-};
+    clienteId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
 
-const obtenerVehiculoPorId = async (req, res) => {
-  try {
-    const vehiculo = await Vehiculo.findByPk(req.params.id, {
-      include: [
-        { model: Cliente },
-        { model: OrdenTrabajo, include: [ArchivoECU, FotoVehiculo, Diagnostico] }
-      ]
-    });
-    if (!vehiculo) return res.status(404).json({ error: 'No encontrado' });
-    res.json(vehiculo);
-  } catch (error) { res.status(500).json({ error: error.message }); }
-};
+    patente: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      unique: true,
+    },
 
-const obtenerVehiculoPorPatente = async (req, res) => {
-  try {
-    const vehiculo = await Vehiculo.findOne({
-      where: { patente: req.params.patente.toUpperCase() },
-      include: [
-        { model: Cliente },
-        { model: OrdenTrabajo, include: [ArchivoECU, FotoVehiculo, Diagnostico] }
-      ]
-    });
-    if (!vehiculo) return res.status(404).json({ error: 'No encontrado' });
-    res.json(vehiculo);
-  } catch (error) { res.status(500).json({ error: error.message }); }
-};
+    marca: {
+      type: DataTypes.STRING(50),
+      allowNull: false,
+    },
 
-const actualizarVehiculo = async (req, res) => {
-  try {
-    const vehiculo = await Vehiculo.findByPk(req.params.id);
-    if (!vehiculo) return res.status(404).json({ error: 'No encontrado' });
-    await vehiculo.update(req.body);
-    res.json(vehiculo);
-  } catch (error) { res.status(500).json({ error: error.message }); }
-};
+    modelo: {
+      type: DataTypes.STRING(50),
+      allowNull: false,
+    },
 
-module.exports = { crearVehiculo, obtenerVehiculos, obtenerVehiculoPorId, obtenerVehiculoPorPatente, actualizarVehiculo };
+    anio: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    vin: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+
+    tipo_unidad: {
+      type: DataTypes.STRING(40),
+      allowNull: false,
+      defaultValue: "AUTO",
+    },
+
+    activo: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
+  },
+  {
+    tableName: "vehiculos",
+    timestamps: true,
+  }
+);
+
+module.exports = Vehiculo;

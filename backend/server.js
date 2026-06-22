@@ -9,7 +9,7 @@ const sequelize = require("./src/config/database");
 
 dotenv.config();
 
-console.log("🛠️ SERVER VERSION: ROLES-CORS-FINAL-V3-2026-06-22");
+console.log("🛠️ SERVER VERSION: GARAGE-FILA-PAGOS-V4-2026-06-22");
 
 const app = express();
 
@@ -114,7 +114,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     message: "Backend Gmtch Tune funcionando",
-    version: "ROLES-CORS-FINAL-V3-2026-06-22",
+    version: "GARAGE-FILA-PAGOS-V4-2026-06-22",
     environment: process.env.NODE_ENV || "development",
   });
 });
@@ -204,6 +204,7 @@ app.use(
       "OWNER",
       "ADMIN",
       "SUPERVISOR",
+      "RECEPCION",
       "OPERADOR_SCANNER",
       "OPERADOR_ECU",
       "MECANICO",
@@ -212,6 +213,7 @@ app.use(
       "OWNER",
       "ADMIN",
       "SUPERVISOR",
+      "RECEPCION",
       "OPERADOR_SCANNER",
       "OPERADOR_ECU",
       "MECANICO",
@@ -333,13 +335,17 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ====================== PREPARAR TABLA USUARIOS ======================
+// ====================== PREPARAR BASE DE DATOS ======================
 
-const prepararBaseUsuarios = async () => {
+const prepararBaseDatos = async () => {
   try {
     await sequelize.query(`
       DO $$
       BEGIN
+        -- ======================
+        -- USUARIOS
+        -- ======================
+
         IF EXISTS (
           SELECT 1
           FROM information_schema.tables
@@ -364,7 +370,6 @@ const prepararBaseUsuarios = async () => {
             AND table_name = 'Usuarios'
             AND column_name = 'username'
           ) THEN
-
             UPDATE "Usuarios"
             SET "username" = CONCAT('usuario_', LEFT("id"::text, 8))
             WHERE "username" IS NULL
@@ -386,7 +391,6 @@ const prepararBaseUsuarios = async () => {
             FROM duplicados d
             WHERE u."id" = d."id"
             AND d.rn > 1;
-
           END IF;
 
           IF EXISTS (
@@ -407,12 +411,159 @@ const prepararBaseUsuarios = async () => {
           END IF;
 
         END IF;
+
+        -- ======================
+        -- CLIENTES
+        -- ======================
+
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+          AND table_name = 'clientes'
+        ) THEN
+
+          ALTER TABLE "clientes"
+          ADD COLUMN IF NOT EXISTS "categoria_cliente" VARCHAR(30) DEFAULT 'NORMAL';
+
+          ALTER TABLE "clientes"
+          ADD COLUMN IF NOT EXISTS "nota_cliente" TEXT;
+
+          UPDATE "clientes"
+          SET "categoria_cliente" = 'NORMAL'
+          WHERE "categoria_cliente" IS NULL
+             OR TRIM("categoria_cliente") = '';
+
+        END IF;
+
+        -- ======================
+        -- VEHÍCULOS
+        -- ======================
+
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+          AND table_name = 'vehiculos'
+        ) THEN
+
+          ALTER TABLE "vehiculos"
+          ADD COLUMN IF NOT EXISTS "anio" INTEGER;
+
+          ALTER TABLE "vehiculos"
+          ADD COLUMN IF NOT EXISTS "vin" VARCHAR(50);
+
+          ALTER TABLE "vehiculos"
+          ADD COLUMN IF NOT EXISTS "tipo_unidad" VARCHAR(40) DEFAULT 'AUTO';
+
+          ALTER TABLE "vehiculos"
+          ADD COLUMN IF NOT EXISTS "activo" BOOLEAN DEFAULT true;
+
+          UPDATE "vehiculos"
+          SET "tipo_unidad" = 'AUTO'
+          WHERE "tipo_unidad" IS NULL
+             OR TRIM("tipo_unidad") = '';
+
+          UPDATE "vehiculos"
+          SET "activo" = true
+          WHERE "activo" IS NULL;
+
+        END IF;
+
+        -- ======================
+        -- ÓRDENES DE TRABAJO
+        -- ======================
+
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+          AND table_name = 'ordenes_trabajo'
+        ) THEN
+
+          IF EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            AND table_name = 'ordenes_trabajo'
+            AND column_name = 'prioridad'
+          ) THEN
+            ALTER TABLE "ordenes_trabajo" ALTER COLUMN "prioridad" DROP DEFAULT;
+            ALTER TABLE "ordenes_trabajo" ALTER COLUMN "prioridad" TYPE VARCHAR(30) USING "prioridad"::text;
+            ALTER TABLE "ordenes_trabajo" ALTER COLUMN "prioridad" SET DEFAULT 'MEDIA';
+
+            UPDATE "ordenes_trabajo"
+            SET "prioridad" = 'MEDIA'
+            WHERE "prioridad" IS NULL
+               OR TRIM("prioridad") = '';
+          END IF;
+
+          IF EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            AND table_name = 'ordenes_trabajo'
+            AND column_name = 'estado'
+          ) THEN
+            ALTER TABLE "ordenes_trabajo" ALTER COLUMN "estado" DROP DEFAULT;
+            ALTER TABLE "ordenes_trabajo" ALTER COLUMN "estado" TYPE VARCHAR(50) USING "estado"::text;
+            ALTER TABLE "ordenes_trabajo" ALTER COLUMN "estado" SET DEFAULT 'RECEPCIONADO';
+
+            UPDATE "ordenes_trabajo"
+            SET "estado" = 'RECEPCIONADO'
+            WHERE "estado" IS NULL
+               OR TRIM("estado") = '';
+          END IF;
+
+          IF EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            AND table_name = 'ordenes_trabajo'
+            AND column_name = 'estado_pago'
+          ) THEN
+            ALTER TABLE "ordenes_trabajo" ALTER COLUMN "estado_pago" DROP DEFAULT;
+            ALTER TABLE "ordenes_trabajo" ALTER COLUMN "estado_pago" TYPE VARCHAR(30) USING "estado_pago"::text;
+            ALTER TABLE "ordenes_trabajo" ALTER COLUMN "estado_pago" SET DEFAULT 'PENDIENTE';
+
+            UPDATE "ordenes_trabajo"
+            SET "estado_pago" = 'PENDIENTE'
+            WHERE "estado_pago" IS NULL
+               OR TRIM("estado_pago") = '';
+          END IF;
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "medio_pago" VARCHAR(40) DEFAULT 'PENDIENTE';
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "monto_pagado" DECIMAL(10, 2) DEFAULT 0;
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "fecha_pago" TIMESTAMP WITH TIME ZONE;
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "cobrado_por" VARCHAR(100);
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "observacion_pago" TEXT;
+
+          UPDATE "ordenes_trabajo"
+          SET "medio_pago" = 'PENDIENTE'
+          WHERE "medio_pago" IS NULL
+             OR TRIM("medio_pago") = '';
+
+          UPDATE "ordenes_trabajo"
+          SET "monto_pagado" = 0
+          WHERE "monto_pagado" IS NULL;
+
+        END IF;
+
       END $$;
     `);
 
-    console.log("✅ Base Usuarios preparada para roles");
+    console.log("✅ Base de datos preparada para garage, fila y pagos");
   } catch (error) {
-    console.warn("⚠️ No se pudo preparar Usuarios:", error.message);
+    console.warn("⚠️ No se pudo preparar base de datos:", error.message);
   }
 };
 
@@ -480,7 +631,7 @@ const crearUsuarioMaestro = async () => {
 
 const startServer = async () => {
   try {
-    await prepararBaseUsuarios();
+    await prepararBaseDatos();
 
     await sequelize.sync({ alter: true });
     console.log("✅ BASE DE DATOS SINCRONIZADA");

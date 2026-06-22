@@ -7,33 +7,84 @@ const {
   FotoVehiculo,
 } = require("../models");
 
+const PRIORIDAD_PESO = {
+  URGENTE: 1,
+  ALTA: 2,
+  MEDIA: 3,
+  BAJA: 4,
+};
+
 const ESTADOS_VALIDOS = [
-  "RECEPCION",
-  "EN TRABAJO",
-  "ESPERANDO MAPA",
-  "LISTO / CARGAR",
+  "RECEPCIONADO",
+  "PARA_DIAGNOSTICO",
+  "EN_PROGRAMACION",
+  "PARA_MECANICA",
+  "EN_MECANICA",
+  "LISTO_PARA_ENTREGA",
   "ENTREGADO",
 ];
 
+const normalizarPrioridad = (prioridad) => {
+  const valor = String(prioridad || "MEDIA").trim().toUpperCase();
+  return PRIORIDAD_PESO[valor] ? valor : "MEDIA";
+};
+
 const normalizarEstado = (estado) => {
-  if (!estado) return "RECEPCION";
+  if (!estado) return "RECEPCIONADO";
 
   const valor = String(estado).trim().toUpperCase();
 
   const mapa = {
-    RECEPCION: "RECEPCION",
-    "RECEPCIÓN": "RECEPCION",
-    RECEPCIONADO: "RECEPCION",
-    RECIBIDO: "RECEPCION",
-    "EN TRABAJO": "EN TRABAJO",
-    TRABAJANDO: "EN TRABAJO",
-    "ESPERANDO MAPA": "ESPERANDO MAPA",
-    LISTO: "LISTO / CARGAR",
-    "LISTO / CARGAR": "LISTO / CARGAR",
+    RECEPCION: "RECEPCIONADO",
+    "RECEPCIÓN": "RECEPCIONADO",
+    RECEPCIONADO: "RECEPCIONADO",
+    RECIBIDO: "RECEPCIONADO",
+
+    PARA_DIAGNOSTICO: "PARA_DIAGNOSTICO",
+    "PARA DIAGNOSTICO": "PARA_DIAGNOSTICO",
+    "PARA DIAGNÓSTICO": "PARA_DIAGNOSTICO",
+
+    "EN TRABAJO": "EN_PROGRAMACION",
+    TRABAJANDO: "EN_PROGRAMACION",
+    ESPERANDO_MAPA: "EN_PROGRAMACION",
+    "ESPERANDO MAPA": "EN_PROGRAMACION",
+    EN_PROGRAMACION: "EN_PROGRAMACION",
+    "EN PROGRAMACION": "EN_PROGRAMACION",
+    "EN PROGRAMACIÓN": "EN_PROGRAMACION",
+
+    PARA_MECANICA: "PARA_MECANICA",
+    "PARA MECANICA": "PARA_MECANICA",
+    "PARA MECÁNICA": "PARA_MECANICA",
+
+    EN_MECANICA: "EN_MECANICA",
+    "EN MECANICA": "EN_MECANICA",
+    "EN MECÁNICA": "EN_MECANICA",
+
+    LISTO: "LISTO_PARA_ENTREGA",
+    "LISTO / CARGAR": "LISTO_PARA_ENTREGA",
+    LISTO_PARA_ENTREGA: "LISTO_PARA_ENTREGA",
+    "LISTO PARA ENTREGA": "LISTO_PARA_ENTREGA",
+
     ENTREGADO: "ENTREGADO",
   };
 
-  return mapa[valor] || "RECEPCION";
+  return mapa[valor] || "RECEPCIONADO";
+};
+
+const puedeCobrar = (req) => {
+  const rol = req.usuario?.rol;
+  const username = String(req.usuario?.username || "").toLowerCase();
+
+  return rol === "OWNER" || rol === "ADMIN" || username === "camila" || username === "gaston";
+};
+
+const ordenarFilaTrabajo = (a, b) => {
+  const pa = PRIORIDAD_PESO[a.prioridad] || 99;
+  const pb = PRIORIDAD_PESO[b.prioridad] || 99;
+
+  if (pa !== pb) return pa - pb;
+
+  return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
 };
 
 const crearOrden = async (req, res) => {
@@ -44,6 +95,7 @@ const crearOrden = async (req, res) => {
       kilometraje,
       motivo_ingreso,
       monto_total,
+      prioridad,
       estado,
     } = req.body;
 
@@ -63,14 +115,16 @@ const crearOrden = async (req, res) => {
       });
     }
 
-    const estadoFinal = normalizarEstado(estado);
-
     const nuevaOrden = await OrdenTrabajo.create({
       vehiculoId: idVehiculo,
       kilometraje: kilometraje ? Number(kilometraje) : null,
       motivo_ingreso: motivo_ingreso || "",
       monto_total: monto_total ? Number(monto_total) : 0,
-      estado: estadoFinal,
+      prioridad: normalizarPrioridad(prioridad),
+      estado: normalizarEstado(estado),
+      estado_pago: "PENDIENTE",
+      medio_pago: "PENDIENTE",
+      monto_pagado: 0,
     });
 
     res.status(201).json({
@@ -93,15 +147,16 @@ const obtenerOrdenes = async (req, res) => {
   try {
     const ordenes = await OrdenTrabajo.findAll({
       include: [
-        { model: Vehiculo, include: Cliente },
+        { model: Vehiculo, include: [Cliente] },
         Diagnostico,
         ArchivoECU,
         FotoVehiculo,
       ],
-      order: [["createdAt", "DESC"]],
     });
 
-    res.json(ordenes);
+    const data = ordenes.map((orden) => orden.toJSON()).sort(ordenarFilaTrabajo);
+
+    res.json(data);
   } catch (error) {
     console.error("ERROR AL OBTENER ÓRDENES:", error);
 
@@ -115,7 +170,7 @@ const obtenerOrdenPorId = async (req, res) => {
   try {
     const orden = await OrdenTrabajo.findByPk(req.params.id, {
       include: [
-        { model: Vehiculo, include: Cliente },
+        { model: Vehiculo, include: [Cliente] },
         Diagnostico,
         ArchivoECU,
         FotoVehiculo,
@@ -154,6 +209,40 @@ const actualizarOrden = async (req, res) => {
       datosActualizados.estado = normalizarEstado(datosActualizados.estado);
     }
 
+    if (datosActualizados.prioridad) {
+      datosActualizados.prioridad = normalizarPrioridad(datosActualizados.prioridad);
+    }
+
+    const camposPago = [
+      "estado_pago",
+      "medio_pago",
+      "monto_pagado",
+      "fecha_pago",
+      "cobrado_por",
+      "observacion_pago",
+    ];
+
+    const tocaPago = camposPago.some((campo) =>
+      Object.prototype.hasOwnProperty.call(datosActualizados, campo)
+    );
+
+    const intentaEntregar = datosActualizados.estado === "ENTREGADO";
+
+    if ((tocaPago || intentaEntregar) && !puedeCobrar(req)) {
+      return res.status(403).json({
+        error: "Solo Gastón o Camila pueden cerrar cobros o entregar la orden",
+      });
+    }
+
+    if (tocaPago) {
+      datosActualizados.cobrado_por =
+        req.usuario?.nombre || req.usuario?.username || datosActualizados.cobrado_por || "Sistema";
+
+      if (datosActualizados.estado_pago === "PAGADO" && !datosActualizados.fecha_pago) {
+        datosActualizados.fecha_pago = new Date();
+      }
+    }
+
     await orden.update(datosActualizados);
 
     res.json({
@@ -186,6 +275,12 @@ const actualizarEstado = async (req, res) => {
     if (!ESTADOS_VALIDOS.includes(estadoFinal)) {
       return res.status(400).json({
         error: "Estado no válido",
+      });
+    }
+
+    if (estadoFinal === "ENTREGADO" && !puedeCobrar(req)) {
+      return res.status(403).json({
+        error: "Solo Gastón o Camila pueden entregar la orden",
       });
     }
 

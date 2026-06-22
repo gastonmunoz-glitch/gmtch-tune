@@ -80,7 +80,7 @@ const MENU = [
   },
   {
     to: "/ordenes",
-    label: "🧾 Cola de Trabajo",
+    label: "🧾 Fila de Trabajo",
     roles: PERMISOS_RUTAS["/ordenes"],
   },
   {
