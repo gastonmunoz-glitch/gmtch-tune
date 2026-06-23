@@ -2,7 +2,7 @@ const { QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
 const { ArchivoECU, OrdenTrabajo } = require("../models");
 
-console.log("📂 CONTROLLER_FILE_SERVICE_POST_ESCRITURA_V3_CARGADO");
+console.log("📂 CONTROLLER_FILE_SERVICE_POST_ESCRITURA_V4_CIERRE_ORDEN_CARGADO");
 
 let columnasPreparadas = false;
 
@@ -128,6 +128,12 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "archivos_ecu"
     ADD COLUMN IF NOT EXISTS "archivado_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "tecnico_finalizado_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "tecnico_finalizado_at" TIMESTAMP WITH TIME ZONE;
 
     ALTER TABLE "diagnosticos"
     ADD COLUMN IF NOT EXISTS "sin_dtc" BOOLEAN DEFAULT false;
@@ -898,18 +904,24 @@ const obtenerArchivoECUPorId = async (req, res) => {
 };
 
 const actualizarArchivoECU = async (req, res) => {
+  const transaction = await sequelize.transaction();
+
   try {
     await prepararColumnas();
 
-    const archivo = await ArchivoECU.findByPk(req.params.id);
+    const archivo = await ArchivoECU.findByPk(req.params.id, { transaction });
 
     if (!archivo) {
+      await transaction.rollback();
+
       return res.status(404).json({
         error: "No encontrado",
       });
     }
 
     if (archivo.archivado) {
+      await transaction.rollback();
+
       return res.status(400).json({
         error: "No puedes modificar un archivo archivado",
       });
@@ -917,11 +929,31 @@ const actualizarArchivoECU = async (req, res) => {
 
     const nuevoEstado = limpiarTexto(req.body.estado);
 
-    if (nuevoEstado === "FINALIZADO" || nuevoEstado === "FINALIZADO_TECNICO") {
+    const quiereFinalizarTecnico =
+      nuevoEstado === "FINALIZADO" || nuevoEstado === "FINALIZADO_TECNICO";
+
+    if (quiereFinalizarTecnico) {
+      const faltantes = [];
+
       if (archivo.post_escritura_estado !== "OK") {
+        faltantes.push("Post escritura con resultado OK");
+      }
+
+      if (!limpiarTexto(archivo.post_escritura_scanner)) {
+        faltantes.push("Foto/captura scanner post escritura");
+      }
+
+      if (!limpiarTexto(archivo.post_escritura_dtc)) {
+        faltantes.push("DTC post escritura o SIN DTC POST ESCRITURA");
+      }
+
+      if (faltantes.length > 0) {
+        await transaction.rollback();
+
         return res.status(400).json({
           error:
-            "No puedes finalizar sin post escritura OK, scanner post escritura y DTC post escritura registrados",
+            "No puedes finalizar técnicamente sin evidencia post escritura completa",
+          faltantes,
         });
       }
     }
@@ -958,13 +990,57 @@ const actualizarArchivoECU = async (req, res) => {
         String(req.body.correccion_pendiente).toLowerCase() === "true";
     }
 
-    await archivo.update(payload);
+    if (quiereFinalizarTecnico) {
+      payload.estado = "FINALIZADO_TECNICO";
+      payload.correccion_pendiente = false;
+    }
+
+    await archivo.update(payload, { transaction });
+
+    if (quiereFinalizarTecnico) {
+      const [resultadoOrden] = await sequelize.query(
+        `
+        UPDATE "ordenes_trabajo"
+        SET
+          "estado" = 'LISTO_PARA_ENTREGA',
+          "tecnico_finalizado_por" = :usuario,
+          "tecnico_finalizado_at" = NOW(),
+          "updatedAt" = NOW()
+        WHERE "id" = :ordenId
+        RETURNING "id", "estado", "estado_pago", "monto_total";
+        `,
+        {
+          replacements: {
+            ordenId: archivo.ordenId,
+            usuario: usuarioActual(req),
+          },
+          transaction,
+        }
+      );
+
+      if (!resultadoOrden || resultadoOrden.length === 0) {
+        await transaction.rollback();
+
+        return res.status(404).json({
+          error:
+            "Archivo finalizado técnicamente, pero no se encontró la orden asociada. No se aplicaron cambios.",
+        });
+      }
+    }
+
+    await transaction.commit();
+
+    const archivoActualizado = await ArchivoECU.findByPk(req.params.id);
 
     res.json({
-      mensaje: "Archivo ECU actualizado",
-      archivo,
+      mensaje: quiereFinalizarTecnico
+        ? "Archivo ECU finalizado técnicamente y orden marcada como LISTO_PARA_ENTREGA"
+        : "Archivo ECU actualizado",
+      archivo: archivoActualizado,
     });
   } catch (error) {
+    await transaction.rollback();
+
     console.error("ERROR AL ACTUALIZAR ARCHIVO ECU:", error);
 
     res.status(500).json({
