@@ -400,7 +400,7 @@ const crearArchivoECU = async (req, res) => {
     const nuevoArchivo = await ArchivoECU.create({
       ordenId,
 
-      estado: "ORIGINAL_CARGADO",
+      estado: "NOTIFICADO_MASTER",
       prioridad: limpiarTexto(req.body.prioridad) || "MEDIA",
       tipo_servicio: limpiarTexto(req.body.tipo_servicio),
 
@@ -420,6 +420,9 @@ const crearArchivoECU = async (req, res) => {
       archivo_original: obtenerRutaPublicaArchivo(req.file),
       archivo_original_subido_por: usuarioActual(req),
       archivo_original_subido_at: new Date(),
+
+      notificado_master_at: new Date(),
+      notificado_master_por: usuarioActual(req),
 
       archivo_modificado: null,
       versiones_modificadas: [],
@@ -450,7 +453,7 @@ const crearArchivoECU = async (req, res) => {
     }
 
     res.status(201).json({
-      mensaje: "Archivo ECU guardado correctamente",
+      mensaje: "Archivo ECU guardado y Master notificado internamente",
       archivo: nuevoArchivo,
       id: nuevoArchivo.id,
       archivoECUId: nuevoArchivo.id,

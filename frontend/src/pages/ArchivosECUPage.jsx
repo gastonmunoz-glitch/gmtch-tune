@@ -39,6 +39,24 @@ const FILTROS = [
   { value: "OK_CIERRE", label: "OK cierre" },
 ];
 
+const SERVICIOS_FILE_SERVICE = [
+  "Diagnostico ECU",
+  "Lectura ECU",
+  "Stage 1",
+  "Stage 2",
+  "Stage 3",
+  "Eco / consumo",
+  "Pops & Bangs",
+  "Hardcut / limitador RPM",
+  "Vmax / limitador velocidad",
+  "DTC / revision de fallas",
+  "Clonacion ECU",
+  "Immo / inmovilizador",
+  "Airbag / crash data",
+  "File Service personalizado",
+  "Otro",
+];
+
 const RUTA_DIAGNOSTICO = "/diagnostico";
 
 const getApiRoot = () => {
@@ -143,6 +161,7 @@ export default function ArchivosECUPage() {
     ordenId: "",
     prioridad: "MEDIA",
     tipo_servicio: "",
+    tipo_servicio_personalizado: "",
     metodo_lectura: "",
     herramienta_lectura: "",
     marca_ecu: "",
@@ -346,9 +365,18 @@ export default function ArchivosECUPage() {
       setGuardando(true);
 
       const fd = new FormData();
+      const tipoServicio =
+        nuevo.tipo_servicio === "Otro"
+          ? limpiar(nuevo.tipo_servicio_personalizado) || "Otro"
+          : nuevo.tipo_servicio;
 
       Object.entries(nuevo).forEach(([key, value]) => {
         if (key === "archivo") return;
+        if (key === "tipo_servicio_personalizado") return;
+        if (key === "tipo_servicio") {
+          fd.append(key, tipoServicio);
+          return;
+        }
         fd.append(key, value ?? "");
       });
 
@@ -366,6 +394,7 @@ export default function ArchivosECUPage() {
         ordenId: "",
         prioridad: "MEDIA",
         tipo_servicio: "",
+        tipo_servicio_personalizado: "",
         metodo_lectura: "",
         herramienta_lectura: "",
         marca_ecu: "",
@@ -781,18 +810,47 @@ export default function ArchivosECUPage() {
 
             <div>
               <label className="text-xs text-slate-400 ml-1">Tipo servicio</label>
-              <input
+              <select
                 value={nuevo.tipo_servicio}
                 onChange={(e) =>
                   setNuevo((prev) => ({
                     ...prev,
                     tipo_servicio: e.target.value,
+                    tipo_servicio_personalizado:
+                      e.target.value === "Otro"
+                        ? prev.tipo_servicio_personalizado
+                        : "",
                   }))
                 }
-                placeholder="Stage 1, diagnóstico, recuperación, etc."
                 className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
-              />
+              >
+                <option value="">-- Selecciona servicio --</option>
+                {SERVICIOS_FILE_SERVICE.map((servicio) => (
+                  <option key={servicio} value={servicio}>
+                    {servicio}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            {nuevo.tipo_servicio === "Otro" && (
+              <div>
+                <label className="text-xs text-slate-400 ml-1">
+                  Servicio personalizado
+                </label>
+                <input
+                  value={nuevo.tipo_servicio_personalizado}
+                  onChange={(e) =>
+                    setNuevo((prev) => ({
+                      ...prev,
+                      tipo_servicio_personalizado: e.target.value,
+                    }))
+                  }
+                  placeholder="Describe el servicio requerido"
+                  className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                />
+              </div>
+            )}
 
             <div>
               <label className="text-xs text-slate-400 ml-1">Método lectura</label>
@@ -848,41 +906,56 @@ export default function ArchivosECUPage() {
               />
             </div>
 
-            <div>
-              <label className="text-xs text-slate-400 ml-1">HW</label>
-              <input
-                value={nuevo.hw}
-                onChange={(e) =>
-                  setNuevo((prev) => ({ ...prev, hw: e.target.value }))
-                }
-                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
-              />
-            </div>
+            <details className="md:col-span-3 bg-slate-950/70 border border-slate-800 rounded-2xl p-4">
+              <summary className="cursor-pointer font-semibold text-slate-200">
+                Datos avanzados ECU opcionales
+              </summary>
 
-            <div>
-              <label className="text-xs text-slate-400 ml-1">SW</label>
-              <input
-                value={nuevo.sw}
-                onChange={(e) =>
-                  setNuevo((prev) => ({ ...prev, sw: e.target.value }))
-                }
-                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
-              />
-            </div>
+              <p className="text-xs text-slate-500 mt-2 mb-4">
+                Estos datos son opcionales. Un Master puede completarlos si los
+                tiene; un Slave o taller pequeno puede dejarlo vacio.
+              </p>
 
-            <div>
-              <label className="text-xs text-slate-400 ml-1">Versión software</label>
-              <input
-                value={nuevo.version_software}
-                onChange={(e) =>
-                  setNuevo((prev) => ({
-                    ...prev,
-                    version_software: e.target.value,
-                  }))
-                }
-                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
-              />
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-400 ml-1">HW</label>
+                  <input
+                    value={nuevo.hw}
+                    onChange={(e) =>
+                      setNuevo((prev) => ({ ...prev, hw: e.target.value }))
+                    }
+                    className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 ml-1">SW</label>
+                  <input
+                    value={nuevo.sw}
+                    onChange={(e) =>
+                      setNuevo((prev) => ({ ...prev, sw: e.target.value }))
+                    }
+                    className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 ml-1">
+                    Version software
+                  </label>
+                  <input
+                    value={nuevo.version_software}
+                    onChange={(e) =>
+                      setNuevo((prev) => ({
+                        ...prev,
+                        version_software: e.target.value,
+                      }))
+                    }
+                    className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            </details>
 
             <div className="md:col-span-3">
               <label className="text-xs text-slate-400 ml-1">
@@ -1244,7 +1317,7 @@ export default function ArchivosECUPage() {
                         onClick={() => notificarMaster(archivo)}
                         className="w-full px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500"
                       >
-                        Notificar Master
+                        Avisar Master por WhatsApp
                       </button>
 
                       <button
