@@ -185,50 +185,38 @@ function OrdenesPage() {
     }
   };
 
-  const marcarPagado = async (orden, medioPago = "TRANSFERENCIA") => {
-    const confirmar = window.confirm(
-      `¿Confirmar pago de la orden #${orden.id} por $${Number(
-        orden.monto_total || 0
-      ).toLocaleString("es-CL")}?`
-    );
+  const cobrarYEntregar = async (orden, medioPago = "TRANSFERENCIA") => {
+    const montoTotal = Number(orden.monto_total || 0);
+    const montoPagado = Number(orden.monto_pagado || montoTotal);
+    const usuario = localStorage.getItem("username") || "sistema";
 
-    if (!confirmar) return;
-
-    try {
-      await api.patch(`/ordenes/${orden.id}`, {
-        estado_pago: "PAGADO",
-        medio_pago: medioPago,
-        monto_pagado: Number(orden.monto_total || 0),
-        observacion_pago: `Pago confirmado por ${localStorage.getItem("username")}`,
-      });
-
-      await recargar();
-
-      alert("Pago confirmado.");
-    } catch (err) {
-      console.error("ERROR CONFIRMANDO PAGO:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudo confirmar el pago.");
+    if (!montoTotal || montoTotal <= 0) {
+      alert("No se puede entregar una orden sin monto total.");
+      return;
     }
-  };
 
-  const finalizarEntrega = async (orden) => {
     const confirmar = window.confirm(
-      `¿Finalizar y entregar la orden #${orden.id}?`
+      `¿Confirmar pago y entregar la orden #${orden.id} por $${montoPagado.toLocaleString(
+        "es-CL"
+      )}?`
     );
 
     if (!confirmar) return;
 
     try {
-      await api.patch(`/ordenes/${orden.id}`, {
-        estado: "ENTREGADO",
+      await api.post(`/ordenes/${orden.id}/cobrar-entregar`, {
+        medio_pago: medioPago,
+        monto_pagado: montoPagado,
+        observacion_pago: `Pago confirmado por ${usuario}`,
+        observacion_cierre: `Orden entregada por ${usuario}`,
       });
 
       await recargar();
 
-      alert("Orden entregada.");
+      alert("Pago confirmado y orden entregada.");
     } catch (err) {
-      console.error("ERROR ENTREGANDO ORDEN:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudo entregar la orden.");
+      console.error("ERROR COBRANDO Y ENTREGANDO:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "No se pudo confirmar el pago y entregar.");
     }
   };
 
@@ -485,23 +473,13 @@ function OrdenesPage() {
                     </button>
 
                     {puedeCobrarFrontend() && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => marcarPagado(o, "TRANSFERENCIA")}
-                          className="bg-black text-white px-4 py-2 font-black uppercase text-[10px]"
-                        >
-                          Confirmar pago
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => finalizarEntrega(o)}
-                          className="bg-green-700 text-white px-4 py-2 font-black uppercase text-[10px]"
-                        >
-                          Entregar
-                        </button>
-                      </>
+                      <button
+                        type="button"
+                        onClick={() => cobrarYEntregar(o, "TRANSFERENCIA")}
+                        className="bg-green-700 text-white px-4 py-2 font-black uppercase text-[10px]"
+                      >
+                        Confirmar pago y entregar
+                      </button>
                     )}
                   </div>
 
