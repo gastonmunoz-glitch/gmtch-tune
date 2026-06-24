@@ -46,6 +46,57 @@ const normalizarBoolean = (valor) => {
   return ["true", "si", "sí", "yes", "on"].includes(texto);
 };
 
+const normalizarCategoriaCliente = (categoria) => {
+  const valor = String(categoria || "NORMAL").trim().toUpperCase();
+  if (["MAYORISTA", "PROVEEDOR"].includes(valor)) return "TALLER_ALIADO";
+
+  return [
+    "NORMAL",
+    "VIP",
+    "FLOTA",
+    "TALLER_ALIADO",
+    "GARANTIA_RECLAMO",
+    "INTERNO",
+  ].includes(valor)
+    ? valor
+    : "NORMAL";
+};
+
+const prioridadSugeridaPorCategoria = (categoria) => {
+  const normalizada = normalizarCategoriaCliente(categoria);
+  const mapa = {
+    NORMAL: "MEDIA",
+    VIP: "ALTA",
+    FLOTA: "ALTA",
+    TALLER_ALIADO: "ALTA",
+    GARANTIA_RECLAMO: "URGENTE",
+    INTERNO: "BAJA",
+  };
+
+  return mapa[normalizada] || "MEDIA";
+};
+
+const obtenerPrioridadSugeridaPorVehiculo = async (vehiculoId) => {
+  try {
+    const filas = await sequelize.query(
+      `SELECT c."categoria_cliente"
+       FROM "vehiculos" v
+       LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+       WHERE v."id" = :vehiculoId
+       LIMIT 1`,
+      {
+        replacements: { vehiculoId },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    return prioridadSugeridaPorCategoria(filas[0]?.categoria_cliente);
+  } catch (error) {
+    console.warn("No se pudo sugerir prioridad por categoría:", error.message);
+    return "MEDIA";
+  }
+};
+
 const NOTIFICACIONES_RESPONSABLES = {
   diagnostico_asignado_a: {
     tipo: "ORDEN_ASIGNADA_DIAGNOSTICO",
@@ -284,7 +335,9 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
                 telefono: row.cliente_telefono,
                 email: row.cliente_email,
                 direccion: row.cliente_direccion,
-                categoria_cliente: row.cliente_categoria_cliente || "NORMAL",
+                categoria_cliente: normalizarCategoriaCliente(
+                  row.cliente_categoria_cliente
+                ),
                 excluir_estadisticas: row.cliente_excluir_estadisticas,
                 nota_cliente: row.cliente_nota_cliente,
               }
@@ -407,9 +460,13 @@ const crearOrden = async (req, res) => {
       });
     }
 
+    const prioridadExplicita = limpiarTexto(req.body.prioridad);
+    const prioridadFinal =
+      prioridadExplicita || (await obtenerPrioridadSugeridaPorVehiculo(vehiculoId));
+
     const nuevaOrden = await OrdenTrabajo.create({
       vehiculoId,
-      prioridad: limpiarTexto(req.body.prioridad) || "MEDIA",
+      prioridad: prioridadFinal,
       estado: limpiarTexto(req.body.estado) || "RECEPCIONADO",
       estado_pago: limpiarTexto(req.body.estado_pago) || "PENDIENTE",
       medio_pago: limpiarTexto(req.body.medio_pago) || "PENDIENTE",

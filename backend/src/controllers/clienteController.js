@@ -6,17 +6,22 @@ let columnasPreparadas = false;
 
 const normalizarCategoria = (categoria) => {
   const valor = String(categoria || "NORMAL").trim().toUpperCase();
+  const compatibilidad = {
+    MAYORISTA: "TALLER_ALIADO",
+    PROVEEDOR: "TALLER_ALIADO",
+  };
+  const normalizada = compatibilidad[valor] || valor;
 
   const permitidas = [
     "NORMAL",
     "VIP",
     "FLOTA",
-    "MAYORISTA",
-    "PROVEEDOR",
+    "TALLER_ALIADO",
+    "GARANTIA_RECLAMO",
     "INTERNO",
   ];
 
-  return permitidas.includes(valor) ? valor : "NORMAL";
+  return permitidas.includes(normalizada) ? normalizada : "NORMAL";
 };
 
 const normalizarBoolean = (valor) => {

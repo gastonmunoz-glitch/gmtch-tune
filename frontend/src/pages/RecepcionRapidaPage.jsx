@@ -7,6 +7,7 @@ const ESTADO_ORDEN_FINAL_RECEPCION = "PARA_DIAGNOSTICO";
 const ESTADO_INICIAL_CLIENTE = {
   nombre: "",
   telefono: "",
+  categoria_cliente: "NORMAL",
 };
 
 const ESTADO_INICIAL_VEHICULO = {
@@ -106,6 +107,35 @@ const obtenerOrdenesVehiculo = (vehiculo) => {
 
 const obtenerClienteVehiculo = (vehiculo) => {
   return vehiculo?.Cliente || vehiculo?.cliente || vehiculo?.ClienteAsociado || null;
+};
+
+const CATEGORIAS_CLIENTE = [
+  { value: "NORMAL", label: "Normal" },
+  { value: "VIP", label: "VIP" },
+  { value: "FLOTA", label: "Flota" },
+  { value: "TALLER_ALIADO", label: "Taller aliado" },
+  { value: "GARANTIA_RECLAMO", label: "Garantía / reclamo" },
+  { value: "INTERNO", label: "Interno" },
+];
+
+const normalizarCategoriaCliente = (categoria) => {
+  const valor = String(categoria || "NORMAL").trim().toUpperCase();
+  if (["MAYORISTA", "PROVEEDOR"].includes(valor)) return "TALLER_ALIADO";
+
+  return CATEGORIAS_CLIENTE.some((item) => item.value === valor) ? valor : "NORMAL";
+};
+
+const prioridadSugeridaPorCategoria = (categoria) => {
+  const mapa = {
+    NORMAL: "MEDIA",
+    VIP: "ALTA",
+    FLOTA: "ALTA",
+    TALLER_ALIADO: "ALTA",
+    GARANTIA_RECLAMO: "URGENTE",
+    INTERNO: "BAJA",
+  };
+
+  return mapa[normalizarCategoriaCliente(categoria)] || "MEDIA";
 };
 
 function RecepcionRapidaPage() {
@@ -299,7 +329,14 @@ function RecepcionRapidaPage() {
       setCliente({
         nombre: clienteAsociado?.nombre || "",
         telefono: clienteAsociado?.telefono || "",
+        categoria_cliente: normalizarCategoriaCliente(
+          clienteAsociado?.categoria_cliente
+        ),
       });
+      setOrden((prev) => ({
+        ...prev,
+        prioridad: prioridadSugeridaPorCategoria(clienteAsociado?.categoria_cliente),
+      }));
 
       if (nuevoVehiculoId) {
         setVehiculoId(nuevoVehiculoId);
@@ -334,7 +371,10 @@ function RecepcionRapidaPage() {
       return;
     }
 
-    setOrden({ ...ESTADO_INICIAL_ORDEN });
+    setOrden({
+      ...ESTADO_INICIAL_ORDEN,
+      prioridad: prioridadSugeridaPorCategoria(cliente.categoria_cliente),
+    });
     setOrdenId(null);
     setFotosArchivos([]);
     borrarStorage("gmtch_ordenId");
@@ -358,6 +398,7 @@ function RecepcionRapidaPage() {
       const payload = {
         nombre,
         telefono,
+        categoria_cliente: normalizarCategoriaCliente(cliente.categoria_cliente),
       };
 
       const res = await api.post("/clientes", payload);
@@ -799,6 +840,28 @@ function RecepcionRapidaPage() {
               }
             />
 
+            <select
+              className="border border-black p-3 w-full bg-white font-bold"
+              value={normalizarCategoriaCliente(cliente.categoria_cliente)}
+              onChange={(e) => {
+                const categoria = normalizarCategoriaCliente(e.target.value);
+                setCliente((prev) => ({
+                  ...prev,
+                  categoria_cliente: categoria,
+                }));
+                setOrden((prev) => ({
+                  ...prev,
+                  prioridad: prioridadSugeridaPorCategoria(categoria),
+                }));
+              }}
+            >
+              {CATEGORIAS_CLIENTE.map((categoria) => (
+                <option key={categoria.value} value={categoria.value}>
+                  {categoria.label}
+                </option>
+              ))}
+            </select>
+
             <div className="flex justify-between gap-4">
               <button
                 type="button"
@@ -949,6 +1012,11 @@ function RecepcionRapidaPage() {
               <option value="ALTA">Prioridad alta</option>
               <option value="URGENTE">Urgente</option>
             </select>
+
+            <p className="text-[10px] font-black uppercase text-gray-500">
+              Prioridad sugerida por categoría:{" "}
+              {prioridadSugeridaPorCategoria(cliente.categoria_cliente)}
+            </p>
 
             <textarea
               className="border border-black p-3 w-full"

@@ -47,6 +47,35 @@ const RESPONSABLES_ETAPAS = [
   },
 ];
 
+const normalizarCategoriaCliente = (categoria) => {
+  const valor = String(categoria || "NORMAL").trim().toUpperCase();
+  if (["MAYORISTA", "PROVEEDOR"].includes(valor)) return "TALLER_ALIADO";
+
+  return [
+    "NORMAL",
+    "VIP",
+    "FLOTA",
+    "TALLER_ALIADO",
+    "GARANTIA_RECLAMO",
+    "INTERNO",
+  ].includes(valor)
+    ? valor
+    : "NORMAL";
+};
+
+const prioridadSugeridaPorCategoria = (categoria) => {
+  const mapa = {
+    NORMAL: "MEDIA",
+    VIP: "ALTA",
+    FLOTA: "ALTA",
+    TALLER_ALIADO: "ALTA",
+    GARANTIA_RECLAMO: "URGENTE",
+    INTERNO: "BAJA",
+  };
+
+  return mapa[normalizarCategoriaCliente(categoria)] || "MEDIA";
+};
+
 const prioridadClase = (prioridad) => {
   const p = String(prioridad || "MEDIA").toUpperCase();
 
@@ -242,6 +271,22 @@ function OrdenesPage() {
   }, [ordenes, filtro]);
 
   const actualizarForm = (campo, valor) => {
+    if (campo === "vehiculoId") {
+      const vehiculoSeleccionado = vehiculos.find(
+        (item) => String(item.id) === String(valor)
+      );
+      const prioridadSugerida = prioridadSugeridaPorCategoria(
+        vehiculoSeleccionado?.Cliente?.categoria_cliente
+      );
+
+      setFormData((prev) => ({
+        ...prev,
+        vehiculoId: valor,
+        prioridad: prioridadSugerida,
+      }));
+      return;
+    }
+
     setFormData((prev) => ({
       ...prev,
       [campo]: valor,
@@ -425,6 +470,12 @@ function OrdenesPage() {
               <option value="URGENTE">URGENTE</option>
             </select>
           </div>
+
+          {formData.vehiculoId && (
+            <p className="text-[10px] font-black uppercase text-gray-500">
+              Sugerida por categoría de cliente. Puedes cambiarla manualmente.
+            </p>
+          )}
 
           <textarea
             className="w-full border-4 border-black p-4 font-black uppercase"

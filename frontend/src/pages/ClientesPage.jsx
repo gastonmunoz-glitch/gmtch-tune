@@ -2,7 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 
-const CATEGORIAS = ["NORMAL", "VIP", "FLOTA", "MAYORISTA", "PROVEEDOR", "INTERNO"];
+const CATEGORIAS = [
+  { value: "NORMAL", label: "Normal" },
+  { value: "VIP", label: "VIP" },
+  { value: "FLOTA", label: "Flota" },
+  { value: "TALLER_ALIADO", label: "Taller aliado" },
+  { value: "GARANTIA_RECLAMO", label: "Garantía / reclamo" },
+  { value: "INTERNO", label: "Interno" },
+];
 
 const FORM_INICIAL = {
   nombre: "",
@@ -17,6 +24,17 @@ const FORM_INICIAL = {
 const texto = (valor, fallback = "No registrado") => {
   const limpio = String(valor ?? "").trim();
   return limpio || fallback;
+};
+
+const normalizarCategoriaCliente = (categoria) => {
+  const valor = String(categoria || "NORMAL").trim().toUpperCase();
+  if (["MAYORISTA", "PROVEEDOR"].includes(valor)) return "TALLER_ALIADO";
+  return CATEGORIAS.some((item) => item.value === valor) ? valor : "NORMAL";
+};
+
+const etiquetaCategoriaCliente = (categoria) => {
+  const normalizada = normalizarCategoriaCliente(categoria);
+  return CATEGORIAS.find((item) => item.value === normalizada)?.label || "Normal";
 };
 
 const fecha = (valor, fallback = "No registrado") => {
@@ -169,7 +187,7 @@ function ClientesPage() {
       telefono: cliente.telefono || "",
       email: cliente.email || "",
       direccion: cliente.direccion || "",
-      categoria_cliente: cliente.categoria_cliente || "NORMAL",
+      categoria_cliente: normalizarCategoriaCliente(cliente.categoria_cliente),
       excluir_estadisticas: cliente.excluir_estadisticas === true,
       nota_cliente: cliente.nota_cliente || "",
     });
@@ -315,8 +333,8 @@ function ClientesPage() {
               }
             >
               {CATEGORIAS.map((categoria) => (
-                <option key={categoria} value={categoria}>
-                  {categoria}
+                <option key={categoria.value} value={categoria.value}>
+                  {categoria.label}
                 </option>
               ))}
             </select>
@@ -411,7 +429,7 @@ function ClientesPage() {
                   <div className="text-gray-500 break-all">{texto(cliente.email)}</div>
                 </div>
                 <div className="col-span-2 font-black text-sm">
-                  {texto(cliente.categoria_cliente, "NORMAL")}
+                  {etiquetaCategoriaCliente(cliente.categoria_cliente)}
                   <div className="text-xs text-gray-500">
                     Activas: {resumen.ordenesActivas}
                   </div>
@@ -483,7 +501,10 @@ function ClientesPage() {
                   <div>Telefono: {texto(clienteSeleccionado.telefono, "Pendiente")}</div>
                   <div>Email: {texto(clienteSeleccionado.email)}</div>
                   <div>Direccion: {texto(clienteSeleccionado.direccion)}</div>
-                  <div>Categoria: {texto(clienteSeleccionado.categoria_cliente, "NORMAL")}</div>
+                  <div>
+                    Categoria:{" "}
+                    {etiquetaCategoriaCliente(clienteSeleccionado.categoria_cliente)}
+                  </div>
                   <div>
                     Estadísticas:{" "}
                     {clienteSeleccionado.excluir_estadisticas === true
