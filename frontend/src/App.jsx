@@ -69,48 +69,48 @@ const PERMISOS_RUTAS = {
 const MENU = [
   {
     to: "/",
-    label: "📊 Dashboard",
+    label: "Dashboard",
     roles: PERMISOS_RUTAS["/"],
   },
   {
     to: "/flujo",
-    label: "🚦 Nueva Recepción",
+    label: "Nueva Recepcion",
     destacado: true,
     roles: PERMISOS_RUTAS["/flujo"],
   },
   {
     to: "/ordenes",
-    label: "🧾 Fila de Trabajo",
+    label: "Fila de Trabajo",
     roles: PERMISOS_RUTAS["/ordenes"],
   },
   {
     to: "/diagnosticos",
-    label: "🧠 Diagnóstico / Scanner",
+    label: "Diagnostico / Scanner",
     roles: PERMISOS_RUTAS["/diagnosticos"],
   },
   {
     to: "/archivos-ecu",
-    label: "📂 File Service / Tuner",
+    label: "File Service / Tuner",
     roles: PERMISOS_RUTAS["/archivos-ecu"],
   },
   {
     to: "/clientes",
-    label: "👥 Clientes",
+    label: "Clientes",
     roles: PERMISOS_RUTAS["/clientes"],
   },
   {
     to: "/vehiculos",
-    label: "🚗 Garage",
+    label: "Garage",
     roles: PERMISOS_RUTAS["/vehiculos"],
   },
   {
     to: "/fotos",
-    label: "📸 Fotos",
+    label: "Fotos",
     roles: PERMISOS_RUTAS["/fotos"],
   },
   {
     to: "/usuarios",
-    label: "👑 Usuarios / Roles",
+    label: "Usuarios / Roles",
     roles: PERMISOS_RUTAS["/usuarios"],
   },
 ];
@@ -202,7 +202,7 @@ function App() {
         setUsuario(u);
         setAuth(true);
       } catch (err) {
-        console.error("Sesión inválida o expirada:", err.response?.data || err.message);
+        console.error("Sesion invalida o expirada:", err.response?.data || err.message);
 
         if (!activo) return;
 
@@ -279,16 +279,16 @@ function App() {
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg font-black text-xl"
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg font-black text-xs uppercase"
             >
-              ☰
+              Menu
             </button>
           </div>
 
           {sidebarOpen && (
             <button
               type="button"
-              aria-label="Cerrar menú"
+              aria-label="Cerrar menu"
               onClick={closeSidebar}
               className="md:hidden fixed inset-0 bg-black/60 z-40"
             />
@@ -322,9 +322,9 @@ function App() {
                 <button
                   type="button"
                   onClick={closeSidebar}
-                  className="md:hidden text-white text-2xl font-black"
+                  className="md:hidden text-white text-xs font-black uppercase"
                 >
-                  ×
+                  Cerrar
                 </button>
               </div>
 
@@ -348,7 +348,7 @@ function App() {
                   onClick={handleLogout}
                   className="w-full bg-red-600 text-white py-2 rounded font-black text-[10px] uppercase hover:bg-red-700 transition"
                 >
-                  Cerrar Sesión
+                  Cerrar sesion
                 </button>
               </div>
             </nav>
@@ -488,7 +488,7 @@ const AccesoDenegado = ({ usuario }) => (
     <h1 className="text-4xl font-black uppercase">Acceso restringido</h1>
 
     <p className="text-xs font-bold uppercase text-gray-500 mt-3">
-      Tu perfil actual no tiene permisos para esta sección.
+      Tu perfil actual no tiene permisos para esta seccion.
     </p>
 
     <div className="mt-6 bg-black text-white p-5 inline-block">
