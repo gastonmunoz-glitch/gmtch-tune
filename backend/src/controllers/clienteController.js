@@ -1,3 +1,5 @@
+const { QueryTypes } = require("sequelize");
+const sequelize = require("../config/database");
 const { Cliente, Vehiculo, OrdenTrabajo } = require("../models");
 
 const normalizarCategoria = (categoria) => {
@@ -26,6 +28,22 @@ const limpiarPayloadCliente = (body = {}) => {
   };
 };
 
+const toNumber = (valor) => {
+  const numero = Number(valor || 0);
+  return Number.isFinite(numero) ? numero : 0;
+};
+
+const maxFecha = (fechas) => {
+  const validas = fechas
+    .filter(Boolean)
+    .map((fecha) => new Date(fecha))
+    .filter((fecha) => !Number.isNaN(fecha.getTime()));
+
+  if (!validas.length) return null;
+
+  return validas.reduce((ultima, fecha) => (fecha > ultima ? fecha : ultima)).toISOString();
+};
+
 const obtenerClientes = async (req, res) => {
   try {
     const clientes = await Cliente.findAll({
@@ -47,6 +65,114 @@ const obtenerClientes = async (req, res) => {
     res.json(clientes);
   } catch (error) {
     console.error("ERROR OBTENIENDO CLIENTES:", error);
+
+    res.status(500).json({
+      error: error.message,
+      detalle: error.errors?.map((e) => e.message) || null,
+    });
+  }
+};
+
+const obtenerClientePorId = async (req, res) => {
+  try {
+    const clienteId = req.params.id;
+
+    const clientes = await sequelize.query(
+      `SELECT id, nombre, telefono, email, direccion, categoria_cliente, nota_cliente, "createdAt", "updatedAt"
+       FROM clientes
+       WHERE id = :clienteId
+       LIMIT 1`,
+      {
+        replacements: { clienteId },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    const cliente = clientes[0];
+
+    if (!cliente) {
+      return res.status(404).json({
+        error: "Cliente no encontrado",
+      });
+    }
+
+    const vehiculos = await sequelize.query(
+      `SELECT *
+       FROM vehiculos
+       WHERE "clienteId" = :clienteId
+       ORDER BY patente ASC`,
+      {
+        replacements: { clienteId },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    const vehiculoIds = vehiculos.map((vehiculo) => vehiculo.id);
+    let ordenes = [];
+
+    if (vehiculoIds.length > 0) {
+      ordenes = await sequelize.query(
+        `SELECT *
+         FROM ordenes_trabajo
+         WHERE "vehiculoId" IN (:vehiculoIds)
+         ORDER BY "createdAt" DESC`,
+        {
+          replacements: { vehiculoIds },
+          type: QueryTypes.SELECT,
+        }
+      );
+    }
+
+    const ordenesPorVehiculo = ordenes.reduce((acc, orden) => {
+      if (!acc[orden.vehiculoId]) acc[orden.vehiculoId] = [];
+      acc[orden.vehiculoId].push(orden);
+      return acc;
+    }, {});
+
+    const vehiculosConOrdenes = vehiculos.map((vehiculo) => ({
+      ...vehiculo,
+      OrdenTrabajos: ordenesPorVehiculo[vehiculo.id] || [],
+    }));
+
+    const ordenesActivas = ordenes.filter(
+      (orden) => String(orden.estado || "").toUpperCase() !== "ENTREGADO"
+    ).length;
+
+    const pagosPendientes = ordenes.filter(
+      (orden) => String(orden.estado_pago || "").toUpperCase() !== "PAGADO"
+    ).length;
+
+    const totalFacturado = ordenes.reduce(
+      (total, orden) => total + toNumber(orden.monto_total),
+      0
+    );
+
+    const totalPagado = ordenes.reduce(
+      (total, orden) => total + toNumber(orden.monto_pagado),
+      0
+    );
+
+    const metricas = {
+      totalVehiculos: vehiculos.length,
+      totalOrdenes: ordenes.length,
+      ordenesActivas,
+      totalFacturado,
+      totalPagado,
+      ultimaVisita: maxFecha(ordenes.map((orden) => orden.createdAt)),
+      ultimaEntrega: maxFecha(ordenes.map((orden) => orden.entregado_at)),
+      pagosPendientes,
+    };
+
+    res.json({
+      ...cliente,
+      Vehiculos: vehiculosConOrdenes,
+      OrdenTrabajos: ordenes,
+      Ordenes: ordenes,
+      metricas,
+      ...metricas,
+    });
+  } catch (error) {
+    console.error("ERROR OBTENIENDO FICHA CRM CLIENTE:", error);
 
     res.status(500).json({
       error: error.message,
@@ -131,11 +257,18 @@ const eliminarCliente = async (req, res) => {
 
     const tieneVehiculos =
       Array.isArray(cliente.Vehiculos) && cliente.Vehiculos.length > 0;
+    const tieneOrdenes =
+      tieneVehiculos &&
+      cliente.Vehiculos.some(
+        (vehiculo) =>
+          Array.isArray(vehiculo.OrdenTrabajos) &&
+          vehiculo.OrdenTrabajos.length > 0
+      );
 
-    if (tieneVehiculos) {
+    if (tieneVehiculos || tieneOrdenes) {
       return res.status(400).json({
         error:
-          "Este cliente tiene vehículos o historial asociado. Por control interno no se elimina.",
+          "No se puede eliminar un cliente con historial. Más adelante podrá archivarse.",
       });
     }
 
@@ -155,6 +288,7 @@ const eliminarCliente = async (req, res) => {
 
 module.exports = {
   obtenerClientes,
+  obtenerClientePorId,
   crearCliente,
   actualizarCliente,
   eliminarCliente,
