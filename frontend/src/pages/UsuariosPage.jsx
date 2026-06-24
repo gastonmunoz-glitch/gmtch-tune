@@ -2,14 +2,14 @@ import { useEffect, useState } from "react";
 import api from "../services/api";
 
 const ROLES = [
-  { value: "OWNER", label: "👑 OWNER / GASTÓN" },
-  { value: "ADMIN", label: "🛡️ ADMIN" },
-  { value: "SUPERVISOR", label: "📡 SUPERVISOR" },
-  { value: "RECEPCION", label: "🚦 RECEPCIÓN" },
-  { value: "OPERADOR_SCANNER", label: "🧠 OPERADOR SCANNER" },
-  { value: "OPERADOR_ECU", label: "💻 OPERADOR ECU" },
-  { value: "MECANICO", label: "🔧 MECÁNICO" },
-  { value: "TUNER", label: "📂 TUNER" },
+  { value: "OWNER", label: "OWNER" },
+  { value: "ADMIN", label: "ADMIN" },
+  { value: "SUPERVISOR", label: "SUPERVISOR" },
+  { value: "RECEPCION", label: "RECEPCIÓN" },
+  { value: "OPERADOR_SCANNER", label: "OPERADOR SCANNER" },
+  { value: "OPERADOR_ECU", label: "OPERADOR ECU" },
+  { value: "MECANICO", label: "MECÁNICO" },
+  { value: "TUNER", label: "TUNER" },
 ];
 
 const ESTADO_INICIAL = {
@@ -17,6 +17,18 @@ const ESTADO_INICIAL = {
   username: "",
   password: "",
   rol: "RECEPCION",
+};
+
+const formatearFecha = (fecha) => {
+  if (!fecha) return "No registrada";
+
+  try {
+    return new Date(fecha).toLocaleDateString("es-CL", {
+      dateStyle: "short",
+    });
+  } catch {
+    return fecha;
+  }
 };
 
 function UsuariosPage() {
@@ -35,11 +47,16 @@ function UsuariosPage() {
 
         setUsuarios(Array.isArray(res.data) ? res.data : []);
       } catch (err) {
-        console.error("ERROR CARGANDO USUARIOS:", err.response?.data || err.message);
+        console.error(
+          "ERROR CARGANDO USUARIOS:",
+          err.response?.data || err.message
+        );
 
         if (!activo) return;
 
-        alert(err.response?.data?.error || "No se pudieron cargar los usuarios.");
+        alert(
+          err.response?.data?.error || "No se pudieron cargar los usuarios."
+        );
       }
     };
 
@@ -75,15 +92,25 @@ function UsuariosPage() {
   const crearUsuario = async (e) => {
     e.preventDefault();
 
-    if (!form.username || !form.password) {
-      alert("Falta usuario o contraseña.");
+    const nombre = form.nombre.trim();
+    const username = form.username.trim();
+    const password = form.password.trim();
+    const rol = form.rol.trim();
+
+    if (!nombre || !username || !password || !rol) {
+      alert("Debes completar nombre, usuario, contraseña y rol.");
       return;
     }
 
     try {
       setCargando(true);
 
-      await api.post("/usuarios", form);
+      await api.post("/usuarios", {
+        nombre,
+        username,
+        password,
+        rol,
+      });
 
       setForm({ ...ESTADO_INICIAL });
       await cargarUsuarios();
@@ -104,7 +131,10 @@ function UsuariosPage() {
       await api.patch(`/usuarios/${id}`, payload);
       await cargarUsuarios();
     } catch (err) {
-      console.error("ERROR ACTUALIZANDO USUARIO:", err.response?.data || err.message);
+      console.error(
+        "ERROR ACTUALIZANDO USUARIO:",
+        err.response?.data || err.message
+      );
       alert(err.response?.data?.error || "No se pudo actualizar el usuario.");
     } finally {
       setCargando(false);
@@ -123,9 +153,9 @@ function UsuariosPage() {
     alert("Contraseña actualizada.");
   };
 
-  const eliminarUsuario = async (id, username) => {
+  const desactivarUsuario = async (id, username) => {
     const confirmar = window.confirm(
-      `¿Eliminar usuario ${username}? Esta acción solo debe usarse si ya no tendrá acceso.`
+      `¿Desactivar acceso de ${username}? No se borrará su historial.`
     );
 
     if (!confirmar) return;
@@ -136,10 +166,13 @@ function UsuariosPage() {
       await api.delete(`/usuarios/${id}`);
       await cargarUsuarios();
 
-      alert("Usuario eliminado.");
+      alert("Usuario desactivado correctamente.");
     } catch (err) {
-      console.error("ERROR ELIMINANDO USUARIO:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudo eliminar el usuario.");
+      console.error(
+        "ERROR DESACTIVANDO USUARIO:",
+        err.response?.data || err.message
+      );
+      alert(err.response?.data?.error || "No se pudo desactivar el usuario.");
     } finally {
       setCargando(false);
     }
@@ -171,6 +204,7 @@ function UsuariosPage() {
             placeholder="Nombre"
             value={form.nombre}
             onChange={(e) => actualizarForm("nombre", e.target.value)}
+            required
           />
 
           <input
@@ -194,6 +228,7 @@ function UsuariosPage() {
             className="border-2 border-black p-3 font-bold bg-white"
             value={form.rol}
             onChange={(e) => actualizarForm("rol", e.target.value)}
+            required
           >
             {ROLES.map((rol) => (
               <option key={rol.value} value={rol.value}>
@@ -248,6 +283,10 @@ function UsuariosPage() {
                 <p className="text-xs font-bold uppercase text-gray-500">
                   @{usuario.username}
                 </p>
+
+                <p className="text-xs font-bold uppercase text-gray-500">
+                  Creado: {formatearFecha(usuario.createdAt)}
+                </p>
               </div>
 
               <div className="xl:col-span-3">
@@ -282,7 +321,7 @@ function UsuariosPage() {
                       : "bg-red-600 text-white"
                   }`}
                 >
-                  {usuario.activo ? "Activo" : "Desactivado"}
+                  {usuario.activo ? "Activo" : "Inactivo"}
                 </button>
               </div>
 
@@ -299,10 +338,13 @@ function UsuariosPage() {
               <div className="xl:col-span-2">
                 <button
                   type="button"
-                  onClick={() => eliminarUsuario(usuario.id, usuario.username)}
-                  className="w-full bg-red-600 text-white px-4 py-3 border-2 border-black font-black uppercase text-[10px]"
+                  onClick={() =>
+                    desactivarUsuario(usuario.id, usuario.username)
+                  }
+                  disabled={!usuario.activo}
+                  className="w-full bg-red-600 text-white px-4 py-3 border-2 border-black font-black uppercase text-[10px] disabled:bg-gray-400 disabled:text-gray-700"
                 >
-                  Eliminar
+                  Desactivar acceso
                 </button>
               </div>
             </div>

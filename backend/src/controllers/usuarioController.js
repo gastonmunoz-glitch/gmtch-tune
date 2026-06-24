@@ -168,14 +168,16 @@ const eliminarUsuario = async (req, res) => {
 
     if (String(usuario.id) === String(req.usuario.id)) {
       return res.status(400).json({
-        error: "No puedes eliminar tu propio usuario",
+        error: "No puedes desactivar tu propio usuario",
       });
     }
 
-    await usuario.destroy();
+    await usuario.update({
+      activo: false,
+    });
 
     res.json({
-      mensaje: "Usuario eliminado",
+      mensaje: "Usuario desactivado correctamente",
       id: req.params.id,
     });
   } catch (error) {
