@@ -163,26 +163,27 @@ function FotosPage() {
             4. Seleccionar una o más fotos
           </label>
           <input
+            name="fotos"
             type="file"
             accept="image/*"
             multiple
             className="font-black text-black text-sm file:mr-4 file:py-2 file:px-4 file:border-2 file:border-black file:text-xs file:font-black file:bg-white hover:file:bg-black hover:file:text-white file:transition"
-            onChange={(e) => setArchivoState(e.target.files)}
+            onChange={(e) => setArchivoState(Array.from(e.target.files || []))}
             required
           />
 
-          {archivos.length > 0 && (
-            <div className="mt-5 text-left bg-white border-2 border-black p-4">
-              <p className="text-xs font-black uppercase mb-2">
-                Fotos seleccionadas: {archivos.length}
-              </p>
+          <div className="mt-5 text-left bg-white border-2 border-black p-4">
+            <p className="text-xs font-black uppercase mb-2">
+              Fotos seleccionadas: {archivos.length}
+            </p>
+            {archivos.length > 0 && (
               <ul className="text-xs font-bold uppercase space-y-1">
                 {archivos.map((archivo) => (
                   <li key={`${archivo.name}-${archivo.size}`}>{archivo.name}</li>
                 ))}
               </ul>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <button

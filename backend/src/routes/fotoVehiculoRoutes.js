@@ -77,24 +77,24 @@ const usuarioActual = (req) => {
   );
 };
 
-const subirFoto = upload.fields([
-  { name: "fotos", maxCount: 20 },
-  { name: "fotos[]", maxCount: 20 },
-  { name: "foto", maxCount: 1 },
-  { name: "archivo", maxCount: 1 },
-  { name: "imagen", maxCount: 1 },
-  { name: "file", maxCount: 1 },
-]);
+const camposArchivoPermitidos = ["fotos", "fotos[]", "foto", "archivo", "imagen", "file"];
+
+const subirFoto = upload.any();
 
 const obtenerArchivosSubidos = (req) => {
-  return [
-    ...(req.files?.fotos || []),
-    ...(req.files?.["fotos[]"] || []),
-    ...(req.files?.foto || []),
-    ...(req.files?.archivo || []),
-    ...(req.files?.imagen || []),
-    ...(req.files?.file || []),
-  ];
+  if (Array.isArray(req.files)) {
+    return req.files.filter((archivo) =>
+      camposArchivoPermitidos.includes(archivo.fieldname)
+    );
+  }
+
+  if (req.files && typeof req.files === "object") {
+    return camposArchivoPermitidos.flatMap((campo) => req.files[campo] || []);
+  }
+
+  if (req.file) return [req.file];
+
+  return [];
 };
 
 router.post("/", (req, res, next) => {
