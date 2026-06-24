@@ -39,25 +39,65 @@ const FILTROS = [
   { value: "OK_CIERRE", label: "OK cierre" },
 ];
 
-const SERVICIOS_FILE_SERVICE = [
-  "⚙️ Stage 1",
-  "🔥 Stage 2",
-  "🏁 Stage 3 / Competición",
-  "🌱 Eco Tune / Consumo",
-  "💥 Pops & Bangs",
-  "🧨 Hardcut / Limitador RPM",
-  "🚀 Launch Control",
-  "🏎️ Vmax / Limitador velocidad",
-  "🧬 Clonación ECU",
-  "🔐 IMMO / Inmovilizador",
-  "🧠 Gestión DTC / Revisión de fallas",
-  "🧯 Airbag / Crash Data",
-  "🛠️ Corrección de archivo",
-  "🧩 File Service personalizado",
-  "✍️ Otro / personalizado",
-];
+const SERVICIO_PERSONALIZADO = "?? Otro / personalizado";
 
-const SERVICIO_PERSONALIZADO = "✍️ Otro / personalizado";
+const SERVICIOS_FILE_SERVICE = [
+  {
+    grupo: "Reprogramaci?n / Performance",
+    opciones: [
+      "?? Stage 1",
+      "?? Stage 2",
+      "?? Stage 3 / Competici?n",
+      "?? Eco Tune / Consumo",
+      "?? Pops & Bangs",
+      "?? Hardcut / Limitador RPM",
+      "?? Launch Control",
+      "??? Vmax / Limitador velocidad",
+    ],
+  },
+  {
+    grupo: "Sistemas anticontaminaci?n / gesti?n t?cnica",
+    opciones: [
+      "??? DPF / FAP",
+      "?? EGR",
+      "?? SCR / AdBlue / DEF",
+      "?? NOx",
+      "?? TVA / Mariposa admisi?n",
+      "?? Lambda / O2",
+      "?? DTC / revisi?n de fallas",
+    ],
+  },
+  {
+    grupo: "Combinaciones frecuentes",
+    opciones: [
+      "?? Stage 1 + DPF/FAP",
+      "?? Stage 1 + EGR",
+      "?? Stage 1 + DPF/FAP + EGR",
+      "?? Stage 1 + SCR/AdBlue",
+      "?? Stage 1 + DPF/FAP + EGR + SCR/AdBlue",
+      "?? Stage 2 + DPF/FAP",
+      "?? Stage 2 + EGR",
+      "?? Stage 2 + DPF/FAP + EGR",
+      "?? Stage 2 + SCR/AdBlue",
+      "?? Stage 2 + DPF/FAP + EGR + SCR/AdBlue",
+    ],
+  },
+  {
+    grupo: "Electr?nica / m?dulos",
+    opciones: [
+      "?? Clonaci?n ECU",
+      "?? Clonaci?n TCU",
+      "?? IMMO / Inmovilizador",
+      "?? Airbag / Crash Data",
+      "?? Adaptaci?n ECU usada",
+      "?? SW Update / Downgrade",
+      "??? Correcci?n de archivo",
+      "?? Archivo de prueba / revisi?n",
+      "?? File Service personalizado",
+      SERVICIO_PERSONALIZADO,
+    ],
+  },
+];
 
 const RUTA_DIAGNOSTICO = "/diagnostico";
 
@@ -827,12 +867,20 @@ export default function ArchivosECUPage() {
                 className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
               >
                 <option value="">-- Selecciona servicio --</option>
-                {SERVICIOS_FILE_SERVICE.map((servicio) => (
-                  <option key={servicio} value={servicio}>
-                    {servicio}
-                  </option>
+                {SERVICIOS_FILE_SERVICE.map((grupo) => (
+                  <optgroup key={grupo.grupo} label={grupo.grupo}>
+                    {grupo.opciones.map((servicio) => (
+                      <option key={servicio} value={servicio}>
+                        {servicio}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
+              <p className="text-xs text-slate-500 mt-2">
+                Los servicios relacionados con sistemas de emisiones deben
+                gestionarse según normativa aplicable y uso autorizado.
+              </p>
             </div>
 
             {nuevo.tipo_servicio === SERVICIO_PERSONALIZADO && (
