@@ -39,62 +39,62 @@ const FILTROS = [
   { value: "OK_CIERRE", label: "OK cierre" },
 ];
 
-const SERVICIO_PERSONALIZADO = "?? Otro / personalizado";
+const SERVICIO_PERSONALIZADO = "Otro / personalizado";
 
 const SERVICIOS_FILE_SERVICE = [
   {
-    grupo: "Reprogramaci?n / Performance",
+    grupo: "Reprogramaci\u00F3n / Performance",
     opciones: [
-      "?? Stage 1",
-      "?? Stage 2",
-      "?? Stage 3 / Competici?n",
-      "?? Eco Tune / Consumo",
-      "?? Pops & Bangs",
-      "?? Hardcut / Limitador RPM",
-      "?? Launch Control",
-      "??? Vmax / Limitador velocidad",
+      { value: "Stage 1", label: "\u2699\uFE0F Stage 1" },
+      { value: "Stage 2", label: "\uD83D\uDD25 Stage 2" },
+      { value: "Stage 3 / Competici\u00F3n", label: "\uD83C\uDFC1 Stage 3 / Competici\u00F3n" },
+      { value: "Eco Tune / Consumo", label: "\uD83C\uDF31 Eco Tune / Consumo" },
+      { value: "Pops & Bangs", label: "\uD83D\uDCA5 Pops & Bangs" },
+      { value: "Hardcut / Limitador RPM", label: "\uD83E\uDDE8 Hardcut / Limitador RPM" },
+      { value: "Launch Control", label: "\uD83D\uDE80 Launch Control" },
+      { value: "Vmax / Limitador velocidad", label: "\uD83C\uDFCE\uFE0F Vmax / Limitador velocidad" },
     ],
   },
   {
-    grupo: "Sistemas anticontaminaci?n / gesti?n t?cnica",
+    grupo: "Sistemas anticontaminaci\u00F3n / gesti\u00F3n t\u00E9cnica",
     opciones: [
-      "??? DPF / FAP",
-      "?? EGR",
-      "?? SCR / AdBlue / DEF",
-      "?? NOx",
-      "?? TVA / Mariposa admisi?n",
-      "?? Lambda / O2",
-      "?? DTC / revisi?n de fallas",
+      { value: "DPF / FAP", label: "\uD83C\uDF2B\uFE0F DPF / FAP" },
+      { value: "EGR", label: "\u267B\uFE0F EGR" },
+      { value: "SCR / AdBlue / DEF", label: "\uD83D\uDCA7 SCR / AdBlue / DEF" },
+      { value: "NOx", label: "\uD83E\uDDEA NOx" },
+      { value: "TVA / Mariposa admisi\u00F3n", label: "\uD83E\uDEC1 TVA / Mariposa admisi\u00F3n" },
+      { value: "Lambda / O2", label: "\uD83E\uDDEF Lambda / O2" },
+      { value: "DTC / revisi\u00F3n de fallas", label: "\uD83E\uDDE0 DTC / revisi\u00F3n de fallas" },
     ],
   },
   {
     grupo: "Combinaciones frecuentes",
     opciones: [
-      "?? Stage 1 + DPF/FAP",
-      "?? Stage 1 + EGR",
-      "?? Stage 1 + DPF/FAP + EGR",
-      "?? Stage 1 + SCR/AdBlue",
-      "?? Stage 1 + DPF/FAP + EGR + SCR/AdBlue",
-      "?? Stage 2 + DPF/FAP",
-      "?? Stage 2 + EGR",
-      "?? Stage 2 + DPF/FAP + EGR",
-      "?? Stage 2 + SCR/AdBlue",
-      "?? Stage 2 + DPF/FAP + EGR + SCR/AdBlue",
+      { value: "Stage 1 + DPF/FAP", label: "\u2699\uFE0F Stage 1 + DPF/FAP" },
+      { value: "Stage 1 + EGR", label: "\u2699\uFE0F Stage 1 + EGR" },
+      { value: "Stage 1 + DPF/FAP + EGR", label: "\u2699\uFE0F Stage 1 + DPF/FAP + EGR" },
+      { value: "Stage 1 + SCR/AdBlue", label: "\u2699\uFE0F Stage 1 + SCR/AdBlue" },
+      { value: "Stage 1 + DPF/FAP + EGR + SCR/AdBlue", label: "\u2699\uFE0F Stage 1 + DPF/FAP + EGR + SCR/AdBlue" },
+      { value: "Stage 2 + DPF/FAP", label: "\uD83D\uDD25 Stage 2 + DPF/FAP" },
+      { value: "Stage 2 + EGR", label: "\uD83D\uDD25 Stage 2 + EGR" },
+      { value: "Stage 2 + DPF/FAP + EGR", label: "\uD83D\uDD25 Stage 2 + DPF/FAP + EGR" },
+      { value: "Stage 2 + SCR/AdBlue", label: "\uD83D\uDD25 Stage 2 + SCR/AdBlue" },
+      { value: "Stage 2 + DPF/FAP + EGR + SCR/AdBlue", label: "\uD83D\uDD25 Stage 2 + DPF/FAP + EGR + SCR/AdBlue" },
     ],
   },
   {
-    grupo: "Electr?nica / m?dulos",
+    grupo: "Electr\u00F3nica / m\u00F3dulos",
     opciones: [
-      "?? Clonaci?n ECU",
-      "?? Clonaci?n TCU",
-      "?? IMMO / Inmovilizador",
-      "?? Airbag / Crash Data",
-      "?? Adaptaci?n ECU usada",
-      "?? SW Update / Downgrade",
-      "??? Correcci?n de archivo",
-      "?? Archivo de prueba / revisi?n",
-      "?? File Service personalizado",
-      SERVICIO_PERSONALIZADO,
+      { value: "Clonaci\u00F3n ECU", label: "\uD83E\uDDEC Clonaci\u00F3n ECU" },
+      { value: "Clonaci\u00F3n TCU", label: "\uD83E\uDDEC Clonaci\u00F3n TCU" },
+      { value: "IMMO / Inmovilizador", label: "\uD83D\uDD10 IMMO / Inmovilizador" },
+      { value: "Airbag / Crash Data", label: "\uD83E\uDDEF Airbag / Crash Data" },
+      { value: "Adaptaci\u00F3n ECU usada", label: "\uD83E\uDDE9 Adaptaci\u00F3n ECU usada" },
+      { value: "SW Update / Downgrade", label: "\uD83D\uDD01 SW Update / Downgrade" },
+      { value: "Correcci\u00F3n de archivo", label: "\uD83D\uDEE0\uFE0F Correcci\u00F3n de archivo" },
+      { value: "Archivo de prueba / revisi\u00F3n", label: "\uD83E\uDDEA Archivo de prueba / revisi\u00F3n" },
+      { value: "File Service personalizado", label: "\uD83E\uDDE9 File Service personalizado" },
+      { value: SERVICIO_PERSONALIZADO, label: "\u270D\uFE0F Otro / personalizado" },
     ],
   },
 ];
@@ -870,8 +870,8 @@ export default function ArchivosECUPage() {
                 {SERVICIOS_FILE_SERVICE.map((grupo) => (
                   <optgroup key={grupo.grupo} label={grupo.grupo}>
                     {grupo.opciones.map((servicio) => (
-                      <option key={servicio} value={servicio}>
-                        {servicio}
+                      <option key={servicio.value} value={servicio.value}>
+                        {servicio.label}
                       </option>
                     ))}
                   </optgroup>
@@ -879,7 +879,7 @@ export default function ArchivosECUPage() {
               </select>
               <p className="text-xs text-slate-500 mt-2">
                 Los servicios relacionados con sistemas de emisiones deben
-                gestionarse según normativa aplicable y uso autorizado.
+                {"gestionarse seg\u00FAn normativa aplicable y uso autorizado."}
               </p>
             </div>
 
