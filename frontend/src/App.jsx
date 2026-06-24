@@ -661,6 +661,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     fileServicePostPendiente: 0,
     fileServiceCorrecciones: 0,
     alertasOperativas: [],
+    checklistOperativo: [],
     clientes: puedeVerBase ? 0 : "Sin acceso",
     vehiculos: puedeVerBase ? 0 : "Sin acceso",
     ordenes: 0,
@@ -737,6 +738,12 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     seguimiento: 1,
   };
 
+  const crearItemChecklist = (label, contador) => ({
+    label,
+    contador,
+    estado: contador > 0 ? "Atencion" : "OK",
+  });
+
   const calcularDashboard = (ordenes, clientes, vehiculos, archivos) => {
     const hoy = new Date();
     const desdeSemana = inicioSemana(hoy);
@@ -793,6 +800,40 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         !["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(estado)
       );
     }).length;
+
+    const archivoActivo = (archivo) => {
+      const estado = String(archivo.estado || "").toUpperCase();
+      return (
+        !archivo.archivado &&
+        !["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(estado)
+      );
+    };
+
+    const ordenesSinDiagnostico = ordenes.filter((orden) => {
+      const estado = String(orden.estado || "").toUpperCase();
+      return ["RECEPCIONADO", "PARA_DIAGNOSTICO"].includes(estado);
+    }).length;
+
+    const fileServiceSinPostOk = archivos.filter(
+      (archivo) =>
+        archivoActivo(archivo) &&
+        String(archivo.post_escritura_estado || "").toUpperCase() !== "OK"
+    ).length;
+
+    const correccionesPendientes = archivos.filter(
+      (archivo) =>
+        archivo.correccion_pendiente === true ||
+        String(archivo.estado || "").toUpperCase() === "REQUIERE_CORRECCION"
+    ).length;
+
+    const listasEntrega = ordenes.filter(
+      (orden) =>
+        String(orden.estado || "").toUpperCase() === "LISTO_PARA_ENTREGA"
+    ).length;
+
+    const pagosPendientes = ordenes.filter(
+      (orden) => String(orden.estado_pago || "").toUpperCase() !== "PAGADO"
+    ).length;
 
     ordenes.forEach((orden) => {
       const estado = String(orden.estado || "").toUpperCase();
@@ -913,10 +954,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       ordenesActivas: ordenes.filter(
         (orden) => String(orden.estado || "").toUpperCase() !== "ENTREGADO"
       ).length,
-      listasEntrega: ordenes.filter(
-        (orden) =>
-          String(orden.estado || "").toUpperCase() === "LISTO_PARA_ENTREGA"
-      ).length,
+      listasEntrega,
       pendientesPago: ordenes.filter(
         (orden) =>
           String(orden.estado_pago || "").toUpperCase() !== "PAGADO" &&
@@ -935,6 +973,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           String(archivo.estado || "").toUpperCase() === "REQUIERE_CORRECCION"
       ).length,
       alertasOperativas: alertasOrdenadas,
+      checklistOperativo: [
+        crearItemChecklist("Ordenes sin diagnostico", ordenesSinDiagnostico),
+        crearItemChecklist("File Service sin post escritura OK", fileServiceSinPostOk),
+        crearItemChecklist("File Service con correccion pendiente", correccionesPendientes),
+        crearItemChecklist("Ordenes listas para entrega", listasEntrega),
+        crearItemChecklist("Pagos pendientes", pagosPendientes),
+        crearItemChecklist("Entregadas hoy", entregadasHoy),
+      ],
       clientes: puedeVerBase ? clientes.length : "Sin acceso",
       vehiculos: puedeVerBase ? vehiculos.length : "Sin acceso",
       ordenes: ordenes.length,
@@ -1034,6 +1080,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       </DashboardSection>
 
       <AlertasOperativasSection alertas={stats.alertasOperativas} />
+
+      <ChecklistOperativoSection items={stats.checklistOperativo} />
 
       <DashboardSection title="Base de datos">
         <StatCard label="Clientes" val={stats.clientes} color="border-blue-500" />
@@ -1180,6 +1228,58 @@ const MiniAlertCard = ({ label, value, color }) => (
     <p className="text-[10px] font-black uppercase text-gray-500">{label}</p>
     <p className="text-2xl font-black text-black">{value}</p>
   </div>
+);
+
+const ChecklistOperativoSection = ({ items = [] }) => (
+  <section className="space-y-4">
+    <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+      <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+        Checklist operativo
+      </h2>
+
+      <p className="text-[11px] font-bold uppercase text-gray-400">
+        Resumen rapido para apertura de taller
+      </p>
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {items.map((item) => {
+        const tienePendientes = Number(item.contador || 0) > 0;
+
+        return (
+          <div
+            key={item.label}
+            className={`border-4 p-4 rounded-2xl shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] ${
+              tienePendientes
+                ? "border-yellow-500 bg-yellow-50 text-yellow-900"
+                : "border-green-500 bg-green-50 text-green-900"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide">
+                  {item.label}
+                </p>
+                <p className="mt-1 text-[10px] font-black uppercase opacity-70">
+                  {item.estado}
+                </p>
+              </div>
+
+              <span className="text-3xl font-black leading-none">
+                {item.contador}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+
+      {items.length === 0 && (
+        <div className="border-4 border-black bg-white p-4 rounded-2xl text-xs font-black uppercase text-gray-500">
+          Checklist sin datos disponibles
+        </div>
+      )}
+    </div>
+  </section>
 );
 
 const DashboardSection = ({ title, children }) => (
