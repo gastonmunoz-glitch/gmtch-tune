@@ -40,22 +40,24 @@ const FILTROS = [
 ];
 
 const SERVICIOS_FILE_SERVICE = [
-  "Diagnostico ECU",
-  "Lectura ECU",
-  "Stage 1",
-  "Stage 2",
-  "Stage 3",
-  "Eco / consumo",
-  "Pops & Bangs",
-  "Hardcut / limitador RPM",
-  "Vmax / limitador velocidad",
-  "DTC / revision de fallas",
-  "Clonacion ECU",
-  "Immo / inmovilizador",
-  "Airbag / crash data",
-  "File Service personalizado",
-  "Otro",
+  "⚙️ Stage 1",
+  "🔥 Stage 2",
+  "🏁 Stage 3 / Competición",
+  "🌱 Eco Tune / Consumo",
+  "💥 Pops & Bangs",
+  "🧨 Hardcut / Limitador RPM",
+  "🚀 Launch Control",
+  "🏎️ Vmax / Limitador velocidad",
+  "🧬 Clonación ECU",
+  "🔐 IMMO / Inmovilizador",
+  "🧠 Gestión DTC / Revisión de fallas",
+  "🧯 Airbag / Crash Data",
+  "🛠️ Corrección de archivo",
+  "🧩 File Service personalizado",
+  "✍️ Otro / personalizado",
 ];
+
+const SERVICIO_PERSONALIZADO = "✍️ Otro / personalizado";
 
 const RUTA_DIAGNOSTICO = "/diagnostico";
 
@@ -366,8 +368,8 @@ export default function ArchivosECUPage() {
 
       const fd = new FormData();
       const tipoServicio =
-        nuevo.tipo_servicio === "Otro"
-          ? limpiar(nuevo.tipo_servicio_personalizado) || "Otro"
+        nuevo.tipo_servicio === SERVICIO_PERSONALIZADO
+          ? limpiar(nuevo.tipo_servicio_personalizado) || SERVICIO_PERSONALIZADO
           : nuevo.tipo_servicio;
 
       Object.entries(nuevo).forEach(([key, value]) => {
@@ -817,7 +819,7 @@ export default function ArchivosECUPage() {
                     ...prev,
                     tipo_servicio: e.target.value,
                     tipo_servicio_personalizado:
-                      e.target.value === "Otro"
+                      e.target.value === SERVICIO_PERSONALIZADO
                         ? prev.tipo_servicio_personalizado
                         : "",
                   }))
@@ -833,7 +835,7 @@ export default function ArchivosECUPage() {
               </select>
             </div>
 
-            {nuevo.tipo_servicio === "Otro" && (
+            {nuevo.tipo_servicio === SERVICIO_PERSONALIZADO && (
               <div>
                 <label className="text-xs text-slate-400 ml-1">
                   Servicio personalizado
@@ -1132,6 +1134,22 @@ export default function ArchivosECUPage() {
                         Original por:{" "}
                         {archivo.archivo_original_subido_por || "No registrado"}
                       </p>
+                      <div className="mt-3 rounded-2xl border border-purple-500/30 bg-purple-500/10 p-3 text-left md:text-right">
+                        <p className="font-semibold text-purple-200">
+                          Master notificado internamente
+                        </p>
+                        <p>Sí / No: {archivo.notificado_master_at ? "Sí" : "No"}</p>
+                        <p>
+                          Fecha:{" "}
+                          {archivo.notificado_master_at
+                            ? formatearFecha(archivo.notificado_master_at)
+                            : "No registrado"}
+                        </p>
+                        <p>
+                          Por:{" "}
+                          {archivo.notificado_master_por || "No registrado"}
+                        </p>
+                      </div>
                     </div>
                   </div>
 
@@ -1329,8 +1347,8 @@ export default function ArchivosECUPage() {
                       </button>
 
                       <p className="text-xs text-slate-500">
-                        Por ahora abre WhatsApp y registra la acción. Más adelante
-                        esto será notificación interna automática al responsable.
+                        La notificaci?n interna se registra al crear el File Service.
+                        WhatsApp es un aviso manual opcional.
                       </p>
                     </div>
                   </div>
