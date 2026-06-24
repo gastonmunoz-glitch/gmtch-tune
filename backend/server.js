@@ -129,6 +129,7 @@ const ordenTrabajoRoutes = require("./src/routes/ordenTrabajoRoutes");
 const diagnosticoRoutes = require("./src/routes/diagnosticoRoutes");
 const archivoECURoutes = require("./src/routes/archivoECURoutes");
 const fotoVehiculoRoutes = require("./src/routes/fotoVehiculoRoutes");
+const notificacionRoutes = require("./src/routes/notificacionRoutes");
 
 // ====================== RUTAS PÚBLICAS ======================
 
@@ -1132,6 +1133,34 @@ app.use(
   fotoVehiculoRoutes
 );
 
+app.use(
+  "/api/notificaciones",
+  autenticar,
+  permitirPorMetodo({
+    GET: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "RECEPCION",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+      "TUNER",
+    ],
+    PATCH: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "RECEPCION",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+      "TUNER",
+    ],
+  }),
+  notificacionRoutes
+);
+
 // ====================== RUTAS OPCIONALES ======================
 
 try {
@@ -1480,6 +1509,7 @@ const startServer = async () => {
       console.log("   /api/diagnosticos");
       console.log("   /api/archivos-ecu");
       console.log("   /api/fotos");
+      console.log("   /api/notificaciones");
     });
   } catch (error) {
     console.error("ERROR AL ARRANCAR:", error);

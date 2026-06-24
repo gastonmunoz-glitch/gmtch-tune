@@ -1,6 +1,9 @@
 const { QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
 const { ArchivoECU, OrdenTrabajo } = require("../models");
+const {
+  crearNotificacionesInternas,
+} = require("./notificacionController");
 
 console.log("📂 CONTROLLER_FILE_SERVICE_POST_ESCRITURA_V4_CIERRE_ORDEN_CARGADO");
 
@@ -452,6 +455,15 @@ const crearArchivoECU = async (req, res) => {
       );
     }
 
+    await crearNotificacionesInternas({
+      rolesDestino: ["TUNER", "OWNER"],
+      tipo: "FILE_ORIGINAL_CARGADO",
+      titulo: "File Service original cargado",
+      mensaje: `Se cargo un archivo original para la orden #${ordenId}.`,
+      ordenId,
+      archivoECUId: nuevoArchivo.id,
+    });
+
     res.status(201).json({
       mensaje: "Archivo ECU guardado y Master notificado internamente",
       archivo: nuevoArchivo,
@@ -545,6 +557,15 @@ const subirArchivoModificado = async (req, res) => {
       post_escritura_observacion: null,
       post_escritura_por: null,
       post_escritura_at: null,
+    });
+
+    await crearNotificacionesInternas({
+      rolesDestino: ["OPERADOR_ECU", "OWNER"],
+      tipo: "FILE_MOD_LISTO",
+      titulo: "MOD listo para escritura",
+      mensaje: `Se cargo ${nuevaVersion.etiqueta} para el File Service #${archivo.id}.`,
+      ordenId: archivo.ordenId,
+      archivoECUId: archivo.id,
     });
 
     res.json({
@@ -673,6 +694,15 @@ const solicitarCorreccion = async (req, res) => {
       correccion_pendiente: true,
       dtc_post_escritura: dtcPost,
       observacion_correccion: observacion,
+    });
+
+    await crearNotificacionesInternas({
+      rolesDestino: ["TUNER", "OWNER"],
+      tipo: "FILE_REQUIERE_CORRECCION",
+      titulo: "File Service requiere correccion",
+      mensaje: `El File Service #${archivo.id} requiere correccion.`,
+      ordenId: archivo.ordenId,
+      archivoECUId: archivo.id,
     });
 
     res.json({
@@ -1034,6 +1064,17 @@ const actualizarArchivoECU = async (req, res) => {
     await transaction.commit();
 
     const archivoActualizado = await ArchivoECU.findByPk(req.params.id);
+
+    if (quiereFinalizarTecnico) {
+      await crearNotificacionesInternas({
+        rolesDestino: ["RECEPCION", "ADMIN", "OWNER"],
+        tipo: "ORDEN_LISTA_ENTREGA",
+        titulo: "Orden lista para entrega",
+        mensaje: `La orden #${archivo.ordenId} esta lista para entrega comercial.`,
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+      });
+    }
 
     res.json({
       mensaje: quiereFinalizarTecnico

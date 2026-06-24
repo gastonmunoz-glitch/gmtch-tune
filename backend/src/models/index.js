@@ -5,6 +5,7 @@ const Diagnostico = require("./Diagnostico");
 const ArchivoECU = require("./ArchivoECU");
 const FotoVehiculo = require("./FotoVehiculo");
 const Usuario = require("./Usuario");
+const Notificacion = require("./Notificacion");
 
 let FileService = null;
 let Operador = null;
@@ -97,6 +98,7 @@ module.exports = {
   ArchivoECU,
   FotoVehiculo,
   Usuario,
+  Notificacion,
   FileService,
   Operador,
 };
