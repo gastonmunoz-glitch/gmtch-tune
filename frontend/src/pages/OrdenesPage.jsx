@@ -27,7 +27,7 @@ const FILTROS_ORDENES = [
 const RESPONSABLES_ETAPAS = [
   {
     campo: "diagnostico_asignado_a",
-    label: "Diagnostico / scanner",
+    label: "Diagnóstico / scanner",
     roles: ["OPERADOR_SCANNER", "OPERADOR_ECU", "SUPERVISOR", "OWNER"],
   },
   {
@@ -37,7 +37,7 @@ const RESPONSABLES_ETAPAS = [
   },
   {
     campo: "mecanico_asignado_a",
-    label: "Mecanico",
+    label: "Mecánico",
     roles: ["MECANICO", "SUPERVISOR", "OWNER"],
   },
   {
@@ -592,7 +592,7 @@ function OrdenesPage() {
                         </div>
 
                         <p className="text-[9px] font-bold uppercase text-gray-400 mt-2">
-                          Recepcion: {o.recepcionado_por || "No registrado"}
+                          Recepción: {o.recepcionado_por || "No registrado"}
                         </p>
                       </div>
                     </div>

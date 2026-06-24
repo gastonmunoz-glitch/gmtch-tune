@@ -130,7 +130,7 @@ function RecepcionRapidaPage() {
 
   const [fotosArchivos, setFotosArchivos] = useState([]);
 
-  const etiquetas = ["Buscar patente", "Cliente", "Vehiculo", "Servicio", "Fotos", "Cierre"];
+  const etiquetas = ["Buscar patente", "Cliente", "Vehículo", "Servicio", "Fotos", "Cierre"];
 
   useEffect(() => {
     escribirStorage("gmtch_paso_recepcion", paso);
@@ -243,14 +243,14 @@ function RecepcionRapidaPage() {
     const mensajeNormalizado = mensaje.toLowerCase();
 
     if (
-      entidad === "Vehiculo" &&
+      (entidad === "Vehiculo" || entidad === "Vehículo") &&
       (status === 409 ||
         mensajeNormalizado.includes("duplicate") ||
         mensajeNormalizado.includes("unique") ||
         mensajeNormalizado.includes("ya existe") ||
         mensajeNormalizado.includes("registrad"))
     ) {
-      return "Esta patente ya esta registrada. Busca la patente para reutilizar el vehiculo.";
+      return "Esta patente ya está registrada. Busca la patente para reutilizar el vehículo.";
     }
 
     if (
@@ -311,18 +311,18 @@ function RecepcionRapidaPage() {
         escribirStorage("gmtch_clienteId", nuevoClienteId);
       }
 
-      mostrarAviso("ok", "Patente encontrada. Puedes crear una nueva orden para este vehiculo.");
+      mostrarAviso("ok", "Patente encontrada. Puedes crear una nueva orden para este vehículo.");
     } catch (err) {
       if (err.response?.status === 404) {
         setVehiculoEncontrado(null);
         setVehiculo({ ...ESTADO_INICIAL_VEHICULO, patente });
-        mostrarAviso("ok", "Patente no registrada. Crear cliente y vehiculo nuevo.");
+        mostrarAviso("ok", "Patente no registrada. Crear cliente y vehículo nuevo.");
         setPaso(2);
         return;
       }
 
       console.error("ERROR BUSCANDO PATENTE:", err.response?.data || err.message);
-      mostrarAviso("error", mensajeErrorAmigable(err, "Busqueda de patente"));
+      mostrarAviso("error", mensajeErrorAmigable(err, "Búsqueda de patente"));
     } finally {
       setCargando(false);
     }
@@ -330,7 +330,7 @@ function RecepcionRapidaPage() {
 
   const crearOrdenParaVehiculoExistente = () => {
     if (!vehiculoId) {
-      mostrarAviso("error", "No se detecto el vehiculo encontrado.");
+      mostrarAviso("error", "No se detectó el vehículo encontrado.");
       return;
     }
 
@@ -338,7 +338,7 @@ function RecepcionRapidaPage() {
     setOrdenId(null);
     setFotosArchivos([]);
     borrarStorage("gmtch_ordenId");
-    mostrarAviso("ok", "Vehiculo seleccionado. Completa los datos de la nueva orden.");
+    mostrarAviso("ok", "Vehículo seleccionado. Completa los datos de la nueva orden.");
     setPaso(4);
   };
 
@@ -372,7 +372,7 @@ function RecepcionRapidaPage() {
       setClienteId(nuevoClienteId);
       escribirStorage("gmtch_clienteId", nuevoClienteId);
 
-      mostrarAviso("ok", "Cliente guardado correctamente. Continua con el vehiculo.");
+      mostrarAviso("ok", "Cliente guardado correctamente. Continúa con el vehículo.");
       setPaso(3);
     } catch (err) {
       console.error("ERROR AL GUARDAR CLIENTE:", err.response?.data || err.message);
@@ -419,19 +419,19 @@ function RecepcionRapidaPage() {
       const nuevoVehiculoId = obtenerVehiculoId(res.data);
 
       if (!nuevoVehiculoId) {
-        mostrarAviso("error", "Vehiculo guardado, pero el backend no devolvio el ID.");
-        console.error("Respuesta sin ID de vehiculo:", res.data);
+        mostrarAviso("error", "Vehículo guardado, pero el backend no devolvió el ID.");
+        console.error("Respuesta sin ID de vehículo:", res.data);
         return;
       }
 
       setVehiculoId(nuevoVehiculoId);
       escribirStorage("gmtch_vehiculoId", nuevoVehiculoId);
 
-      mostrarAviso("ok", "Vehiculo guardado correctamente. Continua con servicio y sintomas.");
+      mostrarAviso("ok", "Vehículo guardado correctamente. Continúa con servicio y síntomas.");
       setPaso(4);
     } catch (err) {
       console.error("ERROR AL GUARDAR VEHICULO:", err.response?.data || err.message);
-      mostrarAviso("error", mensajeErrorAmigable(err, "Vehiculo"));
+      mostrarAviso("error", mensajeErrorAmigable(err, "Vehículo"));
     } finally {
       setCargando(false);
     }
@@ -443,22 +443,22 @@ function RecepcionRapidaPage() {
     const observacionesVisuales = String(orden.observaciones_visuales ?? "").trim();
 
     return [
-      "=== RECEPCION GMTCH TUNE ===",
+      "=== RECEPCIÓN GMTCH TUNE ===",
       `Servicio solicitado: ${servicioSolicitado || "No informado"}`,
       "",
-      "Sintomas indicados por cliente:",
+      "Síntomas indicados por cliente:",
       sintomasCliente || "No informado",
       "",
-      "Observaciones visibles de recepcion:",
+      "Observaciones visibles de recepción:",
       observacionesVisuales || "Sin observaciones visibles registradas",
       "",
-      "Requerimientos iniciales marcados por recepcion:",
-      `- Requiere scanner/diagnostico: ${orden.requiere_scanner ? "SI" : "NO"}`,
+      "Requerimientos iniciales marcados por recepción:",
+      `- Requiere scanner/diagnóstico: ${orden.requiere_scanner ? "SI" : "NO"}`,
       `- Requiere lectura ECU: ${orden.requiere_lectura_ecu ? "SI" : "NO"}`,
-      `- Requiere mecanica: ${orden.requiere_mecanica ? "SI" : "NO"}`,
+      `- Requiere mecánica: ${orden.requiere_mecanica ? "SI" : "NO"}`,
       "",
       "Nota de flujo:",
-      "Recepcion no decide metodo de lectura ECU. El tecnico ECU define si corresponde OBD, BENCH, BOOT o retiro de ECU. El mecanico solo ejecuta instrucciones asignadas por plataforma.",
+      "Recepción no decide método de lectura ECU. El técnico ECU define si corresponde OBD, BENCH, BOOT o retiro de ECU. El mecánico solo ejecuta instrucciones asignadas por plataforma.",
     ].join("\n");
   };
 
@@ -471,12 +471,12 @@ function RecepcionRapidaPage() {
     const montoTotal = limpiarNumero(orden.monto_total);
 
     if (!idVehiculoActual) {
-      mostrarAviso("error", "Falta vehiculo.");
+      mostrarAviso("error", "Falta vehículo.");
       return;
     }
 
     if (!kilometraje || !servicioSolicitado || !sintomasCliente || !montoTotal) {
-      mostrarAviso("error", "Complete kilometraje, servicio solicitado, sintomas y monto.");
+      mostrarAviso("error", "Complete kilometraje, servicio solicitado, síntomas y monto.");
       return;
     }
 
@@ -506,7 +506,7 @@ function RecepcionRapidaPage() {
       setOrdenId(nuevaOrdenId);
       escribirStorage("gmtch_ordenId", nuevaOrdenId);
 
-      mostrarAviso("ok", "Orden creada correctamente. Continua con las fotos de respaldo.");
+      mostrarAviso("ok", "Orden creada correctamente. Continúa con las fotos de respaldo.");
       setPaso(5);
     } catch (err) {
       console.error("ERROR AL GUARDAR ORDEN:", err.response?.data || err.message);
@@ -600,17 +600,17 @@ function RecepcionRapidaPage() {
       const estadoActualizado = await actualizarOrdenAParaDiagnostico();
 
       if (estadoActualizado) {
-        alert("Recepcion finalizada. La orden quedo lista para diagnostico.");
+        alert("Recepción finalizada. La orden quedó lista para diagnóstico.");
       } else {
         alert(
-          "Recepcion guardada. No se pudo mover automaticamente a diagnostico, pero la orden quedo registrada."
+          "Recepción guardada. No se pudo mover automáticamente a diagnóstico, pero la orden quedó registrada."
         );
       }
 
       limpiarFlujo();
     } catch (err) {
       console.error("ERROR AL FINALIZAR RECEPCION:", err.response?.data || err.message);
-      mostrarAviso("error", mensajeErrorAmigable(err, "Recepcion"));
+      mostrarAviso("error", mensajeErrorAmigable(err, "Recepción"));
     } finally {
       setCargando(false);
     }
@@ -663,7 +663,7 @@ function RecepcionRapidaPage() {
       <div className="border-4 border-black bg-slate-50 p-5 space-y-4">
         <div>
           <h3 className="font-black uppercase text-lg">
-            Vehiculo encontrado: {texto(vehiculoEncontrado.patente)}
+            Vehículo encontrado: {texto(vehiculoEncontrado.patente)}
           </h3>
           <p className="text-xs font-bold uppercase text-gray-500">
             {texto(vehiculoEncontrado.marca)} {texto(vehiculoEncontrado.modelo)}{" "}
@@ -709,7 +709,7 @@ function RecepcionRapidaPage() {
           onClick={crearOrdenParaVehiculoExistente}
           className="bg-black text-white px-6 py-3 font-black uppercase text-xs"
         >
-          Crear nueva orden para este vehiculo
+          Crear nueva orden para este vehículo
         </button>
       </div>
     );
@@ -723,7 +723,7 @@ function RecepcionRapidaPage() {
             <div>
               <h2 className="font-black text-lg uppercase">1. Buscar patente</h2>
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Busca primero para reutilizar cliente y vehiculo si ya existen.
+                Busca primero para reutilizar cliente y vehículo si ya existen.
               </p>
             </div>
 
@@ -759,7 +759,7 @@ function RecepcionRapidaPage() {
                 onClick={() => setPaso(2)}
                 className="bg-blue-600 text-white px-6 py-3 font-black uppercase text-xs"
               >
-                Crear cliente y vehiculo nuevo
+                Crear cliente y vehículo nuevo
               </button>
             )}
           </div>
@@ -824,9 +824,9 @@ function RecepcionRapidaPage() {
         return (
           <div className="space-y-4">
             <div>
-              <h2 className="font-black text-lg uppercase">3. Vehiculo</h2>
+              <h2 className="font-black text-lg uppercase">3. Vehículo</h2>
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Identificacion de la unidad ingresada.
+                Identificación de la unidad ingresada.
               </p>
             </div>
 
@@ -905,7 +905,7 @@ function RecepcionRapidaPage() {
                 disabled={cargando}
                 className="bg-black text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
               >
-                {cargando ? "Guardando..." : "Guardar Vehiculo y Continuar"}
+                {cargando ? "Guardando..." : "Guardar Vehículo y Continuar"}
               </button>
             </div>
           </div>
@@ -915,9 +915,9 @@ function RecepcionRapidaPage() {
         return (
           <div className="space-y-4">
             <div>
-              <h2 className="font-black text-lg uppercase">4. Servicio / Sintomas</h2>
+              <h2 className="font-black text-lg uppercase">4. Servicio / Síntomas</h2>
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Recepcion registra lo que informa el cliente y lo visible. No diagnostica ECU.
+                Recepción registra lo que informa el cliente y lo visible. No diagnostica ECU.
               </p>
             </div>
 
@@ -952,7 +952,7 @@ function RecepcionRapidaPage() {
 
             <textarea
               className="border border-black p-3 w-full"
-              placeholder="Servicio solicitado por el cliente. Ej: DPF Off, diagnostico, EGR, AdBlue, Stage 1, lectura ECU, etc."
+              placeholder="Servicio solicitado por el cliente. Ej: DPF Off, diagnóstico, EGR, AdBlue, Stage 1, lectura ECU, etc."
               value={orden.servicio_solicitado ?? ""}
               onChange={(e) =>
                 setOrden((prev) => ({
@@ -964,7 +964,7 @@ function RecepcionRapidaPage() {
 
             <textarea
               className="border border-black p-3 w-full"
-              placeholder="Sintomas indicados por el cliente. Ej: pierde fuerza, humo, testigo motor, regeneraciones constantes, no parte, etc."
+              placeholder="Síntomas indicados por el cliente. Ej: pierde fuerza, humo, testigo motor, regeneraciones constantes, no parte, etc."
               value={orden.sintomas_cliente ?? ""}
               onChange={(e) =>
                 setOrden((prev) => ({
@@ -976,7 +976,7 @@ function RecepcionRapidaPage() {
 
             <textarea
               className="border border-black p-3 w-full"
-              placeholder="Observaciones visibles de recepcion. Ej: golpes, rayas, testigos encendidos, nivel combustible, accesorios, estado interior."
+              placeholder="Observaciones visibles de recepción. Ej: golpes, rayas, testigos encendidos, nivel combustible, accesorios, estado interior."
               value={orden.observaciones_visuales ?? ""}
               onChange={(e) =>
                 setOrden((prev) => ({
@@ -1026,7 +1026,7 @@ function RecepcionRapidaPage() {
                     }))
                   }
                 />
-                Requiere Mecanica
+                Requiere Mecánica
               </label>
             </div>
 
@@ -1043,8 +1043,8 @@ function RecepcionRapidaPage() {
             />
 
             <div className="bg-yellow-50 border-2 border-yellow-500 p-4 text-xs font-bold uppercase leading-relaxed">
-              El mecanico no decide si se retira la ECU. Esa decision queda para el tecnico ECU /
-              operador de lectura segun metodo OBD, BENCH, BOOT o retiro.
+              El mecánico no decide si se retira la ECU. Esa decisión queda para el técnico ECU /
+              operador de lectura según método OBD, BENCH, BOOT o retiro.
             </div>
 
             <div className="flex justify-between gap-4">
@@ -1074,7 +1074,7 @@ function RecepcionRapidaPage() {
             <div>
               <h2 className="font-black text-lg uppercase">5. Fotos de Ingreso</h2>
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Respaldo visual del estado del vehiculo al momento de recepcion.
+                Respaldo visual del estado del vehículo al momento de recepción.
               </p>
             </div>
 
@@ -1118,7 +1118,7 @@ function RecepcionRapidaPage() {
               onClick={abrirSelectorFotos}
               className="w-full bg-black text-white border-4 border-black py-5 px-6 font-black uppercase text-sm hover:bg-blue-600 transition"
             >
-              Seleccionar Fotos de Recepcion
+              Seleccionar Fotos de Recepción
             </button>
 
             <div className="bg-slate-50 border-4 border-black p-4">
@@ -1159,15 +1159,15 @@ function RecepcionRapidaPage() {
         return (
           <div className="space-y-6">
             <div>
-              <h2 className="font-black text-lg uppercase">6. Cierre de Recepcion</h2>
+              <h2 className="font-black text-lg uppercase">6. Cierre de Recepción</h2>
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Al finalizar, la orden queda en cola para diagnostico.
+                Al finalizar, la orden queda en cola para diagnóstico.
               </p>
             </div>
 
             <div className="bg-slate-50 border-4 border-black p-5 space-y-3 text-xs font-bold uppercase">
               <p>Cliente ID: {clienteId || "No registrado"}</p>
-              <p>Vehiculo ID: {vehiculoId || "No registrado"}</p>
+              <p>Vehículo ID: {vehiculoId || "No registrado"}</p>
               <p>Orden ID: {ordenId || leerStorage("gmtch_ordenId") || "No registrado"}</p>
               <p>Estado actual: {ESTADO_ORDEN_INICIAL}</p>
               <p>Estado siguiente: {ESTADO_ORDEN_FINAL_RECEPCION}</p>
@@ -1175,8 +1175,8 @@ function RecepcionRapidaPage() {
             </div>
 
             <div className="bg-blue-50 border-2 border-blue-600 p-4 text-xs font-bold uppercase leading-relaxed">
-              Siguiente etapa: operador de diagnostico/scanner. Luego el tecnico ECU define el
-              metodo de lectura y si corresponde desmontaje. Mecanica solo ejecuta trabajos
+              Siguiente etapa: operador de diagnóstico/scanner. Luego el técnico ECU define el
+              método de lectura y si corresponde desmontaje. Mecánica solo ejecuta trabajos
               asignados por plataforma.
             </div>
 
@@ -1195,7 +1195,7 @@ function RecepcionRapidaPage() {
                 disabled={cargando}
                 className="bg-green-600 text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
               >
-                {cargando ? "Finalizando..." : "Finalizar Recepcion"}
+                {cargando ? "Finalizando..." : "Finalizar Recepción"}
               </button>
             </div>
           </div>
@@ -1210,10 +1210,10 @@ function RecepcionRapidaPage() {
     <div className="max-w-5xl mx-auto bg-white border-4 border-black shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] p-6">
       <div className="mb-8">
         <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter">
-          Recepcion Operativa
+          Recepción Operativa
         </h1>
         <p className="text-xs font-black uppercase text-gray-500 mt-2">
-          Ingreso inicial por patente. Scanner, lectura ECU y mecanica se asignan despues.
+          Ingreso inicial por patente. Scanner, lectura ECU y mecánica se asignan después.
         </p>
       </div>
 
@@ -1253,7 +1253,7 @@ function RecepcionRapidaPage() {
 
       <div className="mt-8 pt-4 border-t border-black flex flex-col md:flex-row justify-between gap-4 md:items-center">
         <div className="text-[10px] uppercase font-bold text-gray-500">
-          Cliente ID: {clienteId || "No registrado"} | Vehiculo ID:{" "}
+          Cliente ID: {clienteId || "No registrado"} | Vehículo ID:{" "}
           {vehiculoId || "No registrado"} | Orden ID:{" "}
           {ordenId || leerStorage("gmtch_ordenId") || "No registrado"}
         </div>
