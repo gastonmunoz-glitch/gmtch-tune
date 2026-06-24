@@ -571,11 +571,33 @@ app.get(
     try {
       const id = Number(req.params.id);
 
-      const rows = await sequelize.query(
+      const vehiculoRows = await sequelize.query(
         `
-        ${queryVehiculoDetalleSQL}
+        SELECT
+          v."id",
+          v."clienteId",
+          v."patente",
+          v."marca",
+          v."modelo",
+          v."anio",
+          v."vin",
+          v."tipo_unidad",
+          v."activo",
+          v."createdAt",
+          v."updatedAt",
+
+          c."id" AS "cliente_id",
+          c."nombre" AS "cliente_nombre",
+          c."telefono" AS "cliente_telefono",
+          c."email" AS "cliente_email",
+          c."direccion" AS "cliente_direccion",
+          c."categoria_cliente" AS "cliente_categoria_cliente",
+          c."nota_cliente" AS "cliente_nota_cliente"
+
+        FROM "vehiculos" v
+        LEFT JOIN "clientes" c ON c."id" = v."clienteId"
         WHERE v."id" = :id
-        ORDER BY o."createdAt" DESC NULLS LAST;
+        LIMIT 1;
         `,
         {
           replacements: { id },
@@ -583,14 +605,202 @@ app.get(
         }
       );
 
-      const vehiculo = armarVehiculoDesdeRows(rows);
-
-      if (!vehiculo) {
+      if (!vehiculoRows.length) {
         return res.status(404).json({
           error: "Vehículo no encontrado",
           controller: "DIRECT-SERVER-V6",
         });
       }
+
+      const base = vehiculoRows[0];
+
+      const ordenesRows = await sequelize.query(
+        `
+        SELECT *
+        FROM "ordenes_trabajo"
+        WHERE "vehiculoId" = :id
+        ORDER BY "createdAt" DESC NULLS LAST;
+        `,
+        {
+          replacements: { id },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      const ordenIds = ordenesRows.map((orden) => orden.id).filter(Boolean);
+
+      const agruparPorOrden = (items = []) => {
+        return items.reduce((acc, item) => {
+          const ordenId =
+            item.ordenId ||
+            item.orden_id ||
+            item.ordenTrabajoId ||
+            item.orden_trabajo_id;
+
+          if (!ordenId) return acc;
+
+          const key = String(ordenId);
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(item);
+
+          return acc;
+        }, {});
+      };
+
+      const consultarRelacion = async (nombre, sql) => {
+        if (!ordenIds.length) return [];
+
+        try {
+          return await sequelize.query(sql, {
+            replacements: { ordenIds },
+            type: QueryTypes.SELECT,
+          });
+        } catch (error) {
+          console.warn(
+            `No se pudo cargar ${nombre} para ficha vehículo 360:`,
+            error.message
+          );
+
+          return [];
+        }
+      };
+
+      const [diagnosticos, fotos, archivosECU] = await Promise.all([
+        consultarRelacion(
+          "diagnósticos",
+          `
+          SELECT *
+          FROM "diagnosticos"
+          WHERE "ordenId" IN (:ordenIds)
+          ORDER BY "createdAt" DESC NULLS LAST;
+          `
+        ),
+        consultarRelacion(
+          "fotos",
+          `
+          SELECT *
+          FROM "fotos_vehiculo"
+          WHERE "ordenId" IN (:ordenIds)
+          ORDER BY "createdAt" DESC NULLS LAST;
+          `
+        ),
+        consultarRelacion(
+          "archivos ECU",
+          `
+          SELECT *
+          FROM "archivos_ecu"
+          WHERE "ordenId" IN (:ordenIds)
+          ORDER BY "createdAt" DESC NULLS LAST;
+          `
+        ),
+      ]);
+
+      const diagnosticosPorOrden = agruparPorOrden(diagnosticos);
+      const fotosPorOrden = agruparPorOrden(fotos);
+      const archivosPorOrden = agruparPorOrden(archivosECU);
+
+      const ordenes = ordenesRows.map((orden) => {
+        const key = String(orden.id);
+        const diagnosticosOrden = diagnosticosPorOrden[key] || [];
+        const fotosOrden = fotosPorOrden[key] || [];
+        const archivosOrden = archivosPorOrden[key] || [];
+
+        return {
+          id: orden.id,
+          vehiculoId: orden.vehiculoId,
+          prioridad: orden.prioridad,
+          estado: orden.estado,
+          estado_pago: orden.estado_pago,
+          medio_pago: orden.medio_pago,
+          monto_pagado: orden.monto_pagado,
+          fecha_pago: orden.fecha_pago,
+          cobrado_por: orden.cobrado_por,
+          observacion_pago: orden.observacion_pago,
+          entregado_por: orden.entregado_por,
+          entregado_at: orden.entregado_at,
+          observacion_cierre: orden.observacion_cierre,
+          tecnico_finalizado_por: orden.tecnico_finalizado_por,
+          tecnico_finalizado_at: orden.tecnico_finalizado_at,
+          kilometraje: orden.kilometraje,
+          motivo_ingreso: orden.motivo_ingreso,
+          monto_total: orden.monto_total,
+          createdAt: orden.createdAt,
+          updatedAt: orden.updatedAt,
+          Diagnosticos: diagnosticosOrden,
+          ArchivoECUs: archivosOrden,
+          ArchivosECU: archivosOrden,
+          FotoVehiculos: fotosOrden,
+          FotosVehiculo: fotosOrden,
+        };
+      });
+
+      const totalFacturado = ordenes.reduce(
+        (acc, orden) => acc + Number(orden.monto_total || 0),
+        0
+      );
+
+      const totalPagado = ordenes.reduce(
+        (acc, orden) => acc + Number(orden.monto_pagado || 0),
+        0
+      );
+
+      const ultimaVisita =
+        ordenes
+          .map((orden) => orden.createdAt)
+          .filter(Boolean)
+          .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ||
+        null;
+
+      const ultimaEntrega =
+        ordenes
+          .map((orden) => orden.entregado_at)
+          .filter(Boolean)
+          .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ||
+        null;
+
+      const metricas = {
+        totalOrdenes: ordenes.length,
+        totalDiagnosticos: diagnosticos.length,
+        totalFotos: fotos.length,
+        totalArchivosECU: archivosECU.length,
+        totalFacturado,
+        totalPagado,
+        ultimaVisita,
+        ultimaEntrega,
+      };
+
+      const vehiculo = {
+        id: base.id,
+        clienteId: base.clienteId,
+        patente: base.patente,
+        marca: base.marca,
+        modelo: base.modelo,
+        anio: base.anio,
+        vin: base.vin,
+        tipo_unidad: base.tipo_unidad,
+        activo: base.activo,
+        createdAt: base.createdAt,
+        updatedAt: base.updatedAt,
+        Cliente: base.cliente_id
+          ? {
+              id: base.cliente_id,
+              nombre: base.cliente_nombre,
+              telefono: base.cliente_telefono,
+              email: base.cliente_email,
+              direccion: base.cliente_direccion,
+              categoria_cliente: base.cliente_categoria_cliente || "NORMAL",
+              nota_cliente: base.cliente_nota_cliente,
+            }
+          : null,
+        OrdenTrabajos: ordenes,
+        Diagnosticos: diagnosticos,
+        ArchivoECUs: archivosECU,
+        ArchivosECU: archivosECU,
+        FotoVehiculos: fotos,
+        FotosVehiculo: fotos,
+        metricas,
+        ...metricas,
+      };
 
       res.json(vehiculo);
     } catch (error) {

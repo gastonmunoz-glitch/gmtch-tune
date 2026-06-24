@@ -16,6 +16,14 @@ const PRIORIDAD_PESO = {
   BAJA: 4,
 };
 
+const FILTROS_ORDENES = [
+  { value: "ACTIVAS", label: "ACTIVAS" },
+  { value: "LISTO_ENTREGA", label: "LISTO ENTREGA" },
+  { value: "PAGO_PENDIENTE", label: "PAGO PENDIENTE" },
+  { value: "ENTREGADAS", label: "ENTREGADAS" },
+  { value: "TODAS", label: "TODAS" },
+];
+
 const prioridadClase = (prioridad) => {
   const p = String(prioridad || "MEDIA").toUpperCase();
 
@@ -70,6 +78,28 @@ const formatearFecha = (valor) => {
   if (Number.isNaN(fecha.getTime())) return "No registrado";
 
   return fecha.toLocaleString("es-CL");
+};
+
+const obtenerTiempo = (valor) => {
+  const fecha = new Date(valor || 0);
+  const tiempo = fecha.getTime();
+  return Number.isNaN(tiempo) ? 0 : tiempo;
+};
+
+const ordenarActivas = (a, b) => {
+  const pa = PRIORIDAD_PESO[a.prioridad] || 99;
+  const pb = PRIORIDAD_PESO[b.prioridad] || 99;
+
+  if (pa !== pb) return pa - pb;
+
+  return obtenerTiempo(a.createdAt) - obtenerTiempo(b.createdAt);
+};
+
+const ordenarEntregadas = (a, b) => {
+  const fechaA = a.entregado_at || a.updatedAt;
+  const fechaB = b.entregado_at || b.updatedAt;
+
+  return obtenerTiempo(fechaB) - obtenerTiempo(fechaA);
 };
 
 function OrdenesPage() {
@@ -132,21 +162,33 @@ function OrdenesPage() {
   };
 
   const ordenesFiltradas = useMemo(() => {
-    const base =
-      filtro === "ACTIVAS"
-        ? ordenes.filter((o) => o.estado !== "ENTREGADO")
-        : filtro === "ENTREGADAS"
-        ? ordenes.filter((o) => o.estado === "ENTREGADO")
-        : ordenes;
+    const activas = ordenes.filter((o) => o.estado !== "ENTREGADO");
+    const entregadas = ordenes.filter((o) => o.estado === "ENTREGADO");
 
-    return [...base].sort((a, b) => {
-      const pa = PRIORIDAD_PESO[a.prioridad] || 99;
-      const pb = PRIORIDAD_PESO[b.prioridad] || 99;
+    if (filtro === "LISTO_ENTREGA") {
+      return activas
+        .filter((o) => o.estado === "LISTO_PARA_ENTREGA")
+        .sort(ordenarActivas);
+    }
 
-      if (pa !== pb) return pa - pb;
+    if (filtro === "PAGO_PENDIENTE") {
+      return activas
+        .filter((o) => o.estado_pago !== "PAGADO")
+        .sort(ordenarActivas);
+    }
 
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-    });
+    if (filtro === "ENTREGADAS") {
+      return entregadas.sort(ordenarEntregadas);
+    }
+
+    if (filtro === "TODAS") {
+      return [
+        ...activas.sort(ordenarActivas),
+        ...entregadas.sort(ordenarEntregadas),
+      ];
+    }
+
+    return activas.sort(ordenarActivas);
   }, [ordenes, filtro]);
 
   const actualizarForm = (campo, valor) => {
@@ -204,7 +246,7 @@ function OrdenesPage() {
     const montoPagado = Number(orden.monto_pagado || montoTotal);
     const usuario = localStorage.getItem("username") || "sistema";
 
-    if (!montoTotal || montoTotal <= 0) {
+    if (!Number.isFinite(montoTotal) || montoTotal <= 0) {
       alert("No se puede entregar una orden sin monto total.");
       return;
     }
@@ -339,16 +381,16 @@ function OrdenesPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {["ACTIVAS", "TODAS", "ENTREGADAS"].map((item) => (
+                {FILTROS_ORDENES.map((item) => (
                   <button
-                    key={item}
+                    key={item.value}
                     type="button"
-                    onClick={() => setFiltro(item)}
+                    onClick={() => setFiltro(item.value)}
                     className={`px-4 py-2 border-2 border-black font-black uppercase text-[10px] ${
-                      filtro === item ? "bg-black text-white" : "bg-white text-black"
+                      filtro === item.value ? "bg-black text-white" : "bg-white text-black"
                     }`}
                   >
-                    {item}
+                    {item.label}
                   </button>
                 ))}
 
@@ -438,7 +480,7 @@ function OrdenesPage() {
                     }`}
                   >
                     <p className="text-[10px] font-black uppercase text-gray-500">
-                      Pago
+                      Operación / pago
                     </p>
 
                     <p
@@ -452,12 +494,14 @@ function OrdenesPage() {
                     </p>
 
                     <p className="text-xl font-black mt-2">
-                      ${Number(o.monto_total || 0).toLocaleString("es-CL")}
+                      {formatearMonto(o.monto_total)}
                     </p>
 
                     <div className="mt-3 space-y-1 text-[10px] font-bold uppercase text-gray-700">
+                      <p>Estado operativo: {o.estado || "Pendiente"}</p>
                       <p>Estado pago: {o.estado_pago || "Pendiente"}</p>
                       <p>Medio de pago: {o.medio_pago || "Pendiente"}</p>
+                      <p>Monto total: {formatearMonto(o.monto_total)}</p>
                       <p>Monto pagado: {formatearMonto(o.monto_pagado)}</p>
                       <p>Fecha pago: {formatearFecha(o.fecha_pago)}</p>
                       <p>Cobrado por: {o.cobrado_por || "No registrado"}</p>
