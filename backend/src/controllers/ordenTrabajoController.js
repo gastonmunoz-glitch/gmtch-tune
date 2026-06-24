@@ -8,6 +8,9 @@ const {
   ArchivoECU,
   FotoVehiculo,
 } = require("../models");
+const {
+  crearNotificacionesInternas,
+} = require("./notificacionController");
 
 console.log("🧾 CONTROLLER_ORDENES_CIERRE_COMERCIAL_V2_CARGADO");
 
@@ -32,6 +35,29 @@ const normalizarNumero = (valor, defecto = 0) => {
   const numero = Number(valor);
   if (Number.isNaN(numero)) return defecto;
   return numero;
+};
+
+const NOTIFICACIONES_RESPONSABLES = {
+  diagnostico_asignado_a: {
+    tipo: "ORDEN_ASIGNADA_DIAGNOSTICO",
+    titulo: "Diagnóstico asignado",
+    etapa: "diagnóstico / scanner",
+  },
+  operador_ecu_asignado_a: {
+    tipo: "ORDEN_ASIGNADA_ECU",
+    titulo: "Trabajo ECU asignado",
+    etapa: "trabajo ECU",
+  },
+  mecanico_asignado_a: {
+    tipo: "ORDEN_ASIGNADA_MECANICA",
+    titulo: "Trabajo mecánico asignado",
+    etapa: "trabajo mecánico",
+  },
+  supervisor_asignado_a: {
+    tipo: "ORDEN_ASIGNADA_SUPERVISION",
+    titulo: "Supervisión asignada",
+    etapa: "supervisión",
+  },
 };
 
 const prepararColumnas = async () => {
@@ -459,6 +485,29 @@ const actualizarOrden = async (req, res) => {
       }
     });
 
+    let responsablesActuales = {};
+
+    if (Object.keys(responsablesPayload).length > 0) {
+      const responsablesRows = await sequelize.query(
+        `
+        SELECT
+          "diagnostico_asignado_a",
+          "operador_ecu_asignado_a",
+          "mecanico_asignado_a",
+          "supervisor_asignado_a"
+        FROM "ordenes_trabajo"
+        WHERE "id" = :id
+        LIMIT 1;
+        `,
+        {
+          replacements: { id: orden.id },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      responsablesActuales = responsablesRows[0] || {};
+    }
+
     if (Object.prototype.hasOwnProperty.call(req.body, "kilometraje")) {
       payload.kilometraje = req.body.kilometraje ? Number(req.body.kilometraje) : null;
     }
@@ -521,6 +570,38 @@ const actualizarOrden = async (req, res) => {
           },
         }
       );
+    }
+
+    if (Object.keys(responsablesPayload).length > 0) {
+      try {
+        const notificaciones = Object.entries(responsablesPayload)
+          .filter(([campo]) => NOTIFICACIONES_RESPONSABLES[campo])
+          .filter(([, nuevoResponsable]) => Boolean(limpiarTexto(nuevoResponsable)))
+          .filter(([campo, nuevoResponsable]) => {
+            const anterior = limpiarTexto(responsablesActuales[campo]);
+            return limpiarTexto(nuevoResponsable) !== anterior;
+          })
+          .map(([campo, nuevoResponsable]) => {
+            const meta = NOTIFICACIONES_RESPONSABLES[campo];
+
+            return crearNotificacionesInternas({
+              usuariosDestino: [limpiarTexto(nuevoResponsable)],
+              rolesDestino: [],
+              tipo: meta.tipo,
+              titulo: meta.titulo,
+              mensaje: `Te asignaron la Orden #${orden.id} para ${meta.etapa}.`,
+              ordenId: orden.id,
+              archivoECUId: null,
+            });
+          });
+
+        await Promise.all(notificaciones);
+      } catch (errorNotificacion) {
+        console.warn(
+          "No se pudieron crear notificaciones de responsables:",
+          errorNotificacion.message
+        );
+      }
     }
 
     res.json({
