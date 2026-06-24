@@ -451,6 +451,7 @@ function Dashboard({ usuario }) {
     fileServiceActivos: 0,
     fileServicePostPendiente: 0,
     fileServiceCorrecciones: 0,
+    alertasOperativas: [],
     clientes: puedeVerBase ? 0 : "Sin acceso",
     vehiculos: puedeVerBase ? 0 : "Sin acceso",
     ordenes: 0,
@@ -510,10 +511,28 @@ function Dashboard({ usuario }) {
       maximumFractionDigits: 0,
     }).format(numero(valor));
 
+  const horasDesde = (fecha, base) => {
+    if (!fecha) return 0;
+    return Math.max(0, (base.getTime() - fecha.getTime()) / 36e5);
+  };
+
+  const formatoTiempo = (horas) => {
+    if (horas < 1) return "menos de 1h";
+    if (horas < 24) return `${Math.floor(horas)}h`;
+    return `${Math.floor(horas / 24)}d ${Math.floor(horas % 24)}h`;
+  };
+
+  const prioridadAlerta = {
+    critica: 3,
+    atencion: 2,
+    seguimiento: 1,
+  };
+
   const calcularDashboard = (ordenes, clientes, vehiculos, archivos) => {
     const hoy = new Date();
     const desdeSemana = inicioSemana(hoy);
     const pagadasMes = [];
+    const alertasOperativas = [];
 
     const comercial = ordenes.reduce(
       (acc, orden) => {
@@ -566,6 +585,117 @@ function Dashboard({ usuario }) {
       );
     }).length;
 
+    ordenes.forEach((orden) => {
+      const estado = String(orden.estado || "").toUpperCase();
+      const estadoPago = String(orden.estado_pago || "").toUpperCase();
+      const referenciaFecha = parseFecha(orden.updatedAt);
+      const horas = horasDesde(referenciaFecha, hoy);
+
+      if (estado === "RECEPCIONADO" && horas > 2) {
+        alertasOperativas.push({
+          id: `orden-${orden.id}-recepcionado`,
+          severidad: "atencion",
+          tipo: "Recepcion detenida",
+          referencia: `Orden #${orden.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: orden.estado || "RECEPCIONADO",
+          horas,
+        });
+      }
+
+      if (estado === "PARA_DIAGNOSTICO" && horas > 4) {
+        alertasOperativas.push({
+          id: `orden-${orden.id}-diagnostico`,
+          severidad: "atencion",
+          tipo: "Diagnostico pendiente",
+          referencia: `Orden #${orden.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: orden.estado || "PARA_DIAGNOSTICO",
+          horas,
+        });
+      }
+
+      if (estado === "EN_PROGRAMACION" && horas > 24) {
+        alertasOperativas.push({
+          id: `orden-${orden.id}-programacion`,
+          severidad: "critica",
+          tipo: "Programacion detenida",
+          referencia: `Orden #${orden.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: orden.estado || "EN_PROGRAMACION",
+          horas,
+        });
+      }
+
+      if (estado === "LISTO_PARA_ENTREGA" && estadoPago !== "PAGADO") {
+        alertasOperativas.push({
+          id: `orden-${orden.id}-pago-pendiente`,
+          severidad: "critica",
+          tipo: "Lista para entrega con pago pendiente",
+          referencia: `Orden #${orden.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: orden.estado || "LISTO_PARA_ENTREGA",
+          horas,
+        });
+      }
+    });
+
+    archivos.forEach((archivo) => {
+      const estado = String(archivo.estado || "").toUpperCase();
+      const fechaCreacion = parseFecha(archivo.createdAt);
+      const horas = horasDesde(fechaCreacion, hoy);
+      const activo =
+        !archivo.archivado &&
+        !["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(estado);
+
+      if (
+        ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
+          estado
+        ) &&
+        String(archivo.post_escritura_estado || "").toUpperCase() !== "OK"
+      ) {
+        alertasOperativas.push({
+          id: `file-${archivo.id}-post`,
+          severidad: "atencion",
+          tipo: "MOD listo sin post escritura",
+          referencia: `File #${archivo.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: archivo.estado || "PENDIENTE_POST",
+          horas,
+        });
+      }
+
+      if (estado === "REQUIERE_CORRECCION" || archivo.correccion_pendiente === true) {
+        alertasOperativas.push({
+          id: `file-${archivo.id}-correccion`,
+          severidad: "critica",
+          tipo: "File Service requiere correccion",
+          referencia: `File #${archivo.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: archivo.estado || "REQUIERE_CORRECCION",
+          horas,
+        });
+      }
+
+      if (activo && horas > 24) {
+        alertasOperativas.push({
+          id: `file-${archivo.id}-activo-24`,
+          severidad: "seguimiento",
+          tipo: "File Service activo mas de 24h",
+          referencia: `File #${archivo.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: archivo.estado || "ACTIVO",
+          horas,
+        });
+      }
+    });
+
+    const alertasOrdenadas = alertasOperativas.sort((a, b) => {
+      const prioridad = prioridadAlerta[b.severidad] - prioridadAlerta[a.severidad];
+      if (prioridad !== 0) return prioridad;
+      return b.horas - a.horas;
+    });
+
     return {
       ...comercial,
       ticketPromedioMes: pagadasMes.length
@@ -595,6 +725,7 @@ function Dashboard({ usuario }) {
           archivo.correccion_pendiente === true ||
           String(archivo.estado || "").toUpperCase() === "REQUIERE_CORRECCION"
       ).length,
+      alertasOperativas: alertasOrdenadas,
       clientes: puedeVerBase ? clientes.length : "Sin acceso",
       vehiculos: puedeVerBase ? vehiculos.length : "Sin acceso",
       ordenes: ordenes.length,
@@ -690,6 +821,8 @@ function Dashboard({ usuario }) {
         <StatCard label="Correcciones pendientes" val={stats.fileServiceCorrecciones} color="border-red-500" />
       </DashboardSection>
 
+      <AlertasOperativasSection alertas={stats.alertasOperativas} />
+
       <DashboardSection title="Base de datos">
         <StatCard label="Clientes" val={stats.clientes} color="border-blue-500" />
         <StatCard label="Vehiculos" val={stats.vehiculos} color="border-green-500" />
@@ -736,6 +869,106 @@ function Dashboard({ usuario }) {
     </div>
   );
 }
+
+const AlertasOperativasSection = ({ alertas = [] }) => {
+  const resumen = alertas.reduce(
+    (acc, alerta) => {
+      acc[alerta.severidad] += 1;
+      return acc;
+    },
+    {
+      critica: 0,
+      atencion: 0,
+      seguimiento: 0,
+    }
+  );
+
+  const visibles = alertas.slice(0, 5);
+
+  const severidadClass = {
+    critica: "bg-red-50 border-red-500 text-red-800",
+    atencion: "bg-yellow-50 border-yellow-500 text-yellow-800",
+    seguimiento: "bg-blue-50 border-blue-500 text-blue-800",
+  };
+
+  const severidadLabel = {
+    critica: "Criticas",
+    atencion: "Atencion",
+    seguimiento: "Seguimiento",
+  };
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+          Alertas operativas
+        </h2>
+
+        <p className="text-[11px] font-bold uppercase text-gray-400">
+          updatedAt es una aproximacion del tiempo por etapa
+        </p>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <MiniAlertCard label="Criticas" value={resumen.critica} color="border-red-500" />
+        <MiniAlertCard label="Atencion" value={resumen.atencion} color="border-yellow-500" />
+        <MiniAlertCard label="Seguimiento" value={resumen.seguimiento} color="border-blue-500" />
+      </div>
+
+      <div className="bg-white border-4 border-black rounded-2xl shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] overflow-hidden">
+        {visibles.length === 0 ? (
+          <div className="p-5 text-sm font-black uppercase text-gray-400">
+            Sin alertas operativas
+          </div>
+        ) : (
+          <div className="divide-y-4 divide-black">
+            {visibles.map((alerta) => (
+              <div
+                key={alerta.id}
+                className="grid grid-cols-1 md:grid-cols-12 gap-3 p-4 items-center"
+              >
+                <div className="md:col-span-3">
+                  <span
+                    className={
+                      "inline-block border-2 rounded-full px-3 py-1 text-[10px] font-black uppercase " +
+                      severidadClass[alerta.severidad]
+                    }
+                  >
+                    {severidadLabel[alerta.severidad]}
+                  </span>
+                </div>
+
+                <div className="md:col-span-4">
+                  <p className="text-sm font-black uppercase text-black">
+                    {alerta.tipo}
+                  </p>
+                  <p className="text-xs font-bold text-gray-500">
+                    {alerta.referencia}
+                  </p>
+                </div>
+
+                <div className="md:col-span-2 text-sm font-black">
+                  {alerta.tiempo}
+                </div>
+
+                <div className="md:col-span-3 text-xs font-bold uppercase text-gray-500 break-words">
+                  {alerta.estado}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+};
+
+const MiniAlertCard = ({ label, value, color }) => (
+  <div className={"bg-white border-4 rounded-2xl p-4 " + color}>
+    <p className="text-[10px] font-black uppercase text-gray-500">{label}</p>
+    <p className="text-2xl font-black text-black">{value}</p>
+  </div>
+);
 
 const DashboardSection = ({ title, children }) => (
   <section className="space-y-4">
