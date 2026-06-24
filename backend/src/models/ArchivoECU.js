@@ -150,6 +150,21 @@ const ArchivoECU = sequelize.define(
       defaultValue: [],
     },
 
+    tuner_asignado_a: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    operador_ecu_asignado_a: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    slave_asignado_a: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
     notificado_master_at: {
       type: DataTypes.DATE,
       allowNull: true,

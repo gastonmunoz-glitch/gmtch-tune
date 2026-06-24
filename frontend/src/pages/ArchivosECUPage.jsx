@@ -54,6 +54,24 @@ const HERRAMIENTAS_PROCESAMIENTO_EXTERNO = [
   { value: "OTRO", label: "Otro" },
 ];
 
+const RESPONSABLES_FILE_SERVICE = [
+  {
+    campo: "tuner_asignado_a",
+    label: "Tuner / Master",
+    roles: ["TUNER", "SUPERVISOR", "OWNER"],
+  },
+  {
+    campo: "operador_ecu_asignado_a",
+    label: "Operador ECU",
+    roles: ["OPERADOR_ECU", "TUNER", "SUPERVISOR", "OWNER"],
+  },
+  {
+    campo: "slave_asignado_a",
+    label: "Slave / operador externo",
+    roles: ["OPERADOR_ECU", "TUNER", "OWNER"],
+  },
+];
+
 const SERVICIO_PERSONALIZADO = "Otro / personalizado";
 
 const SERVICIOS_FILE_SERVICE = [
@@ -203,6 +221,7 @@ const obtenerClienteVehiculo = (archivo) => {
 export default function ArchivosECUPage() {
   const [archivos, setArchivos] = useState([]);
   const [ordenes, setOrdenes] = useState([]);
+  const [usuarios, setUsuarios] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -238,9 +257,10 @@ export default function ArchivosECUPage() {
   const [archivarForms, setArchivarForms] = useState({});
 
   const obtenerDatos = useCallback(async () => {
-    const [archivosRes, ordenesRes] = await Promise.allSettled([
+    const [archivosRes, ordenesRes, usuariosRes] = await Promise.allSettled([
       api.get("/archivos-ecu"),
       api.get("/ordenes"),
+      api.get("/usuarios"),
     ]);
 
     if (archivosRes.status !== "fulfilled") {
@@ -250,11 +270,18 @@ export default function ArchivosECUPage() {
     const archivosData = archivosRes.value.data;
 
     let ordenesData = [];
+    let usuariosData = [];
 
     if (ordenesRes.status === "fulfilled") {
       ordenesData = ordenesRes.value.data;
     } else {
       console.warn("No se pudieron cargar órdenes:", ordenesRes.reason);
+    }
+
+    if (usuariosRes.status === "fulfilled") {
+      usuariosData = usuariosRes.value.data;
+    } else {
+      console.warn("No se pudieron cargar usuarios:", usuariosRes.reason);
     }
 
     return {
@@ -264,6 +291,9 @@ export default function ArchivosECUPage() {
       ordenes: Array.isArray(ordenesData)
         ? ordenesData
         : ordenesData.ordenes || [],
+      usuarios: Array.isArray(usuariosData)
+        ? usuariosData
+        : usuariosData.usuarios || [],
     };
   }, []);
 
@@ -276,6 +306,7 @@ export default function ArchivosECUPage() {
 
       setArchivos(data.archivos);
       setOrdenes(data.ordenes);
+      setUsuarios(data.usuarios);
     } catch (err) {
       console.error(err);
       setError(
@@ -299,6 +330,7 @@ export default function ArchivosECUPage() {
 
         setArchivos(data.archivos);
         setOrdenes(data.ordenes);
+        setUsuarios(data.usuarios);
       } catch (err) {
         if (!activo) return;
 
@@ -384,6 +416,17 @@ export default function ArchivosECUPage() {
       return true;
     });
   }, [archivos, filtro, busqueda]);
+
+  const usuariosPorRoles = useCallback(
+    (roles) =>
+      usuarios.filter(
+        (usuario) =>
+          usuario &&
+          usuario.activo !== false &&
+          roles.includes(usuario.rol)
+      ),
+    [usuarios]
+  );
 
   const mostrarError = (err, fallback = "Error inesperado") => {
     console.error(err);
@@ -539,6 +582,21 @@ export default function ArchivosECUPage() {
         [campo]: valor,
       },
     }));
+  };
+
+  const asignarResponsableFileService = async (archivoId, campo, valor) => {
+    limpiarMensajes();
+
+    try {
+      await api.patch(`/archivos-ecu/${archivoId}`, {
+        [campo]: valor,
+      });
+
+      setMensaje("Responsable File Service actualizado");
+      await cargarDatos();
+    } catch (err) {
+      mostrarError(err, "Error asignando responsable File Service");
+    }
   };
 
   const registrarProcesamientoExterno = async (archivoId) => {
@@ -1306,6 +1364,70 @@ export default function ArchivosECUPage() {
                           {archivo.notificado_master_por || "No registrado"}
                         </p>
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
+                      Responsables File Service
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {RESPONSABLES_FILE_SERVICE.map((responsable) => {
+                        const opciones = usuariosPorRoles(responsable.roles);
+                        const valorActual = archivo[responsable.campo] || "";
+                        const existeActual = opciones.some((usuario) => {
+                          const username =
+                            usuario.username || usuario.nombre || usuario.email;
+                          return username === valorActual;
+                        });
+
+                        return (
+                          <label
+                            key={`${archivo.id}-${responsable.campo}`}
+                            className="text-sm text-slate-300"
+                          >
+                            <span className="block text-xs text-slate-500 mb-1">
+                              {responsable.label}
+                            </span>
+                            <select
+                              value={valorActual}
+                              onChange={(e) =>
+                                asignarResponsableFileService(
+                                  archivo.id,
+                                  responsable.campo,
+                                  e.target.value
+                                )
+                              }
+                              className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                            >
+                              <option value="">Sin asignar</option>
+                              {valorActual && !existeActual && (
+                                <option value={valorActual}>{valorActual}</option>
+                              )}
+                              {opciones.map((usuario) => {
+                                const username =
+                                  usuario.username ||
+                                  usuario.nombre ||
+                                  usuario.email ||
+                                  "";
+
+                                if (!username) return null;
+
+                                return (
+                                  <option
+                                    key={`${responsable.campo}-${usuario.id || username}`}
+                                    value={username}
+                                  >
+                                    {usuario.nombre || username}
+                                    {usuario.rol ? ` (${usuario.rol})` : ""}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
 

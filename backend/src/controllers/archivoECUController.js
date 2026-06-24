@@ -14,6 +14,24 @@ const limpiarTexto = (valor) => {
   return String(valor).trim();
 };
 
+const NOTIFICACIONES_RESPONSABLES_FILE = {
+  tuner_asignado_a: {
+    tipo: "FILE_TUNER_ASIGNADO",
+    titulo: "Tuner / Master asignado",
+    etapa: "File Service como Tuner / Master",
+  },
+  operador_ecu_asignado_a: {
+    tipo: "FILE_OPERADOR_ECU_ASIGNADO",
+    titulo: "Operador ECU asignado",
+    etapa: "File Service como Operador ECU",
+  },
+  slave_asignado_a: {
+    tipo: "FILE_SLAVE_ASIGNADO",
+    titulo: "Slave / operador externo asignado",
+    etapa: "File Service como Slave / operador externo",
+  },
+};
+
 const obtenerOrdenId = (body = {}) => {
   return body.ordenId || body.orden_id || body.ordenTrabajoId || body.orden_trabajo_id;
 };
@@ -116,6 +134,15 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "archivos_ecu"
     ADD COLUMN IF NOT EXISTS "procesamiento_externo_archivos" JSONB DEFAULT '[]'::jsonb;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "tuner_asignado_a" VARCHAR(100);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "operador_ecu_asignado_a" VARCHAR(100);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "slave_asignado_a" VARCHAR(100);
 
     ALTER TABLE "archivos_ecu"
     ADD COLUMN IF NOT EXISTS "post_escritura_estado" VARCHAR(60);
@@ -305,6 +332,10 @@ const mapearArchivoRow = (row) => {
     procesamiento_externo_archivos: normalizarVersiones(
       row.procesamiento_externo_archivos
     ),
+
+    tuner_asignado_a: row.tuner_asignado_a,
+    operador_ecu_asignado_a: row.operador_ecu_asignado_a,
+    slave_asignado_a: row.slave_asignado_a,
 
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -1151,6 +1182,9 @@ const actualizarArchivoECU = async (req, res) => {
       "observaciones",
       "dtc_post_escritura",
       "observacion_correccion",
+      "tuner_asignado_a",
+      "operador_ecu_asignado_a",
+      "slave_asignado_a",
     ];
 
     camposTexto.forEach((campo) => {
@@ -1169,6 +1203,27 @@ const actualizarArchivoECU = async (req, res) => {
       payload.estado = "FINALIZADO_TECNICO";
       payload.correccion_pendiente = false;
     }
+
+    const responsablesPrevios = {
+      tuner_asignado_a: limpiarTexto(archivo.tuner_asignado_a),
+      operador_ecu_asignado_a: limpiarTexto(archivo.operador_ecu_asignado_a),
+      slave_asignado_a: limpiarTexto(archivo.slave_asignado_a),
+    };
+
+    const notificacionesResponsables = Object.entries(
+      NOTIFICACIONES_RESPONSABLES_FILE
+    )
+      .filter(([campo]) => Object.prototype.hasOwnProperty.call(payload, campo))
+      .map(([campo, config]) => ({
+        ...config,
+        usuarioDestino: limpiarTexto(payload[campo]),
+        usuarioAnterior: responsablesPrevios[campo],
+      }))
+      .filter(
+        (notificacion) =>
+          notificacion.usuarioDestino &&
+          notificacion.usuarioDestino !== notificacion.usuarioAnterior
+      );
 
     await archivo.update(payload, { transaction });
 
@@ -1216,6 +1271,28 @@ const actualizarArchivoECU = async (req, res) => {
         ordenId: archivo.ordenId,
         archivoECUId: archivo.id,
       });
+    }
+
+    if (notificacionesResponsables.length > 0) {
+      try {
+        await Promise.all(
+          notificacionesResponsables.map((notificacion) =>
+            crearNotificacionesInternas({
+              usuariosDestino: [notificacion.usuarioDestino],
+              tipo: notificacion.tipo,
+              titulo: notificacion.titulo,
+              mensaje: `Te asignaron el File Service #${archivo.id} para ${notificacion.etapa}.`,
+              ordenId: archivo.ordenId,
+              archivoECUId: archivo.id,
+            })
+          )
+        );
+      } catch (errorNotificacion) {
+        console.warn(
+          "No se pudieron crear notificaciones de responsables File Service:",
+          errorNotificacion.message
+        );
+      }
     }
 
     res.json({
