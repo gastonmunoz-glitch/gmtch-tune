@@ -58,6 +58,20 @@ const textoQR = (orden) => {
   ].join("\n");
 };
 
+const formatearMonto = (valor) => {
+  const monto = Number(valor || 0);
+  return monto > 0 ? `$${monto.toLocaleString("es-CL")}` : "Pendiente";
+};
+
+const formatearFecha = (valor) => {
+  if (!valor) return "No registrado";
+
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return "No registrado";
+
+  return fecha.toLocaleString("es-CL");
+};
+
 function OrdenesPage() {
   const [ordenes, setOrdenes] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
@@ -351,6 +365,7 @@ function OrdenesPage() {
 
           {ordenesFiltradas.map((o) => {
             const vip = o.Vehiculo?.Cliente?.categoria_cliente === "VIP";
+            const pagoConfirmado = o.estado_pago === "PAGADO";
             const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
               textoQR(o)
             )}`;
@@ -417,14 +432,18 @@ function OrdenesPage() {
                     </div>
                   </div>
 
-                  <div className="xl:text-right">
+                  <div
+                    className={`xl:text-right border-2 border-black p-4 ${
+                      pagoConfirmado ? "bg-green-50" : "bg-yellow-50"
+                    }`}
+                  >
                     <p className="text-[10px] font-black uppercase text-gray-500">
                       Pago
                     </p>
 
                     <p
                       className={`inline-block px-3 py-1 text-[10px] font-black uppercase ${
-                        o.estado_pago === "PAGADO"
+                        pagoConfirmado
                           ? "bg-green-600 text-white"
                           : "bg-yellow-400 text-black"
                       }`}
@@ -435,6 +454,16 @@ function OrdenesPage() {
                     <p className="text-xl font-black mt-2">
                       ${Number(o.monto_total || 0).toLocaleString("es-CL")}
                     </p>
+
+                    <div className="mt-3 space-y-1 text-[10px] font-bold uppercase text-gray-700">
+                      <p>Estado pago: {o.estado_pago || "Pendiente"}</p>
+                      <p>Medio de pago: {o.medio_pago || "Pendiente"}</p>
+                      <p>Monto pagado: {formatearMonto(o.monto_pagado)}</p>
+                      <p>Fecha pago: {formatearFecha(o.fecha_pago)}</p>
+                      <p>Cobrado por: {o.cobrado_por || "No registrado"}</p>
+                      <p>Entregado por: {o.entregado_por || "No registrado"}</p>
+                      <p>Fecha entrega: {formatearFecha(o.entregado_at)}</p>
+                    </div>
                   </div>
                 </div>
 
