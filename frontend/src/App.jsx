@@ -432,86 +432,268 @@ const AccesoDenegado = ({ usuario }) => (
 );
 
 function Dashboard({ usuario }) {
+  const puedeVerBase = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(
+    usuario?.rol
+  );
+  const puedeVerFileService = tieneRol(usuario, PERMISOS_RUTAS["/archivos-ecu"]);
+
   const [stats, setStats] = useState({
-    clientes: 0,
-    vehiculos: 0,
+    ventasHoy: 0,
+    ventasSemana: 0,
+    ventasMes: 0,
+    totalPagadoMes: 0,
+    ticketPromedioMes: 0,
+    ordenesActivas: 0,
+    listasEntrega: 0,
+    pendientesPago: 0,
+    entregadasHoy: 0,
+    fileServiceActivos: 0,
+    fileServicePostPendiente: 0,
+    fileServiceCorrecciones: 0,
+    clientes: puedeVerBase ? 0 : "Sin acceso",
+    vehiculos: puedeVerBase ? 0 : "Sin acceso",
     ordenes: 0,
-    ingresos: 0,
+    ultimaActualizacion: null,
   });
+  const [cargandoDashboard, setCargandoDashboard] = useState(false);
 
-  useEffect(() => {
-    let activo = true;
+  const normalizarArray = (respuesta) => {
+    const data = respuesta?.data;
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.ordenes)) return data.ordenes;
+    if (Array.isArray(data?.clientes)) return data.clientes;
+    if (Array.isArray(data?.vehiculos)) return data.vehiculos;
+    if (Array.isArray(data?.archivos)) return data.archivos;
+    return [];
+  };
 
-    const fetchStats = async () => {
-      try {
-        const requests = [api.get("/ordenes")];
+  const numero = (valor) => {
+    const parsed = Number(valor || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
 
-        if (["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(usuario?.rol)) {
-          requests.push(api.get("/clientes"));
-          requests.push(api.get("/vehiculos"));
+  const montoPagadoOrden = (orden) => {
+    const pagado = numero(orden.monto_pagado);
+    if (pagado > 0) return pagado;
+    if (String(orden.estado_pago || "").toUpperCase() === "PAGADO") {
+      return numero(orden.monto_total);
+    }
+    return 0;
+  };
+
+  const parseFecha = (valor) => {
+    if (!valor) return null;
+    const fecha = new Date(valor);
+    return Number.isNaN(fecha.getTime()) ? null : fecha;
+  };
+
+  const mismoDia = (fecha, base) =>
+    fecha &&
+    fecha.getFullYear() === base.getFullYear() &&
+    fecha.getMonth() === base.getMonth() &&
+    fecha.getDate() === base.getDate();
+
+  const inicioSemana = (base) => {
+    const fecha = new Date(base);
+    const dia = fecha.getDay() || 7;
+    fecha.setDate(fecha.getDate() - dia + 1);
+    fecha.setHours(0, 0, 0, 0);
+    return fecha;
+  };
+
+  const formatoCLP = (valor) =>
+    new Intl.NumberFormat("es-CL", {
+      style: "currency",
+      currency: "CLP",
+      maximumFractionDigits: 0,
+    }).format(numero(valor));
+
+  const calcularDashboard = (ordenes, clientes, vehiculos, archivos) => {
+    const hoy = new Date();
+    const desdeSemana = inicioSemana(hoy);
+    const pagadasMes = [];
+
+    const comercial = ordenes.reduce(
+      (acc, orden) => {
+        const fechaPago = parseFecha(orden.fecha_pago);
+        const pagado = montoPagadoOrden(orden);
+
+        if (!fechaPago || pagado <= 0) return acc;
+
+        if (mismoDia(fechaPago, hoy)) acc.ventasHoy += pagado;
+        if (fechaPago >= desdeSemana) acc.ventasSemana += pagado;
+
+        if (
+          fechaPago.getFullYear() === hoy.getFullYear() &&
+          fechaPago.getMonth() === hoy.getMonth()
+        ) {
+          acc.ventasMes += pagado;
+          acc.totalPagadoMes += pagado;
+          pagadasMes.push(pagado);
         }
 
-        const respuestas = await Promise.all(requests);
-
-        if (!activo) return;
-
-        const ordenes = respuestas[0].data || [];
-        const clientes = respuestas[1]?.data || [];
-        const vehiculos = respuestas[2]?.data || [];
-
-        const total = ordenes.reduce(
-          (acc, curr) => acc + parseFloat(curr.monto_total || 0),
-          0
-        );
-
-        setStats({
-          clientes: clientes.length,
-          vehiculos: vehiculos.length,
-          ordenes: ordenes.length,
-          ingresos: total,
-        });
-      } catch (err) {
-        console.error("Error cargando estadísticas:", err.response?.data || err.message);
+        return acc;
+      },
+      {
+        ventasHoy: 0,
+        ventasSemana: 0,
+        ventasMes: 0,
+        totalPagadoMes: 0,
       }
-    };
+    );
 
+    const entregadasHoy = ordenes.filter((orden) => {
+      const estado = String(orden.estado || "").toUpperCase();
+      const fechaEntrega =
+        parseFecha(orden.entregado_at) ||
+        (estado === "ENTREGADO" ? parseFecha(orden.updatedAt) : null);
+      return estado === "ENTREGADO" && mismoDia(fechaEntrega, hoy);
+    }).length;
+
+    const fileServiceActivos = archivos.filter((archivo) => {
+      const estado = String(archivo.estado || "").toUpperCase();
+      return (
+        !archivo.archivado &&
+        !["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(estado)
+      );
+    }).length;
+
+    return {
+      ...comercial,
+      ticketPromedioMes: pagadasMes.length
+        ? comercial.totalPagadoMes / pagadasMes.length
+        : 0,
+      ordenesActivas: ordenes.filter(
+        (orden) => String(orden.estado || "").toUpperCase() !== "ENTREGADO"
+      ).length,
+      listasEntrega: ordenes.filter(
+        (orden) =>
+          String(orden.estado || "").toUpperCase() === "LISTO_PARA_ENTREGA"
+      ).length,
+      pendientesPago: ordenes.filter(
+        (orden) =>
+          String(orden.estado_pago || "").toUpperCase() !== "PAGADO" &&
+          String(orden.estado || "").toUpperCase() !== "ENTREGADO"
+      ).length,
+      entregadasHoy,
+      fileServiceActivos,
+      fileServicePostPendiente: archivos.filter((archivo) =>
+        ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
+          String(archivo.estado || "").toUpperCase()
+        )
+      ).length,
+      fileServiceCorrecciones: archivos.filter(
+        (archivo) =>
+          archivo.correccion_pendiente === true ||
+          String(archivo.estado || "").toUpperCase() === "REQUIERE_CORRECCION"
+      ).length,
+      clientes: puedeVerBase ? clientes.length : "Sin acceso",
+      vehiculos: puedeVerBase ? vehiculos.length : "Sin acceso",
+      ordenes: ordenes.length,
+      ultimaActualizacion: new Date().toLocaleString("es-CL", {
+        dateStyle: "short",
+        timeStyle: "short",
+      }),
+    };
+  };
+
+  const fetchStats = async () => {
+    try {
+      setCargandoDashboard(true);
+
+      const respuestas = await Promise.allSettled([
+        api.get("/ordenes"),
+        puedeVerBase ? api.get("/clientes") : Promise.resolve({ data: [] }),
+        puedeVerBase ? api.get("/vehiculos") : Promise.resolve({ data: [] }),
+        puedeVerFileService
+          ? api.get("/archivos-ecu")
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const [ordenesRes, clientesRes, vehiculosRes, archivosRes] = respuestas;
+
+      const ordenes =
+        ordenesRes.status === "fulfilled" ? normalizarArray(ordenesRes.value) : [];
+      const clientes =
+        clientesRes.status === "fulfilled" ? normalizarArray(clientesRes.value) : [];
+      const vehiculos =
+        vehiculosRes.status === "fulfilled" ? normalizarArray(vehiculosRes.value) : [];
+      const archivos =
+        archivosRes.status === "fulfilled" ? normalizarArray(archivosRes.value) : [];
+
+      setStats(calcularDashboard(ordenes, clientes, vehiculos, archivos));
+    } catch (err) {
+      console.error("Error cargando estadisticas:", err.response?.data || err.message);
+    } finally {
+      setCargandoDashboard(false);
+    }
+  };
+
+  useEffect(() => {
     fetchStats();
-
-    return () => {
-      activo = false;
-    };
   }, [usuario?.rol]);
 
   return (
     <div className="space-y-10">
-      <div>
-        <h1 className="text-4xl md:text-5xl font-black text-black uppercase tracking-tighter">
-          Panel de Operaciones
-        </h1>
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <h1 className="text-4xl md:text-5xl font-black text-black uppercase tracking-tighter">
+            Panel de Operaciones
+          </h1>
 
-        <p className="text-xs font-black uppercase text-gray-500 mt-2">
-          Sesión activa: {usuario?.username} · Rol: {usuario?.rol}
-        </p>
+          <p className="text-xs font-black uppercase text-gray-500 mt-2">
+            Sesion activa: {usuario?.username} - Rol: {usuario?.rol}
+          </p>
+
+          <p className="text-xs font-bold uppercase text-gray-400 mt-1">
+            Ultima actualizacion: {stats.ultimaActualizacion || "Pendiente"}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={fetchStats}
+          disabled={cargandoDashboard}
+          className="bg-black text-white px-6 py-3 rounded-lg font-black uppercase text-xs hover:bg-blue-700 disabled:opacity-50 transition"
+        >
+          {cargandoDashboard ? "Actualizando..." : "Actualizar dashboard"}
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+      <DashboardSection title="Comercial">
+        <StatCard label="Ventas hoy" val={formatoCLP(stats.ventasHoy)} color="border-black bg-black text-white" />
+        <StatCard label="Ventas semana" val={formatoCLP(stats.ventasSemana)} color="border-blue-500" />
+        <StatCard label="Ventas mes" val={formatoCLP(stats.ventasMes)} color="border-blue-500" />
+        <StatCard label="Total pagado mes" val={formatoCLP(stats.totalPagadoMes)} color="border-green-500" />
+        <StatCard label="Ticket promedio mes" val={formatoCLP(stats.ticketPromedioMes)} color="border-green-500" />
+      </DashboardSection>
+
+      <DashboardSection title="Operacion">
+        <StatCard label="Ordenes activas" val={stats.ordenesActivas} color="border-yellow-500" />
+        <StatCard label="Listas para entrega" val={stats.listasEntrega} color="border-emerald-500" />
+        <StatCard label="Pendientes de pago" val={stats.pendientesPago} color="border-red-500" />
+        <StatCard label="Entregadas hoy" val={stats.entregadasHoy} color="border-blue-500" />
+      </DashboardSection>
+
+      <DashboardSection title="File Service">
+        <StatCard label="Activos" val={stats.fileServiceActivos} color="border-purple-500" />
+        <StatCard label="Pendientes post escritura" val={stats.fileServicePostPendiente} color="border-yellow-500" />
+        <StatCard label="Correcciones pendientes" val={stats.fileServiceCorrecciones} color="border-red-500" />
+      </DashboardSection>
+
+      <DashboardSection title="Base de datos">
         <StatCard label="Clientes" val={stats.clientes} color="border-blue-500" />
-        <StatCard label="Vehículos" val={stats.vehiculos} color="border-green-500" />
-        <StatCard label="Órdenes" val={stats.ordenes} color="border-yellow-500" />
-        <StatCard
-          label="Ventas"
-          val={`$${stats.ingresos.toLocaleString("es-CL")}`}
-          color="border-black bg-black text-white"
-        />
-      </div>
+        <StatCard label="Vehiculos" val={stats.vehiculos} color="border-green-500" />
+        <StatCard label="Ordenes" val={stats.ordenes} color="border-yellow-500" />
+      </DashboardSection>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {tieneRol(usuario, PERMISOS_RUTAS["/flujo"]) && (
           <QuickLink
             to="/flujo"
-            title="Nueva Recepción"
-            text="Ingreso de cliente, vehículo, síntomas y fotos."
-            icon="🚦"
+            title="Nueva Recepcion"
+            text="Ingreso de cliente, vehiculo, sintomas y fotos."
+            icon="Recepcion"
           />
         )}
 
@@ -519,8 +701,8 @@ function Dashboard({ usuario }) {
           <QuickLink
             to="/ordenes"
             title="Cola de Trabajo"
-            text="Ver órdenes activas y estados del proceso."
-            icon="🧾"
+            text="Ver ordenes activas y estados del proceso."
+            icon="Ordenes"
           />
         )}
 
@@ -529,7 +711,7 @@ function Dashboard({ usuario }) {
             to="/archivos-ecu"
             title="File Service"
             text="Archivos ECU originales y modificados por tuner."
-            icon="📂"
+            icon="ECU"
           />
         )}
 
@@ -538,7 +720,7 @@ function Dashboard({ usuario }) {
             to="/usuarios"
             title="Usuarios / Roles"
             text="Crear usuarios y administrar permisos."
-            icon="👑"
+            icon="Roles"
           />
         )}
       </div>
@@ -546,12 +728,27 @@ function Dashboard({ usuario }) {
   );
 }
 
+const DashboardSection = ({ title, children }) => (
+  <section className="space-y-4">
+    <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+      {title}
+    </h2>
+
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+      {children}
+    </div>
+  </section>
+);
+
 const StatCard = ({ label, val, color }) => (
   <div
-    className={`bg-white p-8 rounded-2xl border-4 shadow-[10px_10px_0px_0px_rgba(0,0,0,1)] ${color}`}
+    className={
+      "bg-white p-5 rounded-2xl border-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] min-h-[120px] " +
+      color
+    }
   >
     <p className="text-[10px] font-black uppercase opacity-50">{label}</p>
-    <p className="text-4xl font-black mt-2">{val}</p>
+    <p className="text-2xl md:text-3xl font-black mt-2 break-words">{val}</p>
   </div>
 );
 
