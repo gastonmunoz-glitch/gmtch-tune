@@ -48,21 +48,53 @@ const upload = multer({
   },
 });
 
+let columnasPreparadas = false;
+
+const prepararColumnasFotos = async () => {
+  if (columnasPreparadas) return;
+
+  await FotoVehiculo.sequelize.query(`
+    ALTER TABLE "fotos_vehiculo"
+    ADD COLUMN IF NOT EXISTS "tipo_foto" VARCHAR(60) DEFAULT 'OTRO';
+
+    ALTER TABLE "fotos_vehiculo"
+    ADD COLUMN IF NOT EXISTS "nombre_archivo" VARCHAR(255);
+
+    ALTER TABLE "fotos_vehiculo"
+    ADD COLUMN IF NOT EXISTS "subido_por" VARCHAR(100);
+  `);
+
+  columnasPreparadas = true;
+};
+
+const usuarioActual = (req) => {
+  return (
+    req.usuario?.username ||
+    req.user?.username ||
+    req.usuario?.nombre ||
+    req.user?.nombre ||
+    "sistema"
+  );
+};
+
 const subirFoto = upload.fields([
+  { name: "fotos", maxCount: 20 },
+  { name: "fotos[]", maxCount: 20 },
   { name: "foto", maxCount: 1 },
   { name: "archivo", maxCount: 1 },
   { name: "imagen", maxCount: 1 },
   { name: "file", maxCount: 1 },
 ]);
 
-const obtenerArchivoSubido = (req) => {
-  return (
-    req.files?.foto?.[0] ||
-    req.files?.archivo?.[0] ||
-    req.files?.imagen?.[0] ||
-    req.files?.file?.[0] ||
-    null
-  );
+const obtenerArchivosSubidos = (req) => {
+  return [
+    ...(req.files?.fotos || []),
+    ...(req.files?.["fotos[]"] || []),
+    ...(req.files?.foto || []),
+    ...(req.files?.archivo || []),
+    ...(req.files?.imagen || []),
+    ...(req.files?.file || []),
+  ];
 };
 
 router.post("/", (req, res, next) => {
@@ -78,7 +110,9 @@ router.post("/", (req, res, next) => {
   });
 }, async (req, res) => {
   try {
-    const archivo = obtenerArchivoSubido(req);
+    await prepararColumnasFotos();
+
+    const archivos = obtenerArchivosSubidos(req);
 
     const ordenId = req.body.ordenId || req.body.orden_id;
 
@@ -88,27 +122,44 @@ router.post("/", (req, res, next) => {
       });
     }
 
-    if (!archivo) {
+    if (!archivos.length) {
       return res.status(400).json({
         error: "No se recibió ninguna foto",
       });
     }
 
-    const urlFoto = `/uploads/fotos/${archivo.filename}`;
+    const tipoFoto =
+      String(req.body.tipo_foto || req.body.tipo || "OTRO")
+        .trim()
+        .toUpperCase() || "OTRO";
 
-    const nuevaFoto = await FotoVehiculo.create({
-      ordenId: Number(ordenId),
-      orden_id: Number(ordenId),
-      url_foto: urlFoto,
-      nombre_archivo: archivo.originalname,
-      tipo_foto: req.body.tipo_foto || req.body.tipo || "Ingreso",
-      descripcion: req.body.descripcion || "",
-    });
+    const descripcion = req.body.descripcion || "";
+    const subidoPor = usuarioActual(req);
+
+    const fotosCreadas = await Promise.all(
+      archivos.map((archivo) => {
+        const urlFoto = `/uploads/fotos/${archivo.filename}`;
+
+        return FotoVehiculo.create({
+          ordenId: Number(ordenId),
+          url_foto: urlFoto,
+          descripcion,
+          tipo_foto: tipoFoto,
+          nombre_archivo: archivo.originalname || archivo.filename,
+          subido_por: subidoPor,
+        });
+      })
+    );
 
     return res.status(201).json({
-      mensaje: "Foto subida correctamente",
-      foto: nuevaFoto,
-      url_foto: urlFoto,
+      mensaje:
+        fotosCreadas.length === 1
+          ? "Foto subida correctamente"
+          : "Fotos subidas correctamente",
+      cantidad: fotosCreadas.length,
+      fotos: fotosCreadas,
+      foto: fotosCreadas[0],
+      url_foto: fotosCreadas[0]?.url_foto,
     });
   } catch (error) {
     console.error("ERROR AL GUARDAR FOTO:", error);

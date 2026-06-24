@@ -19,6 +19,19 @@ const FotoVehiculo = sequelize.define('FotoVehiculo', {
     type: DataTypes.STRING(255),
     allowNull: false,
   },
+  tipo_foto: {
+    type: DataTypes.STRING(60),
+    allowNull: false,
+    defaultValue: 'OTRO',
+  },
+  nombre_archivo: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+  },
+  subido_por: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+  },
   descripcion: {
     type: DataTypes.STRING(200),
     allowNull: true,
