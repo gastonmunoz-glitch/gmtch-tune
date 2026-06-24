@@ -146,6 +146,33 @@ function App() {
   const [usuario, setUsuario] = useState(() => leerUsuarioLocal());
   const [auth, setAuth] = useState(localStorage.getItem("token") ? true : false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [notificacionesOpen, setNotificacionesOpen] = useState(false);
+  const [notificaciones, setNotificaciones] = useState([]);
+  const [notificacionesNoLeidas, setNotificacionesNoLeidas] = useState(0);
+  const [notificacionesError, setNotificacionesError] = useState("");
+
+  const cargarNotificaciones = async () => {
+    if (!localStorage.getItem("token")) return;
+
+    try {
+      setNotificacionesError("");
+      const res = await api.get("/notificaciones");
+      const data = res.data || {};
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray(data.notificaciones)
+          ? data.notificaciones
+          : [];
+
+      setNotificaciones(items);
+      setNotificacionesNoLeidas(Number(data.noLeidas || 0));
+    } catch (err) {
+      console.error("Error cargando notificaciones:", err.response?.data || err.message);
+      setNotificaciones([]);
+      setNotificacionesNoLeidas(0);
+      setNotificacionesError("No se pudieron cargar notificaciones");
+    }
+  };
 
   useEffect(() => {
     let activo = true;
@@ -197,11 +224,40 @@ function App() {
     setUsuario(null);
     setAuth(false);
     setSidebarOpen(false);
+    setNotificacionesOpen(false);
+    setNotificaciones([]);
+    setNotificacionesNoLeidas(0);
   };
 
   const closeSidebar = () => {
     setSidebarOpen(false);
   };
+
+  const marcarNotificacionLeida = async (id) => {
+    try {
+      await api.patch(`/notificaciones/${id}/leida`);
+      await cargarNotificaciones();
+    } catch (err) {
+      console.error("Error marcando notificacion:", err.response?.data || err.message);
+      setNotificacionesError("No se pudo marcar la notificacion");
+    }
+  };
+
+  const marcarTodasNotificacionesLeidas = async () => {
+    try {
+      await api.patch("/notificaciones/marcar-todas-leidas");
+      await cargarNotificaciones();
+    } catch (err) {
+      console.error("Error marcando notificaciones:", err.response?.data || err.message);
+      setNotificacionesError("No se pudieron marcar las notificaciones");
+    }
+  };
+
+  useEffect(() => {
+    if (auth) {
+      cargarNotificaciones();
+    }
+  }, [auth, usuario?.rol, usuario?.username]);
 
   return (
     <Router>
@@ -298,12 +354,26 @@ function App() {
             </nav>
 
             <main className="flex-1 p-4 pt-24 md:p-10 md:pt-10 overflow-auto w-full">
+              <NotificacionesInternas
+                abiertas={notificacionesOpen}
+                setAbiertas={setNotificacionesOpen}
+                notificaciones={notificaciones}
+                noLeidas={notificacionesNoLeidas}
+                error={notificacionesError}
+                onActualizar={cargarNotificaciones}
+                onMarcarLeida={marcarNotificacionLeida}
+                onMarcarTodas={marcarTodasNotificacionesLeidas}
+              />
+
               <Routes>
                 <Route
                   path="/"
                   element={
                     <Protegido usuario={usuario} roles={PERMISOS_RUTAS["/"]}>
-                      <Dashboard usuario={usuario} />
+                      <Dashboard
+                        usuario={usuario}
+                        actualizarNotificaciones={cargarNotificaciones}
+                      />
                     </Protegido>
                   }
                 />
@@ -431,7 +501,146 @@ const AccesoDenegado = ({ usuario }) => (
   </div>
 );
 
-function Dashboard({ usuario }) {
+const formatearFechaNotificacion = (valor) => {
+  if (!valor) return "Sin fecha";
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return "Sin fecha";
+
+  return fecha.toLocaleString("es-CL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+};
+
+const NotificacionesInternas = ({
+  abiertas,
+  setAbiertas,
+  notificaciones,
+  noLeidas,
+  error,
+  onActualizar,
+  onMarcarLeida,
+  onMarcarTodas,
+}) => {
+  const ultimas = notificaciones.slice(0, 5);
+
+  return (
+    <section className="mb-6 flex justify-end">
+      <div className="relative w-full max-w-xl">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onActualizar}
+            className="bg-white border-2 border-black px-3 py-2 rounded-lg text-[10px] font-black uppercase hover:bg-gray-100 transition"
+          >
+            Actualizar notificaciones
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAbiertas((actual) => !actual)}
+            className="relative bg-black text-white border-2 border-black px-4 py-2 rounded-lg font-black uppercase text-xs hover:bg-blue-700 transition"
+          >
+            Campana
+            {noLeidas > 0 && (
+              <span className="absolute -top-2 -right-2 bg-red-600 text-white border-2 border-black rounded-full min-w-[26px] h-[26px] px-1 flex items-center justify-center text-[10px] font-black">
+                {noLeidas}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {abiertas && (
+          <div className="absolute right-0 mt-3 z-30 w-full bg-white border-4 border-black rounded-2xl shadow-[10px_10px_0px_0px_rgba(0,0,0,1)] overflow-hidden">
+            <div className="bg-black text-white p-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-black uppercase">
+                  Notificaciones internas
+                </h2>
+                <p className="text-[10px] font-bold uppercase text-gray-400">
+                  No leidas: {noLeidas}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={onMarcarTodas}
+                disabled={noLeidas === 0}
+                className="bg-white text-black px-3 py-2 rounded text-[10px] font-black uppercase disabled:opacity-40"
+              >
+                Marcar todas como leidas
+              </button>
+            </div>
+
+            {error && (
+              <div className="px-4 py-3 bg-yellow-50 border-b-2 border-black text-xs font-black uppercase text-yellow-800">
+                {error}
+              </div>
+            )}
+
+            {ultimas.length === 0 ? (
+              <div className="p-5 text-sm font-black uppercase text-gray-400">
+                Sin notificaciones internas
+              </div>
+            ) : (
+              <div className="max-h-[420px] overflow-auto divide-y-2 divide-black">
+                {ultimas.map((notificacion) => (
+                  <div
+                    key={notificacion.id}
+                    className={`p-4 ${notificacion.leida ? "bg-white" : "bg-blue-50"}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase text-blue-700">
+                          {notificacion.tipo || "GENERAL"}
+                        </p>
+                        <h3 className="text-sm font-black uppercase text-black">
+                          {notificacion.titulo || "Sin titulo"}
+                        </h3>
+                      </div>
+
+                      <span
+                        className={`shrink-0 border-2 border-black rounded-full px-2 py-1 text-[10px] font-black uppercase ${
+                          notificacion.leida
+                            ? "bg-gray-100 text-gray-600"
+                            : "bg-green-100 text-green-800"
+                        }`}
+                      >
+                        {notificacion.leida ? "Leida" : "No leida"}
+                      </span>
+                    </div>
+
+                    <p className="text-xs font-bold text-gray-600 mt-2">
+                      {notificacion.mensaje || "Sin mensaje"}
+                    </p>
+
+                    <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <p className="text-[10px] font-black uppercase text-gray-400">
+                        {formatearFechaNotificacion(notificacion.createdAt)}
+                      </p>
+
+                      {!notificacion.leida && (
+                        <button
+                          type="button"
+                          onClick={() => onMarcarLeida(notificacion.id)}
+                          className="bg-black text-white px-3 py-2 rounded text-[10px] font-black uppercase hover:bg-blue-700 transition"
+                        >
+                          Marcar como leida
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+};
+
+function Dashboard({ usuario, actualizarNotificaciones }) {
   const puedeVerBase = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(
     usuario?.rol
   );
@@ -761,6 +970,9 @@ function Dashboard({ usuario }) {
         archivosRes.status === "fulfilled" ? normalizarArray(archivosRes.value) : [];
 
       setStats(calcularDashboard(ordenes, clientes, vehiculos, archivos));
+      if (actualizarNotificaciones) {
+        await actualizarNotificaciones();
+      }
     } catch (err) {
       console.error("Error cargando estadisticas:", err.response?.data || err.message);
     } finally {
