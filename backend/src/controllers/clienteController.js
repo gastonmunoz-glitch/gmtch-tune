@@ -2,6 +2,8 @@ const { QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
 const { Cliente, Vehiculo, OrdenTrabajo } = require("../models");
 
+let columnasPreparadas = false;
+
 const normalizarCategoria = (categoria) => {
   const valor = String(categoria || "NORMAL").trim().toUpperCase();
 
@@ -17,6 +19,30 @@ const normalizarCategoria = (categoria) => {
   return permitidas.includes(valor) ? valor : "NORMAL";
 };
 
+const normalizarBoolean = (valor) => {
+  if (valor === true || valor === false) return valor;
+  if (valor === 1 || valor === "1") return true;
+  if (valor === 0 || valor === "0") return false;
+
+  const texto = String(valor ?? "").trim().toLowerCase();
+  return ["true", "si", "sí", "yes", "on"].includes(texto);
+};
+
+const prepararColumnas = async () => {
+  if (columnasPreparadas) return;
+
+  await sequelize.query(`
+    ALTER TABLE "clientes"
+    ADD COLUMN IF NOT EXISTS "excluir_estadisticas" BOOLEAN DEFAULT false;
+
+    UPDATE "clientes"
+    SET "excluir_estadisticas" = false
+    WHERE "excluir_estadisticas" IS NULL;
+  `);
+
+  columnasPreparadas = true;
+};
+
 const limpiarPayloadCliente = (body = {}) => {
   return {
     nombre: body.nombre || "",
@@ -24,6 +50,7 @@ const limpiarPayloadCliente = (body = {}) => {
     email: body.email || null,
     direccion: body.direccion || null,
     categoria_cliente: normalizarCategoria(body.categoria_cliente),
+    excluir_estadisticas: normalizarBoolean(body.excluir_estadisticas),
     nota_cliente: body.nota_cliente || null,
   };
 };
@@ -46,6 +73,8 @@ const maxFecha = (fechas) => {
 
 const obtenerClientes = async (req, res) => {
   try {
+    await prepararColumnas();
+
     const clientes = await Cliente.findAll({
       include: [
         {
@@ -75,10 +104,12 @@ const obtenerClientes = async (req, res) => {
 
 const obtenerClientePorId = async (req, res) => {
   try {
+    await prepararColumnas();
+
     const clienteId = req.params.id;
 
     const clientes = await sequelize.query(
-      `SELECT id, nombre, telefono, email, direccion, categoria_cliente, nota_cliente, "createdAt", "updatedAt"
+      `SELECT id, nombre, telefono, email, direccion, categoria_cliente, excluir_estadisticas, nota_cliente, "createdAt", "updatedAt"
        FROM clientes
        WHERE id = :clienteId
        LIMIT 1`,
@@ -183,6 +214,8 @@ const obtenerClientePorId = async (req, res) => {
 
 const crearCliente = async (req, res) => {
   try {
+    await prepararColumnas();
+
     const payload = limpiarPayloadCliente(req.body);
 
     if (!payload.nombre || !payload.nombre.trim()) {
@@ -206,6 +239,8 @@ const crearCliente = async (req, res) => {
 
 const actualizarCliente = async (req, res) => {
   try {
+    await prepararColumnas();
+
     const cliente = await Cliente.findByPk(req.params.id);
 
     if (!cliente) {
@@ -234,6 +269,8 @@ const actualizarCliente = async (req, res) => {
 
 const eliminarCliente = async (req, res) => {
   try {
+    await prepararColumnas();
+
     const cliente = await Cliente.findByPk(req.params.id, {
       include: [
         {

@@ -74,6 +74,12 @@ const OrdenTrabajo = sequelize.define(
       type: DataTypes.DECIMAL(10, 2),
       defaultValue: 0,
     },
+
+    excluir_estadisticas: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   },
   {
     tableName: "ordenes_trabajo",

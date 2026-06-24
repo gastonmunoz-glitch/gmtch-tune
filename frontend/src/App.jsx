@@ -749,8 +749,44 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     const desdeSemana = inicioSemana(hoy);
     const pagadasMes = [];
     const alertasOperativas = [];
+    const esVerdadero = (valor) =>
+      valor === true || String(valor || "").toLowerCase() === "true";
+    const clientesExcluidosIds = new Set(
+      clientes
+        .filter((cliente) => esVerdadero(cliente?.excluir_estadisticas))
+        .map((cliente) => String(cliente.id))
+    );
+    const clienteExcluidoEnOrden = (orden) => {
+      const cliente = orden?.Vehiculo?.Cliente || orden?.Cliente;
+      const clienteId =
+        cliente?.id ||
+        orden?.clienteId ||
+        orden?.cliente_id ||
+        orden?.Vehiculo?.clienteId ||
+        orden?.Vehiculo?.cliente_id;
 
-    const comercial = ordenes.reduce(
+      return (
+        esVerdadero(cliente?.excluir_estadisticas) ||
+        (clienteId && clientesExcluidosIds.has(String(clienteId)))
+      );
+    };
+    const ordenExcluida = (orden) =>
+      esVerdadero(orden?.excluir_estadisticas) || clienteExcluidoEnOrden(orden);
+    const ordenesReales = ordenes.filter((orden) => !ordenExcluida(orden));
+    const clientesReales = clientes.filter(
+      (cliente) => !esVerdadero(cliente?.excluir_estadisticas)
+    );
+    const vehiculosReales = vehiculos.filter((vehiculo) => {
+      const cliente = vehiculo?.Cliente || vehiculo?.cliente;
+      const clienteId = cliente?.id || vehiculo?.clienteId || vehiculo?.cliente_id;
+
+      return (
+        !esVerdadero(cliente?.excluir_estadisticas) &&
+        (!clienteId || !clientesExcluidosIds.has(String(clienteId)))
+      );
+    });
+
+    const comercial = ordenesReales.reduce(
       (acc, orden) => {
         const fechaPago = parseFecha(orden.fecha_pago);
         const fechaCreacion = parseFecha(orden.createdAt);
@@ -785,7 +821,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       }
     );
 
-    const entregadasHoy = ordenes.filter((orden) => {
+    const entregadasHoy = ordenesReales.filter((orden) => {
       const estado = String(orden.estado || "").toUpperCase();
       const fechaEntrega =
         parseFecha(orden.entregado_at) ||
@@ -809,7 +845,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       );
     };
 
-    const ordenesSinDiagnostico = ordenes.filter((orden) => {
+    const ordenesSinDiagnostico = ordenesReales.filter((orden) => {
       const estado = String(orden.estado || "").toUpperCase();
       return ["RECEPCIONADO", "PARA_DIAGNOSTICO"].includes(estado);
     }).length;
@@ -826,16 +862,16 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         String(archivo.estado || "").toUpperCase() === "REQUIERE_CORRECCION"
     ).length;
 
-    const listasEntrega = ordenes.filter(
+    const listasEntrega = ordenesReales.filter(
       (orden) =>
         String(orden.estado || "").toUpperCase() === "LISTO_PARA_ENTREGA"
     ).length;
 
-    const pagosPendientes = ordenes.filter(
+    const pagosPendientes = ordenesReales.filter(
       (orden) => String(orden.estado_pago || "").toUpperCase() !== "PAGADO"
     ).length;
 
-    ordenes.forEach((orden) => {
+    ordenesReales.forEach((orden) => {
       const estado = String(orden.estado || "").toUpperCase();
       const estadoPago = String(orden.estado_pago || "").toUpperCase();
       const referenciaFecha = parseFecha(orden.updatedAt);
@@ -951,11 +987,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       ticketPromedioMes: pagadasMes.length
         ? comercial.totalPagadoMes / pagadasMes.length
         : 0,
-      ordenesActivas: ordenes.filter(
+      ordenesActivas: ordenesReales.filter(
         (orden) => String(orden.estado || "").toUpperCase() !== "ENTREGADO"
       ).length,
       listasEntrega,
-      pendientesPago: ordenes.filter(
+      pendientesPago: ordenesReales.filter(
         (orden) =>
           String(orden.estado_pago || "").toUpperCase() !== "PAGADO" &&
           String(orden.estado || "").toUpperCase() !== "ENTREGADO"
@@ -981,9 +1017,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         crearItemChecklist("Pagos pendientes", pagosPendientes),
         crearItemChecklist("Entregadas hoy", entregadasHoy),
       ],
-      clientes: puedeVerBase ? clientes.length : "Sin acceso",
-      vehiculos: puedeVerBase ? vehiculos.length : "Sin acceso",
-      ordenes: ordenes.length,
+      clientes: puedeVerBase ? clientesReales.length : "Sin acceso",
+      vehiculos: puedeVerBase ? vehiculosReales.length : "Sin acceso",
+      ordenes: ordenesReales.length,
       ultimaActualizacion: new Date().toLocaleString("es-CL", {
         dateStyle: "short",
         timeStyle: "short",

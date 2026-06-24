@@ -36,6 +36,12 @@ const Cliente = sequelize.define(
       defaultValue: "NORMAL",
     },
 
+    excluir_estadisticas: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
     nota_cliente: {
       type: DataTypes.TEXT,
       allowNull: true,

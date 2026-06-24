@@ -310,6 +310,22 @@ function OrdenesPage() {
     }
   };
 
+  const cambiarExcluirEstadisticas = async (orden, valor) => {
+    try {
+      await api.patch(`/ordenes/${orden.id}`, {
+        excluir_estadisticas: valor,
+      });
+
+      await recargar();
+    } catch (err) {
+      console.error(
+        "ERROR CAMBIANDO EXCLUSION ESTADISTICAS:",
+        err.response?.data || err.message
+      );
+      alert(err.response?.data?.error || "No se pudo actualizar estadísticas.");
+    }
+  };
+
   const cobrarYEntregar = async (orden, medioPago = "TRANSFERENCIA") => {
     const montoTotal = Number(orden.monto_total || 0);
     const montoPagado = Number(orden.monto_pagado || montoTotal);
@@ -476,6 +492,10 @@ function OrdenesPage() {
 
           {ordenesFiltradas.map((o) => {
             const vip = o.Vehiculo?.Cliente?.categoria_cliente === "VIP";
+            const clienteExcluido =
+              o.Vehiculo?.Cliente?.excluir_estadisticas === true;
+            const ordenExcluida = o.excluir_estadisticas === true;
+            const noCuentaEstadisticas = clienteExcluido || ordenExcluida;
             const pagoConfirmado = o.estado_pago === "PAGADO";
             const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
               textoQR(o)
@@ -523,6 +543,12 @@ function OrdenesPage() {
                         {vip && (
                           <span className="bg-yellow-400 text-black px-3 py-1 text-[10px] font-black uppercase">
                             ⭐ VIP
+                          </span>
+                        )}
+
+                        {noCuentaEstadisticas && (
+                          <span className="bg-yellow-200 text-black border-2 border-black px-3 py-1 text-[10px] font-black uppercase">
+                            No cuenta en estadísticas
                           </span>
                         )}
                       </div>
@@ -594,6 +620,22 @@ function OrdenesPage() {
                         <p className="text-[9px] font-bold uppercase text-gray-400 mt-2">
                           Recepción: {o.recepcionado_por || "No registrado"}
                         </p>
+                        <label className="mt-3 flex items-center gap-2 text-[10px] font-black uppercase text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={ordenExcluida}
+                            onChange={(event) =>
+                              cambiarExcluirEstadisticas(o, event.target.checked)
+                            }
+                          />
+                          Excluir estadísticas
+                        </label>
+
+                        {clienteExcluido && (
+                          <p className="mt-1 text-[9px] font-bold uppercase text-yellow-700">
+                            Cliente marcado como demo/test
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>

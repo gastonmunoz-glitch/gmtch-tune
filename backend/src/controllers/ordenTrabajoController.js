@@ -37,6 +37,15 @@ const normalizarNumero = (valor, defecto = 0) => {
   return numero;
 };
 
+const normalizarBoolean = (valor) => {
+  if (valor === true || valor === false) return valor;
+  if (valor === 1 || valor === "1") return true;
+  if (valor === 0 || valor === "0") return false;
+
+  const texto = String(valor ?? "").trim().toLowerCase();
+  return ["true", "si", "sí", "yes", "on"].includes(texto);
+};
+
 const NOTIFICACIONES_RESPONSABLES = {
   diagnostico_asignado_a: {
     tipo: "ORDEN_ASIGNADA_DIAGNOSTICO",
@@ -96,6 +105,20 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "monto_total" NUMERIC(10,2) DEFAULT 0;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "excluir_estadisticas" BOOLEAN DEFAULT false;
+
+    UPDATE "ordenes_trabajo"
+    SET "excluir_estadisticas" = false
+    WHERE "excluir_estadisticas" IS NULL;
+
+    ALTER TABLE "clientes"
+    ADD COLUMN IF NOT EXISTS "excluir_estadisticas" BOOLEAN DEFAULT false;
+
+    UPDATE "clientes"
+    SET "excluir_estadisticas" = false
+    WHERE "excluir_estadisticas" IS NULL;
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "recepcionado_por" VARCHAR(100);
@@ -161,6 +184,7 @@ const queryOrdenesBase = `
     c."email" AS "cliente_email",
     c."direccion" AS "cliente_direccion",
     c."categoria_cliente" AS "cliente_categoria_cliente",
+    c."excluir_estadisticas" AS "cliente_excluir_estadisticas",
     c."nota_cliente" AS "cliente_nota_cliente"
 
   FROM "ordenes_trabajo" o
@@ -221,6 +245,7 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     kilometraje: row.kilometraje,
     motivo_ingreso: row.motivo_ingreso,
     monto_total: row.monto_total,
+    excluir_estadisticas: row.excluir_estadisticas,
 
     recepcionado_por: row.recepcionado_por,
     diagnostico_asignado_a: row.diagnostico_asignado_a,
@@ -260,6 +285,7 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
                 email: row.cliente_email,
                 direccion: row.cliente_direccion,
                 categoria_cliente: row.cliente_categoria_cliente || "NORMAL",
+                excluir_estadisticas: row.cliente_excluir_estadisticas,
                 nota_cliente: row.cliente_nota_cliente,
               }
             : null,
@@ -391,6 +417,7 @@ const crearOrden = async (req, res) => {
       kilometraje: req.body.kilometraje ? Number(req.body.kilometraje) : null,
       motivo_ingreso: limpiarTexto(req.body.motivo_ingreso),
       monto_total: normalizarNumero(req.body.monto_total, 0),
+      excluir_estadisticas: normalizarBoolean(req.body.excluir_estadisticas),
     });
 
     const recepcionadoPor =
@@ -518,6 +545,12 @@ const actualizarOrden = async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(req.body, "monto_pagado")) {
       payload.monto_pagado = normalizarNumero(req.body.monto_pagado, 0);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "excluir_estadisticas")) {
+      payload.excluir_estadisticas = normalizarBoolean(
+        req.body.excluir_estadisticas
+      );
     }
 
     if (payload.estado_pago === "PAGADO") {

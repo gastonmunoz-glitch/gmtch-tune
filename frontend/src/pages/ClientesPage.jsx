@@ -10,6 +10,7 @@ const FORM_INICIAL = {
   email: "",
   direccion: "",
   categoria_cliente: "NORMAL",
+  excluir_estadisticas: false,
   nota_cliente: "",
 };
 
@@ -169,6 +170,7 @@ function ClientesPage() {
       email: cliente.email || "",
       direccion: cliente.direccion || "",
       categoria_cliente: cliente.categoria_cliente || "NORMAL",
+      excluir_estadisticas: cliente.excluir_estadisticas === true,
       nota_cliente: cliente.nota_cliente || "",
     });
   };
@@ -334,6 +336,20 @@ function ClientesPage() {
             />
           </div>
 
+          <label className="flex items-center gap-3 border-4 border-black bg-yellow-50 p-4 font-black uppercase text-xs text-black">
+            <input
+              type="checkbox"
+              checked={formData.excluir_estadisticas === true}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  excluir_estadisticas: e.target.checked,
+                })
+              }
+            />
+            Excluir de estadísticas / Demo
+          </label>
+
           <div className="flex gap-3">
             <button
               type="submit"
@@ -384,6 +400,11 @@ function ClientesPage() {
                   <div className="font-mono text-xs text-blue-700">
                     #{String(cliente.id).padStart(4, "0")}
                   </div>
+                  {cliente.excluir_estadisticas === true && (
+                    <div className="mt-2 inline-block bg-yellow-300 border-2 border-black px-2 py-1 text-[10px] font-black uppercase">
+                      Demo / no cuenta en estadísticas
+                    </div>
+                  )}
                 </button>
                 <div className="col-span-2 text-sm font-bold">
                   <div>{texto(cliente.telefono, "Pendiente")}</div>
@@ -463,6 +484,12 @@ function ClientesPage() {
                   <div>Email: {texto(clienteSeleccionado.email)}</div>
                   <div>Direccion: {texto(clienteSeleccionado.direccion)}</div>
                   <div>Categoria: {texto(clienteSeleccionado.categoria_cliente, "NORMAL")}</div>
+                  <div>
+                    Estadísticas:{" "}
+                    {clienteSeleccionado.excluir_estadisticas === true
+                      ? "Demo / no cuenta"
+                      : "Cuenta como real"}
+                  </div>
                 </div>
                 <div className="mt-3 bg-gray-100 border-2 border-black p-3 font-bold">
                   Nota interna: {texto(clienteSeleccionado.nota_cliente)}
