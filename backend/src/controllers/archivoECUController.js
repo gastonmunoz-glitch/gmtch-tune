@@ -97,6 +97,27 @@ const prepararColumnas = async () => {
     ADD COLUMN IF NOT EXISTS "archivo_original_subido_at" TIMESTAMP WITH TIME ZONE;
 
     ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "procesamiento_externo_estado" VARCHAR(60);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "procesamiento_externo_herramienta" VARCHAR(80);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "procesamiento_externo_responsable" VARCHAR(100);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "procesamiento_externo_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "procesamiento_externo_observacion" TEXT;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "procesamiento_externo_archivo_resultado" TEXT;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "procesamiento_externo_archivos" JSONB DEFAULT '[]'::jsonb;
+
+    ALTER TABLE "archivos_ecu"
     ADD COLUMN IF NOT EXISTS "post_escritura_estado" VARCHAR(60);
 
     ALTER TABLE "archivos_ecu"
@@ -274,6 +295,17 @@ const mapearArchivoRow = (row) => {
     instrucciones_tuner: row.instrucciones_tuner,
     observaciones: row.observaciones,
 
+    procesamiento_externo_estado: row.procesamiento_externo_estado,
+    procesamiento_externo_herramienta: row.procesamiento_externo_herramienta,
+    procesamiento_externo_responsable: row.procesamiento_externo_responsable,
+    procesamiento_externo_at: row.procesamiento_externo_at,
+    procesamiento_externo_observacion: row.procesamiento_externo_observacion,
+    procesamiento_externo_archivo_resultado:
+      row.procesamiento_externo_archivo_resultado,
+    procesamiento_externo_archivos: normalizarVersiones(
+      row.procesamiento_externo_archivos
+    ),
+
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
 
@@ -423,6 +455,14 @@ const crearArchivoECU = async (req, res) => {
       archivo_original: obtenerRutaPublicaArchivo(req.file),
       archivo_original_subido_por: usuarioActual(req),
       archivo_original_subido_at: new Date(),
+
+      procesamiento_externo_estado: null,
+      procesamiento_externo_herramienta: null,
+      procesamiento_externo_responsable: null,
+      procesamiento_externo_at: null,
+      procesamiento_externo_observacion: null,
+      procesamiento_externo_archivo_resultado: null,
+      procesamiento_externo_archivos: [],
 
       notificado_master_at: new Date(),
       notificado_master_por: usuarioActual(req),
@@ -575,6 +615,108 @@ const subirArchivoModificado = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR AL SUBIR ARCHIVO MODIFICADO:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const registrarProcesamientoExterno = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const archivo = await ArchivoECU.findByPk(req.params.id);
+
+    if (!archivo) {
+      return res.status(404).json({
+        error: "Registro no encontrado",
+      });
+    }
+
+    if (archivo.archivado) {
+      return res.status(400).json({
+        error: "No puedes registrar procesamiento externo en un archivo archivado",
+      });
+    }
+
+    const estadosPermitidos = [
+      "PENDIENTE",
+      "EN_PROCESO",
+      "COMPLETADO",
+      "FALLIDO",
+      "NO_APLICA",
+    ];
+
+    const herramientasPermitidas = [
+      "ALIENTECH_RECODE",
+      "KESS3",
+      "STAGEX",
+      "OTRO",
+    ];
+
+    let estado =
+      limpiarTexto(req.body.procesamiento_externo_estado) ||
+      limpiarTexto(req.body.estado) ||
+      "EN_PROCESO";
+
+    let herramienta =
+      limpiarTexto(req.body.procesamiento_externo_herramienta) ||
+      limpiarTexto(req.body.herramienta) ||
+      "OTRO";
+
+    estado = estado.toUpperCase();
+    herramienta = herramienta.toUpperCase();
+
+    if (!estadosPermitidos.includes(estado)) {
+      return res.status(400).json({
+        error: "Estado de procesamiento externo inválido",
+      });
+    }
+
+    if (!herramientasPermitidas.includes(herramienta)) {
+      return res.status(400).json({
+        error: "Herramienta de procesamiento externo inválida",
+      });
+    }
+
+    const observacion =
+      limpiarTexto(req.body.procesamiento_externo_observacion) ||
+      limpiarTexto(req.body.observacion);
+
+    const rutaArchivo = obtenerRutaPublicaArchivo(req.file);
+    const responsable = usuarioActual(req);
+    const fecha = new Date();
+
+    const evento = {
+      estado,
+      herramienta,
+      observacion,
+      archivo: rutaArchivo,
+      responsable,
+      fecha: fecha.toISOString(),
+    };
+
+    const historial = normalizarVersiones(archivo.procesamiento_externo_archivos);
+
+    await archivo.update({
+      procesamiento_externo_estado: estado,
+      procesamiento_externo_herramienta: herramienta,
+      procesamiento_externo_responsable: responsable,
+      procesamiento_externo_at: fecha,
+      procesamiento_externo_observacion: observacion,
+      procesamiento_externo_archivo_resultado:
+        rutaArchivo || archivo.procesamiento_externo_archivo_resultado,
+      procesamiento_externo_archivos: [...historial, evento],
+    });
+
+    res.json({
+      mensaje: "Procesamiento externo registrado correctamente",
+      archivo,
+      evento,
+    });
+  } catch (error) {
+    console.error("ERROR AL REGISTRAR PROCESAMIENTO EXTERNO:", error);
 
     res.status(500).json({
       error: error.message,
@@ -1135,6 +1277,7 @@ module.exports = {
   obtenerArchivoECUPorId,
   actualizarArchivoECU,
   subirArchivoModificado,
+  registrarProcesamientoExterno,
   notificarMaster,
   notificarSlave,
   solicitarCorreccion,

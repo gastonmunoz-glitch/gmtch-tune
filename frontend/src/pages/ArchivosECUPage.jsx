@@ -39,6 +39,21 @@ const FILTROS = [
   { value: "OK_CIERRE", label: "OK cierre" },
 ];
 
+const ESTADOS_PROCESAMIENTO_EXTERNO = [
+  "PENDIENTE",
+  "EN_PROCESO",
+  "COMPLETADO",
+  "FALLIDO",
+  "NO_APLICA",
+];
+
+const HERRAMIENTAS_PROCESAMIENTO_EXTERNO = [
+  { value: "ALIENTECH_RECODE", label: "Alientech Recode" },
+  { value: "KESS3", label: "KESS3" },
+  { value: "STAGEX", label: "StageX" },
+  { value: "OTRO", label: "Otro" },
+];
+
 const SERVICIO_PERSONALIZADO = "Otro / personalizado";
 
 const SERVICIOS_FILE_SERVICE = [
@@ -218,6 +233,7 @@ export default function ArchivosECUPage() {
   });
 
   const [modForms, setModForms] = useState({});
+  const [procesamientoForms, setProcesamientoForms] = useState({});
   const [postForms, setPostForms] = useState({});
   const [archivarForms, setArchivarForms] = useState({});
 
@@ -398,6 +414,24 @@ export default function ArchivosECUPage() {
       return;
     }
 
+    const tipoServicio =
+      nuevo.tipo_servicio === SERVICIO_PERSONALIZADO
+        ? limpiar(nuevo.tipo_servicio_personalizado)
+        : limpiar(nuevo.tipo_servicio);
+
+    if (!tipoServicio) {
+      setError("Debes seleccionar un tipo de servicio para File Service.");
+      return;
+    }
+
+    if (
+      nuevo.tipo_servicio === SERVICIO_PERSONALIZADO &&
+      !limpiar(nuevo.tipo_servicio_personalizado)
+    ) {
+      setError("Debes escribir el servicio personalizado para File Service.");
+      return;
+    }
+
     if (!nuevo.archivo) {
       setError("Debes cargar el archivo original");
       return;
@@ -407,10 +441,6 @@ export default function ArchivosECUPage() {
       setGuardando(true);
 
       const fd = new FormData();
-      const tipoServicio =
-        nuevo.tipo_servicio === SERVICIO_PERSONALIZADO
-          ? limpiar(nuevo.tipo_servicio_personalizado) || SERVICIO_PERSONALIZADO
-          : nuevo.tipo_servicio;
 
       Object.entries(nuevo).forEach(([key, value]) => {
         if (key === "archivo") return;
@@ -470,6 +500,20 @@ export default function ArchivosECUPage() {
     }));
   };
 
+  const actualizarProcesamientoForm = (archivoId, campo, valor) => {
+    setProcesamientoForms((prev) => ({
+      ...prev,
+      [archivoId]: {
+        procesamiento_externo_estado: "EN_PROCESO",
+        procesamiento_externo_herramienta: "OTRO",
+        procesamiento_externo_observacion: "",
+        archivo_resultado: null,
+        ...(prev[archivoId] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
   const actualizarPostForm = (archivoId, campo, valor) => {
     setPostForms((prev) => ({
       ...prev,
@@ -495,6 +539,56 @@ export default function ArchivosECUPage() {
         [campo]: valor,
       },
     }));
+  };
+
+  const registrarProcesamientoExterno = async (archivoId) => {
+    limpiarMensajes();
+
+    const form = {
+      procesamiento_externo_estado: "EN_PROCESO",
+      procesamiento_externo_herramienta: "OTRO",
+      procesamiento_externo_observacion: "",
+      archivo_resultado: null,
+      ...(procesamientoForms[archivoId] || {}),
+    };
+
+    try {
+      const fd = new FormData();
+
+      fd.append(
+        "procesamiento_externo_estado",
+        form.procesamiento_externo_estado || "EN_PROCESO"
+      );
+      fd.append(
+        "procesamiento_externo_herramienta",
+        form.procesamiento_externo_herramienta || "OTRO"
+      );
+      fd.append(
+        "procesamiento_externo_observacion",
+        form.procesamiento_externo_observacion || ""
+      );
+
+      if (form.archivo_resultado) {
+        fd.append("archivo_resultado", form.archivo_resultado);
+      }
+
+      await api.post(`/archivos-ecu/${archivoId}/procesamiento-externo`, fd, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      setMensaje("Procesamiento externo registrado correctamente");
+
+      setProcesamientoForms((prev) => ({
+        ...prev,
+        [archivoId]: {},
+      }));
+
+      await cargarDatos();
+    } catch (err) {
+      mostrarError(err, "Error registrando procesamiento externo");
+    }
   };
 
   const subirModificado = async (archivoId) => {
@@ -1124,6 +1218,20 @@ export default function ArchivosECUPage() {
                 ? archivo.versiones_modificadas
                 : [];
 
+              const historialProcesamiento = Array.isArray(
+                archivo.procesamiento_externo_archivos
+              )
+                ? archivo.procesamiento_externo_archivos
+                : [];
+
+              const procesamientoForm = {
+                procesamiento_externo_estado: "EN_PROCESO",
+                procesamiento_externo_herramienta: "OTRO",
+                procesamiento_externo_observacion: "",
+                archivo_resultado: null,
+                ...(procesamientoForms[archivo.id] || {}),
+              };
+
               const postForm = {
                 post_escritura_estado: "OK",
                 post_escritura_sin_dtc: false,
@@ -1395,11 +1503,205 @@ export default function ArchivosECUPage() {
                       </button>
 
                       <p className="text-xs text-slate-500">
-                        La notificaci?n interna se registra al crear el File Service.
+                        La notificacion interna se registra al crear el File Service.
                         WhatsApp es un aviso manual opcional.
                       </p>
                     </div>
                   </div>
+
+                  <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <summary className="cursor-pointer font-semibold text-slate-200">
+                      Procesamiento externo
+                    </summary>
+
+                    <div className="mt-4 space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                          <p className="text-slate-500">Estado</p>
+                          <p>{archivo.procesamiento_externo_estado || "No registrado"}</p>
+                        </div>
+
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                          <p className="text-slate-500">Herramienta</p>
+                          <p>
+                            {archivo.procesamiento_externo_herramienta ||
+                              "No registrado"}
+                          </p>
+                        </div>
+
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                          <p className="text-slate-500">Responsable</p>
+                          <p>
+                            {archivo.procesamiento_externo_responsable ||
+                              "No registrado"}
+                          </p>
+                        </div>
+
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                          <p className="text-slate-500">Fecha</p>
+                          <p>
+                            {archivo.procesamiento_externo_at
+                              ? formatearFecha(archivo.procesamiento_externo_at)
+                              : "No registrado"}
+                          </p>
+                        </div>
+
+                        <div className="md:col-span-2 bg-slate-950 border border-slate-800 rounded-xl p-3">
+                          <p className="text-slate-500">Observacion</p>
+                          <p>
+                            {archivo.procesamiento_externo_observacion ||
+                              "Sin observacion"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {archivo.procesamiento_externo_archivo_resultado && (
+                        <a
+                          href={fileUrl(
+                            archivo.procesamiento_externo_archivo_resultado
+                          )}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-block px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm"
+                        >
+                          Descargar resultado externo
+                        </a>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-slate-400 ml-1">
+                            Estado
+                          </label>
+                          <select
+                            value={procesamientoForm.procesamiento_externo_estado}
+                            onChange={(e) =>
+                              actualizarProcesamientoForm(
+                                archivo.id,
+                                "procesamiento_externo_estado",
+                                e.target.value
+                              )
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                          >
+                            {ESTADOS_PROCESAMIENTO_EXTERNO.map((estado) => (
+                              <option key={estado} value={estado}>
+                                {estado}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-slate-400 ml-1">
+                            Herramienta
+                          </label>
+                          <select
+                            value={
+                              procesamientoForm.procesamiento_externo_herramienta
+                            }
+                            onChange={(e) =>
+                              actualizarProcesamientoForm(
+                                archivo.id,
+                                "procesamiento_externo_herramienta",
+                                e.target.value
+                              )
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                          >
+                            {HERRAMIENTAS_PROCESAMIENTO_EXTERNO.map((item) => (
+                              <option key={item.value} value={item.value}>
+                                {item.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="md:col-span-2">
+                          <label className="text-xs text-slate-400 ml-1">
+                            Observacion opcional
+                          </label>
+                          <textarea
+                            value={
+                              procesamientoForm.procesamiento_externo_observacion
+                            }
+                            onChange={(e) =>
+                              actualizarProcesamientoForm(
+                                archivo.id,
+                                "procesamiento_externo_observacion",
+                                e.target.value
+                              )
+                            }
+                            rows={2}
+                            className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div className="md:col-span-2">
+                          <label className="text-xs text-slate-400 ml-1">
+                            Archivo resultado opcional
+                          </label>
+                          <input
+                            type="file"
+                            onChange={(e) =>
+                              actualizarProcesamientoForm(
+                                archivo.id,
+                                "archivo_resultado",
+                                e.target.files?.[0] || null
+                              )
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => registrarProcesamientoExterno(archivo.id)}
+                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500"
+                      >
+                        Registrar procesamiento externo
+                      </button>
+
+                      {historialProcesamiento.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-slate-300">
+                            Historial procesamiento externo
+                          </p>
+
+                          {historialProcesamiento.map((evento, index) => (
+                            <div
+                              key={`${evento.fecha || index}-${index}`}
+                              className="border border-slate-800 rounded-xl p-3 text-sm"
+                            >
+                              <p className="font-semibold">
+                                {evento.estado || "-"} -{" "}
+                                {evento.herramienta || "-"}
+                              </p>
+                              <p className="text-xs text-slate-400">
+                                Por {evento.responsable || "-"} -{" "}
+                                {formatearFecha(evento.fecha)}
+                              </p>
+                              {evento.observacion && (
+                                <p className="text-slate-300 mt-1">
+                                  {evento.observacion}
+                                </p>
+                              )}
+                              {evento.archivo && (
+                                <a
+                                  href={fileUrl(evento.archivo)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-block mt-2 text-blue-300 hover:text-blue-200"
+                                >
+                                  Ver archivo
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </details>
 
                   <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
                     <div className="flex items-center justify-between gap-3">

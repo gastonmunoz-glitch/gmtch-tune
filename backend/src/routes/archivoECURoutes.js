@@ -9,6 +9,7 @@ const {
   obtenerArchivoECUPorId,
   actualizarArchivoECU,
   subirArchivoModificado,
+  registrarProcesamientoExterno,
   notificarMaster,
   notificarSlave,
   solicitarCorreccion,
@@ -49,6 +50,7 @@ const upload = multer({
 
 const manejarSubidaArchivo = upload.single("archivo");
 const manejarPostEscritura = upload.single("scanner_post_escritura");
+const manejarProcesamientoExterno = upload.single("archivo_resultado");
 
 router.post("/", manejarSubidaArchivo, crearArchivoECU);
 
@@ -59,6 +61,12 @@ router.put("/:id", actualizarArchivoECU);
 router.patch("/:id", actualizarArchivoECU);
 
 router.post("/:id/modificado", manejarSubidaArchivo, subirArchivoModificado);
+
+router.post(
+  "/:id/procesamiento-externo",
+  manejarProcesamientoExterno,
+  registrarProcesamientoExterno
+);
 
 router.post("/:id/notificar-master", notificarMaster);
 router.post("/:id/notificar-slave", notificarSlave);

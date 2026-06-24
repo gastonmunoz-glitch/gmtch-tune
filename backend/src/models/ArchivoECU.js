@@ -114,6 +114,42 @@ const ArchivoECU = sequelize.define(
       allowNull: true,
     },
 
+    procesamiento_externo_estado: {
+      type: DataTypes.STRING(60),
+      allowNull: true,
+    },
+
+    procesamiento_externo_herramienta: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    procesamiento_externo_responsable: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    procesamiento_externo_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    procesamiento_externo_observacion: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    procesamiento_externo_archivo_resultado: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    procesamiento_externo_archivos: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
+
     notificado_master_at: {
       type: DataTypes.DATE,
       allowNull: true,
