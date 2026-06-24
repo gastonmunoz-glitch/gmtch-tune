@@ -438,9 +438,10 @@ function Dashboard({ usuario }) {
   const puedeVerFileService = tieneRol(usuario, PERMISOS_RUTAS["/archivos-ecu"]);
 
   const [stats, setStats] = useState({
-    ventasHoy: 0,
-    ventasSemana: 0,
-    ventasMes: 0,
+    cajaHoy: 0,
+    cajaSemana: 0,
+    cajaMes: 0,
+    trabajosIngresadosHoy: 0,
     totalPagadoMes: 0,
     ticketPromedioMes: 0,
     ordenesActivas: 0,
@@ -473,12 +474,13 @@ function Dashboard({ usuario }) {
   };
 
   const montoPagadoOrden = (orden) => {
+    if (String(orden.estado_pago || "").toUpperCase() !== "PAGADO") {
+      return 0;
+    }
+
     const pagado = numero(orden.monto_pagado);
     if (pagado > 0) return pagado;
-    if (String(orden.estado_pago || "").toUpperCase() === "PAGADO") {
-      return numero(orden.monto_total);
-    }
-    return 0;
+    return numero(orden.monto_total);
   };
 
   const parseFecha = (valor) => {
@@ -516,18 +518,23 @@ function Dashboard({ usuario }) {
     const comercial = ordenes.reduce(
       (acc, orden) => {
         const fechaPago = parseFecha(orden.fecha_pago);
+        const fechaCreacion = parseFecha(orden.createdAt);
         const pagado = montoPagadoOrden(orden);
+
+        if (mismoDia(fechaCreacion, hoy)) {
+          acc.trabajosIngresadosHoy += numero(orden.monto_total);
+        }
 
         if (!fechaPago || pagado <= 0) return acc;
 
-        if (mismoDia(fechaPago, hoy)) acc.ventasHoy += pagado;
-        if (fechaPago >= desdeSemana) acc.ventasSemana += pagado;
+        if (mismoDia(fechaPago, hoy)) acc.cajaHoy += pagado;
+        if (fechaPago >= desdeSemana) acc.cajaSemana += pagado;
 
         if (
           fechaPago.getFullYear() === hoy.getFullYear() &&
           fechaPago.getMonth() === hoy.getMonth()
         ) {
-          acc.ventasMes += pagado;
+          acc.cajaMes += pagado;
           acc.totalPagadoMes += pagado;
           pagadasMes.push(pagado);
         }
@@ -535,9 +542,10 @@ function Dashboard({ usuario }) {
         return acc;
       },
       {
-        ventasHoy: 0,
-        ventasSemana: 0,
-        ventasMes: 0,
+        cajaHoy: 0,
+        cajaSemana: 0,
+        cajaMes: 0,
+        trabajosIngresadosHoy: 0,
         totalPagadoMes: 0,
       }
     );
@@ -661,9 +669,10 @@ function Dashboard({ usuario }) {
       </div>
 
       <DashboardSection title="Comercial">
-        <StatCard label="Ventas hoy" val={formatoCLP(stats.ventasHoy)} color="border-black bg-black text-white" />
-        <StatCard label="Ventas semana" val={formatoCLP(stats.ventasSemana)} color="border-blue-500" />
-        <StatCard label="Ventas mes" val={formatoCLP(stats.ventasMes)} color="border-blue-500" />
+        <StatCard label="Caja hoy" val={formatoCLP(stats.cajaHoy)} color="border-black bg-black text-white" />
+        <StatCard label="Caja semana" val={formatoCLP(stats.cajaSemana)} color="border-blue-500" />
+        <StatCard label="Caja mes" val={formatoCLP(stats.cajaMes)} color="border-blue-500" />
+        <StatCard label="Trabajos ingresados hoy" val={formatoCLP(stats.trabajosIngresadosHoy)} color="border-yellow-500" />
         <StatCard label="Total pagado mes" val={formatoCLP(stats.totalPagadoMes)} color="border-green-500" />
         <StatCard label="Ticket promedio mes" val={formatoCLP(stats.ticketPromedioMes)} color="border-green-500" />
       </DashboardSection>
