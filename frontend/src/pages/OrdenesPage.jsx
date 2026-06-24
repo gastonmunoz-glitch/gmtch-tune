@@ -24,6 +24,29 @@ const FILTROS_ORDENES = [
   { value: "TODAS", label: "TODAS" },
 ];
 
+const RESPONSABLES_ETAPAS = [
+  {
+    campo: "diagnostico_asignado_a",
+    label: "Diagnostico / scanner",
+    roles: ["OPERADOR_SCANNER", "OPERADOR_ECU", "SUPERVISOR", "OWNER"],
+  },
+  {
+    campo: "operador_ecu_asignado_a",
+    label: "Operador ECU",
+    roles: ["OPERADOR_ECU", "TUNER", "SUPERVISOR", "OWNER"],
+  },
+  {
+    campo: "mecanico_asignado_a",
+    label: "Mecanico",
+    roles: ["MECANICO", "SUPERVISOR", "OWNER"],
+  },
+  {
+    campo: "supervisor_asignado_a",
+    label: "Supervisor",
+    roles: ["SUPERVISOR", "ADMIN", "OWNER"],
+  },
+];
+
 const prioridadClase = (prioridad) => {
   const p = String(prioridad || "MEDIA").toUpperCase();
 
@@ -105,6 +128,7 @@ const ordenarEntregadas = (a, b) => {
 function OrdenesPage() {
   const [ordenes, setOrdenes] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
+  const [usuarios, setUsuarios] = useState([]);
   const [filtro, setFiltro] = useState("ACTIVAS");
   const [cargando, setCargando] = useState(false);
 
@@ -121,15 +145,29 @@ function OrdenesPage() {
 
     const cargarInicial = async () => {
       try {
-        const [oRes, vRes] = await Promise.all([
+        const [oRes, vRes, uRes] = await Promise.allSettled([
           api.get("/ordenes"),
           api.get("/vehiculos"),
+          api.get("/usuarios"),
         ]);
 
         if (!activo) return;
 
-        setOrdenes(Array.isArray(oRes.data) ? oRes.data : []);
-        setVehiculos(Array.isArray(vRes.data) ? vRes.data : []);
+        setOrdenes(
+          oRes.status === "fulfilled" && Array.isArray(oRes.value.data)
+            ? oRes.value.data
+            : []
+        );
+        setVehiculos(
+          vRes.status === "fulfilled" && Array.isArray(vRes.value.data)
+            ? vRes.value.data
+            : []
+        );
+        setUsuarios(
+          uRes.status === "fulfilled" && Array.isArray(uRes.value.data)
+            ? uRes.value.data
+            : []
+        );
       } catch (err) {
         console.error("ERROR CARGANDO FILA:", err.response?.data || err.message);
       }
@@ -146,13 +184,25 @@ function OrdenesPage() {
     try {
       setCargando(true);
 
-      const [oRes, vRes] = await Promise.all([
+      const [oRes, vRes, uRes] = await Promise.allSettled([
         api.get("/ordenes"),
         api.get("/vehiculos"),
+        api.get("/usuarios"),
       ]);
 
-      setOrdenes(Array.isArray(oRes.data) ? oRes.data : []);
-      setVehiculos(Array.isArray(vRes.data) ? vRes.data : []);
+      setOrdenes(
+        oRes.status === "fulfilled" && Array.isArray(oRes.value.data)
+          ? oRes.value.data
+          : []
+      );
+      setVehiculos(
+        vRes.status === "fulfilled" && Array.isArray(vRes.value.data)
+          ? vRes.value.data
+          : []
+      );
+      if (uRes.status === "fulfilled" && Array.isArray(uRes.value.data)) {
+        setUsuarios(uRes.value.data);
+      }
     } catch (err) {
       console.error("ERROR RECARGANDO FILA:", err.response?.data || err.message);
       alert("No se pudo recargar la fila de trabajo.");
@@ -238,6 +288,25 @@ function OrdenesPage() {
     } catch (err) {
       console.error("ERROR CAMBIANDO ESTADO:", err.response?.data || err.message);
       alert(err.response?.data?.error || "No se pudo cambiar el estado.");
+    }
+  };
+
+  const usuariosPorRoles = (roles = []) => {
+    return usuarios.filter(
+      (usuario) => usuario.activo !== false && roles.includes(usuario.rol)
+    );
+  };
+
+  const asignarResponsable = async (orden, campo, valor) => {
+    try {
+      await api.patch(`/ordenes/${orden.id}`, {
+        [campo]: valor,
+      });
+
+      await recargar();
+    } catch (err) {
+      console.error("ERROR ASIGNANDO RESPONSABLE:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "No se pudo asignar responsable.");
     }
   };
 
@@ -471,6 +540,61 @@ function OrdenesPage() {
                         Entrada: {new Date(o.createdAt).toLocaleString("es-CL")} · KM:{" "}
                         {o.kilometraje || "—"}
                       </p>
+
+                      <div className="mt-4 border-2 border-black bg-white p-3">
+                        <p className="text-[10px] font-black uppercase text-gray-500 mb-2">
+                          Responsables
+                        </p>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {RESPONSABLES_ETAPAS.map((etapa) => {
+                            const opciones = usuariosPorRoles(etapa.roles);
+                            const valorActual = o[etapa.campo] || "";
+
+                            return (
+                              <label
+                                key={etapa.campo}
+                                className="text-[10px] font-black uppercase text-gray-500"
+                              >
+                                {etapa.label}
+                                <select
+                                  className="mt-1 w-full border-2 border-black p-2 text-[10px] font-bold uppercase bg-white text-black"
+                                  value={valorActual}
+                                  onChange={(event) =>
+                                    asignarResponsable(
+                                      o,
+                                      etapa.campo,
+                                      event.target.value
+                                    )
+                                  }
+                                >
+                                  <option value="">Sin asignar</option>
+                                  {valorActual &&
+                                    !opciones.some(
+                                      (usuario) => usuario.username === valorActual
+                                    ) && (
+                                      <option value={valorActual}>
+                                        {valorActual}
+                                      </option>
+                                    )}
+                                  {opciones.map((usuario) => (
+                                    <option
+                                      key={`${etapa.campo}-${usuario.id}`}
+                                      value={usuario.username}
+                                    >
+                                      {usuario.nombre || usuario.username} ({usuario.rol})
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            );
+                          })}
+                        </div>
+
+                        <p className="text-[9px] font-bold uppercase text-gray-400 mt-2">
+                          Recepcion: {o.recepcionado_por || "No registrado"}
+                        </p>
+                      </div>
                     </div>
                   </div>
 

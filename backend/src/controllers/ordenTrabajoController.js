@@ -72,6 +72,21 @@ const prepararColumnas = async () => {
     ADD COLUMN IF NOT EXISTS "monto_total" NUMERIC(10,2) DEFAULT 0;
 
     ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "recepcionado_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "diagnostico_asignado_a" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "operador_ecu_asignado_a" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "mecanico_asignado_a" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "supervisor_asignado_a" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "tecnico_finalizado_por" VARCHAR(100);
 
     ALTER TABLE "ordenes_trabajo"
@@ -180,6 +195,12 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     kilometraje: row.kilometraje,
     motivo_ingreso: row.motivo_ingreso,
     monto_total: row.monto_total,
+
+    recepcionado_por: row.recepcionado_por,
+    diagnostico_asignado_a: row.diagnostico_asignado_a,
+    operador_ecu_asignado_a: row.operador_ecu_asignado_a,
+    mecanico_asignado_a: row.mecanico_asignado_a,
+    supervisor_asignado_a: row.supervisor_asignado_a,
 
     tecnico_finalizado_por: row.tecnico_finalizado_por,
     tecnico_finalizado_at: row.tecnico_finalizado_at,
@@ -346,6 +367,25 @@ const crearOrden = async (req, res) => {
       monto_total: normalizarNumero(req.body.monto_total, 0),
     });
 
+    const recepcionadoPor =
+      limpiarTexto(req.body.recepcionado_por) || usuarioActual(req);
+
+    await sequelize.query(
+      `
+      UPDATE "ordenes_trabajo"
+      SET
+        "recepcionado_por" = :recepcionadoPor,
+        "updatedAt" = NOW()
+      WHERE "id" = :id;
+      `,
+      {
+        replacements: {
+          id: nuevaOrden.id,
+          recepcionadoPor,
+        },
+      }
+    );
+
     res.status(201).json({
       mensaje: "Orden creada correctamente",
       orden: nuevaOrden,
@@ -389,11 +429,33 @@ const actualizarOrden = async (req, res) => {
       "motivo_ingreso",
       "observacion_pago",
       "observacion_cierre",
+      "recepcionado_por",
+      "diagnostico_asignado_a",
+      "operador_ecu_asignado_a",
+      "mecanico_asignado_a",
+      "supervisor_asignado_a",
     ];
 
     camposTexto.forEach((campo) => {
       if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
         payload[campo] = limpiarTexto(req.body[campo]);
+      }
+    });
+
+    const camposResponsables = [
+      "recepcionado_por",
+      "diagnostico_asignado_a",
+      "operador_ecu_asignado_a",
+      "mecanico_asignado_a",
+      "supervisor_asignado_a",
+    ];
+
+    const responsablesPayload = {};
+
+    camposResponsables.forEach((campo) => {
+      if (Object.prototype.hasOwnProperty.call(payload, campo)) {
+        responsablesPayload[campo] = payload[campo];
+        delete payload[campo];
       }
     });
 
@@ -438,6 +500,28 @@ const actualizarOrden = async (req, res) => {
     }
 
     await orden.update(payload);
+
+    if (Object.keys(responsablesPayload).length > 0) {
+      const asignaciones = Object.keys(responsablesPayload).map(
+        (campo) => `"${campo}" = :${campo}`
+      );
+
+      await sequelize.query(
+        `
+        UPDATE "ordenes_trabajo"
+        SET
+          ${asignaciones.join(",\n          ")},
+          "updatedAt" = NOW()
+        WHERE "id" = :id;
+        `,
+        {
+          replacements: {
+            id: orden.id,
+            ...responsablesPayload,
+          },
+        }
+      );
+    }
 
     res.json({
       mensaje: "Orden actualizada correctamente",
