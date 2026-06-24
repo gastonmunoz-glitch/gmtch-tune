@@ -33,6 +33,29 @@ const listarUsuarios = async (req, res) => {
   }
 };
 
+const listarResponsables = async (req, res) => {
+  try {
+    const usuarios = await Usuario.findAll({
+      attributes: ["id", "nombre", "username", "rol", "activo"],
+      where: {
+        activo: true,
+      },
+      order: [
+        ["rol", "ASC"],
+        ["nombre", "ASC"],
+      ],
+    });
+
+    res.json(usuarios);
+  } catch (error) {
+    console.error("ERROR LISTANDO RESPONSABLES:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
 const crearUsuario = async (req, res) => {
   try {
     const nombre = limpiarTexto(req.body.nombre);
@@ -191,6 +214,7 @@ const eliminarUsuario = async (req, res) => {
 
 module.exports = {
   listarUsuarios,
+  listarResponsables,
   crearUsuario,
   actualizarUsuario,
   eliminarUsuario,

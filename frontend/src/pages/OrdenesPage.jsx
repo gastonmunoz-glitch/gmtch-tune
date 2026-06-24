@@ -148,7 +148,7 @@ function OrdenesPage() {
         const [oRes, vRes, uRes] = await Promise.allSettled([
           api.get("/ordenes"),
           api.get("/vehiculos"),
-          api.get("/usuarios"),
+          api.get("/usuarios/responsables"),
         ]);
 
         if (!activo) return;
@@ -187,7 +187,7 @@ function OrdenesPage() {
       const [oRes, vRes, uRes] = await Promise.allSettled([
         api.get("/ordenes"),
         api.get("/vehiculos"),
-        api.get("/usuarios"),
+        api.get("/usuarios/responsables"),
       ]);
 
       setOrdenes(

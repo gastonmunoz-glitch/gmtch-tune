@@ -260,7 +260,7 @@ export default function ArchivosECUPage() {
     const [archivosRes, ordenesRes, usuariosRes] = await Promise.allSettled([
       api.get("/archivos-ecu"),
       api.get("/ordenes"),
-      api.get("/usuarios"),
+      api.get("/usuarios/responsables"),
     ]);
 
     if (archivosRes.status !== "fulfilled") {
