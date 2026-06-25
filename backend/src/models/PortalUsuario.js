@@ -1,0 +1,81 @@
+const { DataTypes } = require("sequelize");
+const bcrypt = require("bcryptjs");
+const sequelize = require("../config/database");
+
+const PortalUsuario = sequelize.define(
+  "PortalUsuario",
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+      allowNull: false,
+    },
+
+    cuentaId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+
+    nombre: {
+      type: DataTypes.STRING(120),
+      allowNull: false,
+    },
+
+    email: {
+      type: DataTypes.STRING(160),
+      allowNull: false,
+      unique: true,
+    },
+
+    password: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+
+    activo: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
+
+    aprobado: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
+
+    last_login_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    last_seen_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+  },
+  {
+    tableName: "portal_usuarios",
+    timestamps: true,
+  }
+);
+
+const hashPassword = async (usuario) => {
+  if (
+    usuario.password &&
+    !usuario.password.startsWith("$2a$") &&
+    !usuario.password.startsWith("$2b$")
+  ) {
+    usuario.password = await bcrypt.hash(usuario.password, 10);
+  }
+};
+
+PortalUsuario.beforeCreate(hashPassword);
+PortalUsuario.beforeUpdate(async (usuario) => {
+  if (usuario.changed("password")) {
+    await hashPassword(usuario);
+  }
+});
+
+module.exports = PortalUsuario;

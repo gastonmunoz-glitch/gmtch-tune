@@ -104,6 +104,7 @@ const {
   permitirRoles,
   permitirPorMetodo,
 } = require("./src/middleware/authMiddleware");
+const { autenticarPortal } = require("./src/middleware/portalAuthMiddleware");
 
 // ====================== RUTAS BASE ======================
 
@@ -130,12 +131,20 @@ const diagnosticoRoutes = require("./src/routes/diagnosticoRoutes");
 const archivoECURoutes = require("./src/routes/archivoECURoutes");
 const fotoVehiculoRoutes = require("./src/routes/fotoVehiculoRoutes");
 const notificacionRoutes = require("./src/routes/notificacionRoutes");
+const portalAuthRoutes = require("./src/routes/portalAuthRoutes");
+const portalFileRoutes = require("./src/routes/portalFileRoutes");
+const portalAdminRoutes = require("./src/routes/portalAdminRoutes");
 
 // ====================== RUTAS PÚBLICAS ======================
 
 app.use("/api/auth", authRoutes);
+app.use("/api/portal/auth", portalAuthRoutes);
 
 // ====================== RUTAS PROTEGIDAS ======================
+
+app.use("/api/portal/files", autenticarPortal, portalFileRoutes);
+app.use("/api/portal/creditos", autenticarPortal, portalFileRoutes.creditosRouter);
+app.use("/api/portal/admin", autenticar, permitirRoles("OWNER"), portalAdminRoutes);
 
 app.use(
   "/api/usuarios",
@@ -1501,6 +1510,10 @@ const startServer = async () => {
       console.log("   /api/auth/test");
       console.log("   /api/auth/login");
       console.log("   /api/auth/me");
+      console.log("   /api/portal/auth/login");
+      console.log("   /api/portal/files");
+      console.log("   /api/portal/creditos");
+      console.log("   /api/portal/admin");
       console.log("   /api/usuarios");
       console.log("   /api/clientes");
       console.log("   /api/vehiculos DIRECT-SERVER-V6");
