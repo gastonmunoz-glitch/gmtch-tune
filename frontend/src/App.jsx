@@ -259,6 +259,38 @@ function App() {
     }
   }, [auth, usuario?.rol, usuario?.username]);
 
+  useEffect(() => {
+    if (!auth || !usuario?.id) return undefined;
+
+    let cancelado = false;
+
+    const enviarPresencia = async () => {
+      const token = localStorage.getItem("token");
+      const baseURL = api.defaults.baseURL;
+
+      if (!token || !baseURL || cancelado) return;
+
+      try {
+        await fetch(`${baseURL}/usuarios/me/presencia`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch {
+        // Presencia aproximada: no debe romper sesion ni operacion.
+      }
+    };
+
+    enviarPresencia();
+    const intervalo = window.setInterval(enviarPresencia, 60000);
+
+    return () => {
+      cancelado = true;
+      window.clearInterval(intervalo);
+    };
+  }, [auth, usuario?.id]);
+
   return (
     <Router>
       {!auth ? (

@@ -38,6 +38,22 @@ const Usuario = sequelize.define(
       allowNull: false,
       defaultValue: true,
     },
+
+    last_login_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    last_seen_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    login_count: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
   },
   {
     tableName: "Usuarios",

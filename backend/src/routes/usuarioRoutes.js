@@ -5,6 +5,8 @@ const { permitirRoles } = require("../middleware/authMiddleware");
 const {
   listarUsuarios,
   listarResponsables,
+  actualizarPresenciaPropia,
+  listarPresencia,
   crearUsuario,
   actualizarUsuario,
   eliminarUsuario,
@@ -22,6 +24,8 @@ const ROLES_RESPONSABLES = [
 ];
 
 router.get("/responsables", permitirRoles(...ROLES_RESPONSABLES), listarResponsables);
+router.post("/me/presencia", actualizarPresenciaPropia);
+router.get("/presencia", permitirRoles("OWNER"), listarPresencia);
 
 router.get("/", permitirRoles("OWNER"), listarUsuarios);
 router.post("/", permitirRoles("OWNER"), crearUsuario);

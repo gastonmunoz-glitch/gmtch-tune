@@ -5,10 +5,10 @@ const ROLES = [
   { value: "OWNER", label: "OWNER" },
   { value: "ADMIN", label: "ADMIN" },
   { value: "SUPERVISOR", label: "SUPERVISOR" },
-  { value: "RECEPCION", label: "RECEPCIÓN" },
+  { value: "RECEPCION", label: "RECEPCION" },
   { value: "OPERADOR_SCANNER", label: "OPERADOR SCANNER" },
   { value: "OPERADOR_ECU", label: "OPERADOR ECU" },
-  { value: "MECANICO", label: "MECÁNICO" },
+  { value: "MECANICO", label: "MECANICO" },
   { value: "TUNER", label: "TUNER" },
 ];
 
@@ -31,17 +31,78 @@ const formatearFecha = (fecha) => {
   }
 };
 
+const formatearFechaHora = (fecha) => {
+  if (!fecha) return "No registrada";
+
+  try {
+    return new Date(fecha).toLocaleString("es-CL", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  } catch {
+    return fecha;
+  }
+};
+
+const obtenerEstadoPresencia = (usuario) => {
+  if (!usuario.last_login_at) {
+    return {
+      label: "Nunca ingresó",
+      className: "bg-gray-200 text-gray-700 border-gray-500",
+    };
+  }
+
+  const lastSeen = usuario.last_seen_at ? new Date(usuario.last_seen_at) : null;
+  const diffMinutos = lastSeen
+    ? (Date.now() - lastSeen.getTime()) / 60000
+    : Number.POSITIVE_INFINITY;
+
+  if (usuario.online_aproximado || diffMinutos <= 10) {
+    return {
+      label: "Online aproximado",
+      className: "bg-green-100 text-green-800 border-green-500",
+    };
+  }
+
+  if (usuario.activo_reciente || diffMinutos <= 60) {
+    return {
+      label: "Reciente",
+      className: "bg-blue-100 text-blue-800 border-blue-500",
+    };
+  }
+
+  return {
+    label: "Inactivo",
+    className: "bg-yellow-100 text-yellow-800 border-yellow-500",
+  };
+};
+
 function UsuariosPage() {
   const [usuarios, setUsuarios] = useState([]);
   const [form, setForm] = useState({ ...ESTADO_INICIAL });
   const [cargando, setCargando] = useState(false);
+
+  const cargarUsuarios = async () => {
+    try {
+      setCargando(true);
+
+      const res = await api.get("/usuarios/presencia");
+
+      setUsuarios(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("ERROR CARGANDO USUARIOS:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "No se pudieron cargar los usuarios.");
+    } finally {
+      setCargando(false);
+    }
+  };
 
   useEffect(() => {
     let activo = true;
 
     const cargarInicial = async () => {
       try {
-        const res = await api.get("/usuarios");
+        const res = await api.get("/usuarios/presencia");
 
         if (!activo) return;
 
@@ -66,21 +127,6 @@ function UsuariosPage() {
       activo = false;
     };
   }, []);
-
-  const cargarUsuarios = async () => {
-    try {
-      setCargando(true);
-
-      const res = await api.get("/usuarios");
-
-      setUsuarios(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      console.error("ERROR CARGANDO USUARIOS:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudieron cargar los usuarios.");
-    } finally {
-      setCargando(false);
-    }
-  };
 
   const actualizarForm = (campo, valor) => {
     setForm((prev) => ({
@@ -190,6 +236,15 @@ function UsuariosPage() {
         </p>
       </div>
 
+      <div className="bg-blue-50 border-4 border-blue-700 p-5">
+        <h2 className="text-xl font-black uppercase text-blue-900">
+          Presencia de usuarios V1
+        </h2>
+        <p className="text-xs font-bold uppercase text-blue-700 mt-2">
+          Esta información es referencial. Online aproximado se calcula por actividad reciente en la plataforma.
+        </p>
+      </div>
+
       <form
         onSubmit={crearUsuario}
         className="bg-white border-4 border-black p-6 shadow-[12px_12px_0px_0px_rgba(0,0,0,1)]"
@@ -270,85 +325,111 @@ function UsuariosPage() {
         </div>
 
         <div className="divide-y-2 divide-black">
-          {usuarios.map((usuario) => (
-            <div
-              key={usuario.id}
-              className="p-5 grid grid-cols-1 xl:grid-cols-12 gap-4 xl:items-center"
-            >
-              <div className="xl:col-span-3">
-                <p className="text-lg font-black uppercase">
-                  {usuario.nombre || usuario.username}
-                </p>
+          {usuarios.map((usuario) => {
+            const estado = obtenerEstadoPresencia(usuario);
 
-                <p className="text-xs font-bold uppercase text-gray-500">
-                  @{usuario.username}
-                </p>
+            return (
+              <div
+                key={usuario.id}
+                className="p-5 grid grid-cols-1 xl:grid-cols-12 gap-4 xl:items-center"
+              >
+                <div className="xl:col-span-3">
+                  <p className="text-lg font-black uppercase">
+                    {usuario.nombre || usuario.username}
+                  </p>
 
-                <p className="text-xs font-bold uppercase text-gray-500">
-                  Creado: {formatearFecha(usuario.createdAt)}
-                </p>
+                  <p className="text-xs font-bold uppercase text-gray-500">
+                    @{usuario.username}
+                  </p>
+
+                  {usuario.createdAt && (
+                    <p className="text-xs font-bold uppercase text-gray-500">
+                      Creado: {formatearFecha(usuario.createdAt)}
+                    </p>
+                  )}
+                </div>
+
+                <div className="xl:col-span-3 space-y-2">
+                  <span
+                    className={`inline-block border-2 rounded-full px-3 py-1 text-[10px] font-black uppercase ${estado.className}`}
+                  >
+                    {estado.label}
+                  </span>
+
+                  <p className="text-[10px] font-black uppercase text-gray-500">
+                    Último login: {formatearFechaHora(usuario.last_login_at)}
+                  </p>
+
+                  <p className="text-[10px] font-black uppercase text-gray-500">
+                    Última actividad: {formatearFechaHora(usuario.last_seen_at)}
+                  </p>
+
+                  <p className="text-[10px] font-black uppercase text-gray-500">
+                    Cantidad de ingresos: {Number(usuario.login_count || 0)}
+                  </p>
+                </div>
+
+                <div className="xl:col-span-2">
+                  <select
+                    className="border-2 border-black p-3 font-bold bg-white w-full"
+                    value={usuario.rol}
+                    onChange={(e) =>
+                      actualizarUsuario(usuario.id, {
+                        rol: e.target.value,
+                      })
+                    }
+                  >
+                    {ROLES.map((rol) => (
+                      <option key={rol.value} value={rol.value}>
+                        {rol.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="xl:col-span-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      actualizarUsuario(usuario.id, {
+                        activo: !usuario.activo,
+                      })
+                    }
+                    className={`w-full px-4 py-3 border-2 border-black font-black uppercase text-[10px] ${
+                      usuario.activo
+                        ? "bg-green-500 text-black"
+                        : "bg-red-600 text-white"
+                    }`}
+                  >
+                    {usuario.activo ? "Activo" : "Inactivo"}
+                  </button>
+                </div>
+
+                <div className="xl:col-span-1">
+                  <button
+                    type="button"
+                    onClick={() => cambiarPassword(usuario.id)}
+                    className="w-full bg-black text-white px-4 py-3 border-2 border-black font-black uppercase text-[10px]"
+                  >
+                    Cambiar clave
+                  </button>
+                </div>
+
+                <div className="xl:col-span-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      desactivarUsuario(usuario.id, usuario.username)
+                    }
+                    disabled={!usuario.activo}
+                    className="w-full bg-red-600 text-white px-4 py-3 border-2 border-black font-black uppercase text-[10px] disabled:bg-gray-400 disabled:text-gray-700"
+                  >
+                    Desactivar acceso
+                  </button>
+                </div>
               </div>
-
-              <div className="xl:col-span-3">
-                <select
-                  className="border-2 border-black p-3 font-bold bg-white w-full"
-                  value={usuario.rol}
-                  onChange={(e) =>
-                    actualizarUsuario(usuario.id, {
-                      rol: e.target.value,
-                    })
-                  }
-                >
-                  {ROLES.map((rol) => (
-                    <option key={rol.value} value={rol.value}>
-                      {rol.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="xl:col-span-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    actualizarUsuario(usuario.id, {
-                      activo: !usuario.activo,
-                    })
-                  }
-                  className={`w-full px-4 py-3 border-2 border-black font-black uppercase text-[10px] ${
-                    usuario.activo
-                      ? "bg-green-500 text-black"
-                      : "bg-red-600 text-white"
-                  }`}
-                >
-                  {usuario.activo ? "Activo" : "Inactivo"}
-                </button>
-              </div>
-
-              <div className="xl:col-span-2">
-                <button
-                  type="button"
-                  onClick={() => cambiarPassword(usuario.id)}
-                  className="w-full bg-black text-white px-4 py-3 border-2 border-black font-black uppercase text-[10px]"
-                >
-                  Cambiar clave
-                </button>
-              </div>
-
-              <div className="xl:col-span-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    desactivarUsuario(usuario.id, usuario.username)
-                  }
-                  disabled={!usuario.activo}
-                  className="w-full bg-red-600 text-white px-4 py-3 border-2 border-black font-black uppercase text-[10px] disabled:bg-gray-400 disabled:text-gray-700"
-                >
-                  Desactivar acceso
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
 
           {usuarios.length === 0 && (
             <div className="p-10 text-center">

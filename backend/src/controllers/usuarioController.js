@@ -1,4 +1,7 @@
+const sequelize = require("../config/database");
 const { Usuario } = require("../models");
+
+let columnasPresenciaPreparadas = false;
 
 const ROLES_VALIDOS = [
   "OWNER",
@@ -16,8 +19,44 @@ const limpiarTexto = (valor) => {
   return String(valor).trim();
 };
 
+const prepararColumnasPresencia = async () => {
+  if (columnasPresenciaPreparadas) return;
+
+  await sequelize.query(`
+    ALTER TABLE "Usuarios"
+    ADD COLUMN IF NOT EXISTS "last_login_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "Usuarios"
+    ADD COLUMN IF NOT EXISTS "last_seen_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "Usuarios"
+    ADD COLUMN IF NOT EXISTS "login_count" INTEGER DEFAULT 0;
+
+    UPDATE "Usuarios"
+    SET "login_count" = 0
+    WHERE "login_count" IS NULL;
+  `);
+
+  columnasPresenciaPreparadas = true;
+};
+
+const calcularEstadoPresencia = (lastSeenAt, lastLoginAt) => {
+  if (!lastLoginAt) return "NUNCA_INGRESO";
+  if (!lastSeenAt) return "INACTIVO";
+
+  const fecha = new Date(lastSeenAt);
+  const diffMinutos = (Date.now() - fecha.getTime()) / 60000;
+
+  if (Number.isNaN(diffMinutos)) return "INACTIVO";
+  if (diffMinutos <= 10) return "ONLINE";
+  if (diffMinutos <= 60) return "RECIENTE";
+  return "INACTIVO";
+};
+
 const listarUsuarios = async (req, res) => {
   try {
+    await prepararColumnasPresencia();
+
     const usuarios = await Usuario.findAll({
       attributes: ["id", "nombre", "username", "rol", "activo", "createdAt", "updatedAt"],
       order: [["createdAt", "DESC"]],
@@ -35,6 +74,8 @@ const listarUsuarios = async (req, res) => {
 
 const listarResponsables = async (req, res) => {
   try {
+    await prepararColumnasPresencia();
+
     const usuarios = await Usuario.findAll({
       attributes: ["id", "nombre", "username", "rol", "activo"],
       where: {
@@ -56,8 +97,86 @@ const listarResponsables = async (req, res) => {
   }
 };
 
+const actualizarPresenciaPropia = async (req, res) => {
+  try {
+    await prepararColumnasPresencia();
+
+    await Usuario.update(
+      {
+        last_seen_at: new Date(),
+      },
+      {
+        where: {
+          id: req.usuario.id,
+        },
+      }
+    );
+
+    res.json({
+      ok: true,
+      mensaje: "Presencia actualizada",
+    });
+  } catch (error) {
+    console.error("ERROR ACTUALIZANDO PRESENCIA:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const listarPresencia = async (req, res) => {
+  try {
+    await prepararColumnasPresencia();
+
+    const usuarios = await Usuario.findAll({
+      attributes: [
+        "id",
+        "nombre",
+        "username",
+        "rol",
+        "activo",
+        "last_login_at",
+        "last_seen_at",
+        "login_count",
+      ],
+      order: [
+        ["rol", "ASC"],
+        ["nombre", "ASC"],
+      ],
+    });
+
+    res.json(
+      usuarios.map((usuario) => {
+        const item = usuario.toJSON();
+        const estadoPresencia = calcularEstadoPresencia(
+          item.last_seen_at,
+          item.last_login_at
+        );
+
+        return {
+          ...item,
+          login_count: Number(item.login_count || 0),
+          online_aproximado: estadoPresencia === "ONLINE",
+          activo_reciente:
+            estadoPresencia === "ONLINE" || estadoPresencia === "RECIENTE",
+          estado_presencia: estadoPresencia,
+        };
+      })
+    );
+  } catch (error) {
+    console.error("ERROR LISTANDO PRESENCIA:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
 const crearUsuario = async (req, res) => {
   try {
+    await prepararColumnasPresencia();
+
     const nombre = limpiarTexto(req.body.nombre);
     const username = limpiarTexto(req.body.username).toLowerCase();
     const password = limpiarTexto(req.body.password);
@@ -115,6 +234,8 @@ const crearUsuario = async (req, res) => {
 
 const actualizarUsuario = async (req, res) => {
   try {
+    await prepararColumnasPresencia();
+
     const usuario = await Usuario.findByPk(req.params.id);
 
     if (!usuario) {
@@ -181,6 +302,8 @@ const actualizarUsuario = async (req, res) => {
 
 const eliminarUsuario = async (req, res) => {
   try {
+    await prepararColumnasPresencia();
+
     const usuario = await Usuario.findByPk(req.params.id);
 
     if (!usuario) {
@@ -213,8 +336,11 @@ const eliminarUsuario = async (req, res) => {
 };
 
 module.exports = {
+  prepararColumnasPresencia,
   listarUsuarios,
   listarResponsables,
+  actualizarPresenciaPropia,
+  listarPresencia,
   crearUsuario,
   actualizarUsuario,
   eliminarUsuario,
