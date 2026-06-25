@@ -103,7 +103,9 @@ function PortalAdminPage() {
 
     try {
       await portalAdminCrearCuenta(nuevaCuenta);
-      setMensaje("Cuenta portal creada correctamente.");
+      setMensaje(
+        `Cuenta creada. Email de login portal: ${nuevaCuenta.usuario_email.trim()}`
+      );
       setNuevaCuenta({
         nombre_taller: "",
         contacto: "",
@@ -236,13 +238,16 @@ function PortalAdminPage() {
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_0.8fr]">
         <form onSubmit={crearCuenta} className="border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
           <h2 className="text-sm font-black uppercase">Crear cuenta externa</h2>
+          <p className="mt-2 text-xs font-bold text-gray-500">
+            El master debe iniciar sesión con el Email de login portal, no con el email de la cuenta.
+          </p>
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <input className={inputClass} placeholder="Nombre taller" value={nuevaCuenta.nombre_taller} onChange={(e) => actualizarNuevaCuenta("nombre_taller", e.target.value)} />
             <input className={inputClass} placeholder="Contacto" value={nuevaCuenta.contacto} onChange={(e) => actualizarNuevaCuenta("contacto", e.target.value)} />
-            <input className={inputClass} placeholder="Email cuenta" value={nuevaCuenta.email} onChange={(e) => actualizarNuevaCuenta("email", e.target.value)} />
+            <input className={inputClass} placeholder="Email de cuenta/taller" value={nuevaCuenta.email} onChange={(e) => actualizarNuevaCuenta("email", e.target.value)} />
             <input className={inputClass} placeholder="Teléfono" value={nuevaCuenta.telefono} onChange={(e) => actualizarNuevaCuenta("telefono", e.target.value)} />
-            <input className={inputClass} placeholder="Nombre usuario" value={nuevaCuenta.usuario_nombre} onChange={(e) => actualizarNuevaCuenta("usuario_nombre", e.target.value)} />
-            <input className={inputClass} placeholder="Email usuario" value={nuevaCuenta.usuario_email} onChange={(e) => actualizarNuevaCuenta("usuario_email", e.target.value)} />
+            <input className={inputClass} placeholder="Nombre usuario portal" value={nuevaCuenta.usuario_nombre} onChange={(e) => actualizarNuevaCuenta("usuario_nombre", e.target.value)} />
+            <input className={inputClass} placeholder="Email de login portal" value={nuevaCuenta.usuario_email} onChange={(e) => actualizarNuevaCuenta("usuario_email", e.target.value)} />
             <input className={inputClass} type="password" placeholder="Password inicial" value={nuevaCuenta.usuario_password} onChange={(e) => actualizarNuevaCuenta("usuario_password", e.target.value)} />
             <input className={inputClass} placeholder="Observaciones" value={nuevaCuenta.observaciones} onChange={(e) => actualizarNuevaCuenta("observaciones", e.target.value)} />
           </div>
@@ -280,19 +285,56 @@ function PortalAdminPage() {
           </button>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {cuentas.map((cuenta) => (
-            <article key={cuenta.id} className="border-2 border-black p-4">
-              <p className="text-sm font-black uppercase">{cuenta.nombre_taller}</p>
-              <p className="text-xs font-bold text-gray-500">{cuenta.email || cuenta.contacto || "Sin contacto"}</p>
-              <p className="mt-2 text-xs font-black uppercase">Saldo: {cuenta.saldo_creditos}</p>
-              <p className="text-xs font-bold uppercase text-gray-500">
-                {cuenta.activo ? "Activa" : "Inactiva"} / {cuenta.aprobado ? "Aprobada" : "Pendiente"}
-              </p>
-              <button type="button" onClick={() => verMovimientos(cuenta.id)} className="mt-3 border-2 border-black px-3 py-2 text-[10px] font-black uppercase">
-                Ver movimientos
-              </button>
-            </article>
-          ))}
+          {cuentas.map((cuenta) => {
+            const usuariosPortal = cuenta.Usuarios || cuenta.PortalUsuarios || [];
+
+            return (
+              <article key={cuenta.id} className="border-2 border-black p-4">
+                <p className="text-sm font-black uppercase">{cuenta.nombre_taller}</p>
+                <p className="mt-2 text-xs font-bold text-gray-500">
+                  Email cuenta/taller: {cuenta.email || "No registrado"}
+                </p>
+                <p className="text-xs font-bold text-gray-500">
+                  Contacto: {cuenta.contacto || cuenta.telefono || "Sin contacto"}
+                </p>
+                <p className="mt-2 text-xs font-black uppercase">Saldo: {cuenta.saldo_creditos}</p>
+                <p className="text-xs font-bold uppercase text-gray-500">
+                  {cuenta.activo ? "Activa" : "Inactiva"} / {cuenta.aprobado ? "Aprobada" : "Pendiente"}
+                </p>
+
+                <div className="mt-3 border-t-2 border-black pt-3">
+                  <p className="text-[10px] font-black uppercase text-blue-700">
+                    Usuarios portal asociados
+                  </p>
+                  {usuariosPortal.length > 0 ? (
+                    <div className="mt-2 space-y-2">
+                      {usuariosPortal.map((usuario) => (
+                        <div key={usuario.id || usuario.email} className="bg-gray-100 p-2">
+                          <p className="text-xs font-black uppercase">
+                            {usuario.nombre || "Usuario portal"}
+                          </p>
+                          <p className="text-xs font-bold text-gray-700">
+                            Email de login portal: {usuario.email || "No registrado"}
+                          </p>
+                          <p className="text-[10px] font-bold uppercase text-gray-500">
+                            {usuario.activo ? "Activo" : "Inactivo"} / {usuario.aprobado ? "Aprobado" : "Pendiente"}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs font-bold text-red-700">
+                      Sin usuario portal creado.
+                    </p>
+                  )}
+                </div>
+
+                <button type="button" onClick={() => verMovimientos(cuenta.id)} className="mt-3 border-2 border-black px-3 py-2 text-[10px] font-black uppercase">
+                  Ver movimientos
+                </button>
+              </article>
+            );
+          })}
         </div>
 
         {cuentaMovimiento && (

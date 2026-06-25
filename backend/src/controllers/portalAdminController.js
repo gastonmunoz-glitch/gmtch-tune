@@ -125,6 +125,13 @@ const crearCuenta = async (req, res) => {
       req.body.usuario_nombre || req.body.nombre_usuario || req.body.contacto
     );
 
+    if (!usuarioEmail || !usuarioPassword || !usuarioNombre) {
+      return res.status(400).json({
+        error:
+          "Para crear cuenta portal debes enviar usuario_nombre, usuario_email y usuario_password. Ese email sera el login del portal.",
+      });
+    }
+
     const resultado = await sequelize.transaction(async (transaction) => {
       const cuenta = await PortalCuenta.create(
         {
@@ -150,26 +157,17 @@ const crearCuenta = async (req, res) => {
 
       let usuario = null;
 
-      if (usuarioEmail || usuarioPassword || usuarioNombre) {
-        if (!usuarioEmail || !usuarioPassword || !usuarioNombre) {
-          throw Object.assign(
-            new Error("Para crear usuario portal debes enviar nombre, email y password"),
-            { status: 400 }
-          );
-        }
-
-        usuario = await PortalUsuario.create(
-          {
-            cuentaId: cuenta.id,
-            nombre: usuarioNombre,
-            email: usuarioEmail,
-            password: usuarioPassword,
-            activo: true,
-            aprobado: true,
-          },
-          { transaction }
-        );
-      }
+      usuario = await PortalUsuario.create(
+        {
+          cuentaId: cuenta.id,
+          nombre: usuarioNombre,
+          email: usuarioEmail,
+          password: usuarioPassword,
+          activo: true,
+          aprobado: true,
+        },
+        { transaction }
+      );
 
       return { cuenta, usuario };
     });
