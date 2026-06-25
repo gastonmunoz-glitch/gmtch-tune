@@ -10,6 +10,7 @@ const PortalCuenta = require("./PortalCuenta");
 const PortalUsuario = require("./PortalUsuario");
 const PortalFileService = require("./PortalFileService");
 const PortalCreditoMovimiento = require("./PortalCreditoMovimiento");
+const PortalAuditoriaEvento = require("./PortalAuditoriaEvento");
 
 let FileService = null;
 let Operador = null;
@@ -135,6 +136,26 @@ PortalCreditoMovimiento.belongsTo(PortalCuenta, {
   constraints: false,
 });
 
+PortalCuenta.hasMany(PortalAuditoriaEvento, {
+  foreignKey: "cuentaId",
+  constraints: false,
+});
+
+PortalAuditoriaEvento.belongsTo(PortalCuenta, {
+  foreignKey: "cuentaId",
+  constraints: false,
+});
+
+PortalUsuario.hasMany(PortalAuditoriaEvento, {
+  foreignKey: "usuarioId",
+  constraints: false,
+});
+
+PortalAuditoriaEvento.belongsTo(PortalUsuario, {
+  foreignKey: "usuarioId",
+  constraints: false,
+});
+
 module.exports = {
   Cliente,
   Vehiculo,
@@ -148,6 +169,7 @@ module.exports = {
   PortalUsuario,
   PortalFileService,
   PortalCreditoMovimiento,
+  PortalAuditoriaEvento,
   FileService,
   Operador,
 };

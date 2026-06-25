@@ -46,6 +46,10 @@ function PortalAdminPage() {
   const [cuentaMovimiento, setCuentaMovimiento] = useState("");
   const [nuevoUsuarioPorCuenta, setNuevoUsuarioPorCuenta] = useState({});
   const [resetPasswordPorUsuario, setResetPasswordPorUsuario] = useState({});
+  const [edicionCuenta, setEdicionCuenta] = useState({});
+  const [edicionUsuario, setEdicionUsuario] = useState({});
+  const [auditoria, setAuditoria] = useState([]);
+  const [auditoriaTitulo, setAuditoriaTitulo] = useState("");
   const [nuevaCuenta, setNuevaCuenta] = useState({
     nombre_taller: "",
     contacto: "",
@@ -97,6 +101,26 @@ function PortalAdminPage() {
       ...actual,
       [cuentaId]: {
         ...(actual[cuentaId] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const actualizarEdicionCuenta = (cuentaId, campo, valor) => {
+    setEdicionCuenta((actual) => ({
+      ...actual,
+      [cuentaId]: {
+        ...(actual[cuentaId] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const actualizarEdicionUsuario = (usuarioId, campo, valor) => {
+    setEdicionUsuario((actual) => ({
+      ...actual,
+      [usuarioId]: {
+        ...(actual[usuarioId] || {}),
         [campo]: valor,
       },
     }));
@@ -167,6 +191,49 @@ function PortalAdminPage() {
       await cargar();
     } catch (err) {
       setError(mensajeError(err, "No se pudo crear usuario portal."));
+    }
+  };
+
+  const guardarCuentaPortal = async (cuenta) => {
+    const edit = edicionCuenta[cuenta.id] || {};
+
+    try {
+      setError("");
+      setMensaje("");
+      const res = await api.patch(`/portal/admin/cuentas/${cuenta.id}`, {
+        nombre_taller: edit.nombre_taller ?? cuenta.nombre_taller,
+        contacto: edit.contacto ?? cuenta.contacto ?? "",
+        email: edit.email ?? cuenta.email ?? "",
+        telefono: edit.telefono ?? cuenta.telefono ?? "",
+        pais: edit.pais ?? cuenta.pais ?? "",
+        ciudad: edit.ciudad ?? cuenta.ciudad ?? "",
+        observaciones: edit.observaciones ?? cuenta.observaciones ?? "",
+        activo: cuenta.activo,
+        aprobado: cuenta.aprobado,
+      });
+      setMensaje(res.data?.mensaje || "Cuenta portal actualizada.");
+      await cargar();
+    } catch (err) {
+      setError(mensajeError(err, "No se pudo guardar la cuenta."));
+    }
+  };
+
+  const guardarUsuarioPortal = async (usuario) => {
+    const edit = edicionUsuario[usuario.id] || {};
+
+    try {
+      setError("");
+      setMensaje("");
+      const res = await api.patch(`/portal/admin/usuarios/${usuario.id}`, {
+        nombre: edit.nombre ?? usuario.nombre,
+        email: edit.email ?? usuario.email,
+        activo: usuario.activo,
+        aprobado: usuario.aprobado,
+      });
+      setMensaje(res.data?.mensaje || "Usuario portal actualizado.");
+      await cargar();
+    } catch (err) {
+      setError(mensajeError(err, "No se pudo guardar el usuario portal."));
     }
   };
 
@@ -278,6 +345,32 @@ function PortalAdminPage() {
       setMovimientos(Array.isArray(data?.movimientos) ? data.movimientos : []);
     } catch (err) {
       setError(err.message || "No se pudieron cargar movimientos.");
+    }
+  };
+
+  const verAuditoriaCuenta = async (cuenta) => {
+    try {
+      setError("");
+      const res = await api.get(`/portal/admin/cuentas/${cuenta.id}/auditoria`, {
+        params: { limit: 50 },
+      });
+      setAuditoria(Array.isArray(res.data) ? res.data : []);
+      setAuditoriaTitulo(`Auditoría cuenta: ${cuenta.nombre_taller}`);
+    } catch (err) {
+      setError(mensajeError(err, "No se pudo cargar auditoría de cuenta."));
+    }
+  };
+
+  const verAuditoriaUsuario = async (usuario) => {
+    try {
+      setError("");
+      const res = await api.get(`/portal/admin/usuarios/${usuario.id}/auditoria`, {
+        params: { limit: 50 },
+      });
+      setAuditoria(Array.isArray(res.data) ? res.data : []);
+      setAuditoriaTitulo(`Auditoría usuario: ${usuario.email}`);
+    } catch (err) {
+      setError(mensajeError(err, "No se pudo cargar auditoría de usuario."));
     }
   };
 
@@ -428,6 +521,38 @@ function PortalAdminPage() {
                 <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
                   Archivos: {cuenta.total_archivos ?? 0} / Movimientos: {cuenta.total_movimientos ?? 0}
                 </p>
+                {!cuenta.activo && (
+                  <p className="mt-2 bg-red-100 p-2 text-xs font-black uppercase text-red-700">
+                    Cuenta inactiva: no podrá iniciar sesión.
+                  </p>
+                )}
+                {cuenta.total_archivos > 0 || cuenta.total_movimientos > 0 ? (
+                  <p className="mt-2 bg-yellow-100 p-2 text-xs font-black uppercase text-yellow-800">
+                    Cuenta con historial: no se elimina, se desactiva.
+                  </p>
+                ) : null}
+
+                <details className="mt-3 border-2 border-black p-3">
+                  <summary className="cursor-pointer text-[10px] font-black uppercase">
+                    Editar datos de cuenta
+                  </summary>
+                  <div className="mt-3 grid grid-cols-1 gap-2">
+                    <input className={inputClass} placeholder="Nombre taller" value={edicionCuenta[cuenta.id]?.nombre_taller ?? cuenta.nombre_taller ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "nombre_taller", e.target.value)} />
+                    <input className={inputClass} placeholder="Contacto" value={edicionCuenta[cuenta.id]?.contacto ?? cuenta.contacto ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "contacto", e.target.value)} />
+                    <input className={inputClass} placeholder="Email cuenta/taller" value={edicionCuenta[cuenta.id]?.email ?? cuenta.email ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "email", e.target.value)} />
+                    <input className={inputClass} placeholder="Teléfono" value={edicionCuenta[cuenta.id]?.telefono ?? cuenta.telefono ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "telefono", e.target.value)} />
+                    <input className={inputClass} placeholder="País" value={edicionCuenta[cuenta.id]?.pais ?? cuenta.pais ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "pais", e.target.value)} />
+                    <input className={inputClass} placeholder="Ciudad" value={edicionCuenta[cuenta.id]?.ciudad ?? cuenta.ciudad ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "ciudad", e.target.value)} />
+                    <textarea className={`${inputClass} min-h-[70px]`} placeholder="Observaciones" value={edicionCuenta[cuenta.id]?.observaciones ?? cuenta.observaciones ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "observaciones", e.target.value)} />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => guardarCuentaPortal(cuenta)}
+                    className="mt-2 bg-black px-3 py-2 text-[10px] font-black uppercase text-white"
+                  >
+                    Guardar cuenta
+                  </button>
+                </details>
 
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
@@ -457,6 +582,13 @@ function PortalAdminPage() {
                       Tiene historial: desactivar
                     </span>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => verAuditoriaCuenta(cuenta)}
+                    className="border-2 border-blue-600 px-3 py-2 text-[10px] font-black uppercase text-blue-700"
+                  >
+                    Ver auditoría
+                  </button>
                 </div>
 
                 <div className="mt-3 border-t-2 border-black pt-3">
@@ -489,6 +621,38 @@ function PortalAdminPage() {
                           <p className="text-[10px] font-bold uppercase text-gray-500">
                             Última actividad: {fecha(usuario.last_seen_at)}
                           </p>
+                          {!usuario.activo && (
+                            <p className="mt-1 bg-red-100 p-2 text-[10px] font-black uppercase text-red-700">
+                              Usuario inactivo
+                            </p>
+                          )}
+
+                          <details className="mt-2 border border-gray-400 p-2">
+                            <summary className="cursor-pointer text-[9px] font-black uppercase">
+                              Editar usuario portal
+                            </summary>
+                            <div className="mt-2 grid grid-cols-1 gap-2">
+                              <input
+                                className={inputClass}
+                                placeholder="Nombre"
+                                value={edicionUsuario[usuario.id]?.nombre ?? usuario.nombre ?? ""}
+                                onChange={(e) => actualizarEdicionUsuario(usuario.id, "nombre", e.target.value)}
+                              />
+                              <input
+                                className={inputClass}
+                                placeholder="Email de login portal"
+                                value={edicionUsuario[usuario.id]?.email ?? usuario.email ?? ""}
+                                onChange={(e) => actualizarEdicionUsuario(usuario.id, "email", e.target.value)}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => guardarUsuarioPortal(usuario)}
+                              className="mt-2 bg-black px-3 py-2 text-[9px] font-black uppercase text-white"
+                            >
+                              Guardar usuario
+                            </button>
+                          </details>
 
                           <div className="mt-2 flex flex-wrap gap-2">
                             <button
@@ -504,6 +668,13 @@ function PortalAdminPage() {
                               className="border border-black px-2 py-1 text-[9px] font-black uppercase"
                             >
                               {usuario.aprobado ? "Pausar usuario" : "Aprobar usuario"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => verAuditoriaUsuario(usuario)}
+                              className="border border-blue-600 px-2 py-1 text-[9px] font-black uppercase text-blue-700"
+                            >
+                              Auditoría
                             </button>
                           </div>
 
@@ -602,6 +773,44 @@ function PortalAdminPage() {
           </div>
         )}
       </section>
+
+      {auditoriaTitulo && (
+        <section className="border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <h2 className="text-sm font-black uppercase">{auditoriaTitulo}</h2>
+            <button
+              type="button"
+              onClick={() => {
+                setAuditoria([]);
+                setAuditoriaTitulo("");
+              }}
+              className="border-2 border-black px-4 py-2 text-xs font-black uppercase"
+            >
+              Cerrar auditoría
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {auditoria.map((evento) => (
+              <div
+                key={evento.id}
+                className="grid grid-cols-1 gap-2 border border-gray-300 p-3 text-xs font-bold md:grid-cols-5"
+              >
+                <span>{fecha(evento.createdAt)}</span>
+                <span>{evento.tipo}</span>
+                <span>{evento.resultado}</span>
+                <span>{evento.creado_por || "Sistema"}</span>
+                <span>{evento.descripcion || "Sin descripción"}</span>
+              </div>
+            ))}
+            {!auditoria.length && (
+              <p className="text-xs font-bold text-gray-500">
+                Sin eventos de auditoría para esta selección.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
         <h2 className="text-sm font-black uppercase">Solicitudes externas</h2>

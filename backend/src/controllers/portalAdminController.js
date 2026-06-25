@@ -1,10 +1,14 @@
 const sequelize = require("../config/database");
+const { Op } = require("sequelize");
+const bcrypt = require("bcryptjs");
 const {
   PortalCuenta,
   PortalUsuario,
   PortalFileService,
   PortalCreditoMovimiento,
+  PortalAuditoriaEvento,
 } = require("../models");
+const { registrarEventoPortal } = require("./portalAuthController");
 
 const ESTADOS_VALIDOS = [
   "RECIBIDO",
@@ -83,6 +87,35 @@ const mapearUsuarioAdmin = (usuario) => {
   };
 };
 
+const mapearEventoAuditoria = (evento) => ({
+  id: evento.id,
+  cuentaId: evento.cuentaId,
+  usuarioId: evento.usuarioId,
+  tipo: evento.tipo,
+  resultado: evento.resultado,
+  descripcion: evento.descripcion,
+  metadata: evento.metadata || null,
+  ip: evento.ip,
+  user_agent: evento.user_agent,
+  creado_por: evento.creado_por,
+  createdAt: evento.createdAt,
+});
+
+const buscarEventosAuditoria = async (filtros = {}) => {
+  const where = {};
+  const limit = Math.min(Math.max(Number(filtros.limit) || 80, 1), 200);
+
+  if (filtros.cuentaId) where.cuentaId = filtros.cuentaId;
+  if (filtros.usuarioId) where.usuarioId = filtros.usuarioId;
+  if (filtros.tipo) where.tipo = limpiarTexto(filtros.tipo).toUpperCase();
+
+  return PortalAuditoriaEvento.findAll({
+    where,
+    order: [["createdAt", "DESC"]],
+    limit,
+  });
+};
+
 const mapearFileAdmin = (archivo) => {
   const json = typeof archivo.toJSON === "function" ? archivo.toJSON() : archivo;
 
@@ -155,6 +188,8 @@ const crearCuenta = async (req, res) => {
     }
 
     const resultado = await sequelize.transaction(async (transaction) => {
+      const usuarioPasswordHash = await bcrypt.hash(usuarioPassword, 10);
+
       const cuenta = await PortalCuenta.create(
         {
           nombre_taller: nombreTaller,
@@ -184,7 +219,7 @@ const crearCuenta = async (req, res) => {
           cuentaId: cuenta.id,
           nombre: usuarioNombre,
           email: usuarioEmail,
-          password: usuarioPassword,
+          password: usuarioPasswordHash,
           activo: true,
           aprobado: true,
         },
@@ -198,6 +233,20 @@ const crearCuenta = async (req, res) => {
       mensaje: "Cuenta portal creada correctamente",
       cuenta: mapearCuentaAdmin(resultado.cuenta),
       usuario: mapearUsuarioAdmin(resultado.usuario),
+    });
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: resultado.cuenta.id,
+      usuarioId: resultado.usuario.id,
+      tipo: "USUARIO_PORTAL_CREADO",
+      resultado: "OK",
+      descripcion: "Cuenta portal y primer usuario creados",
+      metadata: {
+        cuenta_email: resultado.cuenta.email,
+        usuario_email: resultado.usuario.email,
+      },
+      creado_por: usuarioInternoActual(req),
     });
   } catch (error) {
     console.error("ERROR CREANDO CUENTA PORTAL:", error);
@@ -258,6 +307,72 @@ const listarCuentas = async (req, res) => {
   }
 };
 
+const editarCuenta = async (req, res) => {
+  try {
+    const cuenta = await PortalCuenta.findByPk(req.params.id);
+
+    if (!cuenta) {
+      return res.status(404).json({
+        error: "Cuenta portal no encontrada",
+      });
+    }
+
+    const payload = {};
+    const camposTexto = [
+      "nombre_taller",
+      "contacto",
+      "email",
+      "telefono",
+      "pais",
+      "ciudad",
+      "observaciones",
+    ];
+
+    camposTexto.forEach((campo) => {
+      if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
+        payload[campo] =
+          campo === "email"
+            ? limpiarTexto(req.body[campo]).toLowerCase()
+            : limpiarTexto(req.body[campo]);
+      }
+    });
+
+    if (!payload.nombre_taller && Object.prototype.hasOwnProperty.call(payload, "nombre_taller")) {
+      return res.status(400).json({
+        error: "El nombre del taller es obligatorio",
+      });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "activo")) {
+      payload.activo = normalizarBoolean(req.body.activo, cuenta.activo);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "aprobado")) {
+      payload.aprobado = normalizarBoolean(req.body.aprobado, cuenta.aprobado);
+    }
+
+    await cuenta.update(payload);
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: cuenta.id,
+      tipo: "CUENTA_PORTAL_EDITADA",
+      resultado: "OK",
+      descripcion: "Cuenta portal editada por admin",
+      metadata: { campos: Object.keys(payload), email: cuenta.email },
+      creado_por: usuarioInternoActual(req),
+    });
+
+    res.json({
+      mensaje: "Cuenta portal actualizada",
+      cuenta: mapearCuentaAdmin(cuenta),
+    });
+  } catch (error) {
+    console.error("ERROR EDITANDO CUENTA PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 const crearUsuarioCuenta = async (req, res) => {
   try {
     const cuenta = await PortalCuenta.findByPk(req.params.id);
@@ -288,11 +403,13 @@ const crearUsuarioCuenta = async (req, res) => {
       });
     }
 
+    const passwordHash = await bcrypt.hash(password, 10);
+
     const usuario = await PortalUsuario.create({
       cuentaId: cuenta.id,
       nombre,
       email,
-      password,
+      password: passwordHash,
       activo: true,
       aprobado: true,
     });
@@ -301,8 +418,94 @@ const crearUsuarioCuenta = async (req, res) => {
       mensaje: "Usuario portal creado correctamente",
       usuario: mapearUsuarioAdmin(usuario),
     });
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: cuenta.id,
+      usuarioId: usuario.id,
+      tipo: "USUARIO_PORTAL_CREADO",
+      resultado: "OK",
+      descripcion: "Usuario portal creado en cuenta existente",
+      metadata: { email: usuario.email },
+      creado_por: usuarioInternoActual(req),
+    });
   } catch (error) {
     console.error("ERROR CREANDO USUARIO PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const editarUsuarioPortal = async (req, res) => {
+  try {
+    const usuario = await PortalUsuario.findByPk(req.params.id);
+
+    if (!usuario) {
+      return res.status(404).json({
+        error: "Usuario portal no encontrado",
+      });
+    }
+
+    const payload = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "nombre")) {
+      const nombre = limpiarTexto(req.body.nombre);
+      if (!nombre) {
+        return res.status(400).json({ error: "Nombre de usuario obligatorio" });
+      }
+      payload.nombre = nombre;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "email")) {
+      const email = limpiarTexto(req.body.email).toLowerCase();
+      if (!email) {
+        return res.status(400).json({ error: "Email de login portal obligatorio" });
+      }
+
+      const existente = await PortalUsuario.findOne({
+        where: {
+          email,
+          id: {
+            [Op.ne]: usuario.id,
+          },
+        },
+      });
+
+      if (existente) {
+        return res.status(409).json({
+          error: "Ya existe otro usuario portal con ese email",
+        });
+      }
+
+      payload.email = email;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "activo")) {
+      payload.activo = normalizarBoolean(req.body.activo, usuario.activo);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "aprobado")) {
+      payload.aprobado = normalizarBoolean(req.body.aprobado, usuario.aprobado);
+    }
+
+    await usuario.update(payload);
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: usuario.cuentaId,
+      usuarioId: usuario.id,
+      tipo: "USUARIO_PORTAL_EDITADO",
+      resultado: "OK",
+      descripcion: "Usuario portal editado por admin",
+      metadata: { campos: Object.keys(payload), email: usuario.email },
+      creado_por: usuarioInternoActual(req),
+    });
+
+    res.json({
+      mensaje: "Usuario portal actualizado",
+      usuario: mapearUsuarioAdmin(usuario),
+    });
+  } catch (error) {
+    console.error("ERROR EDITANDO USUARIO PORTAL:", error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -325,7 +528,20 @@ const resetPasswordUsuario = async (req, res) => {
       });
     }
 
-    await usuario.update({ password });
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await usuario.update({ password: passwordHash });
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: usuario.cuentaId,
+      usuarioId: usuario.id,
+      tipo: "PASSWORD_RESET_ADMIN",
+      resultado: "OK",
+      descripcion: "Clave de usuario portal reseteada por admin",
+      metadata: { email: usuario.email },
+      creado_por: usuarioInternoActual(req),
+    });
 
     res.json({
       mensaje: `Clave actualizada para ${usuario.email}`,
@@ -359,6 +575,22 @@ const actualizarEstadoCuenta = async (req, res) => {
 
     await cuenta.update(payload);
 
+    await registrarEventoPortal({
+      req,
+      cuentaId: cuenta.id,
+      tipo:
+        payload.activo === false || payload.aprobado === false
+          ? "CUENTA_PORTAL_DESACTIVADA"
+          : "CUENTA_PORTAL_EDITADA",
+      resultado: "OK",
+      descripcion: "Estado de cuenta portal actualizado",
+      metadata: {
+        activo: cuenta.activo,
+        aprobado: cuenta.aprobado,
+      },
+      creado_por: usuarioInternoActual(req),
+    });
+
     res.json({
       mensaje: "Estado de cuenta portal actualizado",
       cuenta: mapearCuentaAdmin(cuenta),
@@ -390,6 +622,21 @@ const actualizarEstadoUsuario = async (req, res) => {
     }
 
     await usuario.update(payload);
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: usuario.cuentaId,
+      usuarioId: usuario.id,
+      tipo: "USUARIO_PORTAL_EDITADO",
+      resultado: "OK",
+      descripcion: "Estado de usuario portal actualizado",
+      metadata: {
+        activo: usuario.activo,
+        aprobado: usuario.aprobado,
+        email: usuario.email,
+      },
+      creado_por: usuarioInternoActual(req),
+    });
 
     res.json({
       mensaje: "Estado de usuario portal actualizado",
@@ -430,6 +677,16 @@ const eliminarCuentaPrueba = async (req, res) => {
         transaction,
       });
       await cuenta.destroy({ transaction });
+    });
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: cuenta.id,
+      tipo: "CUENTA_PORTAL_EDITADA",
+      resultado: "OK",
+      descripcion: "Cuenta de prueba eliminada sin historial",
+      metadata: { nombre_taller: cuenta.nombre_taller, email: cuenta.email },
+      creado_por: usuarioInternoActual(req),
     });
 
     res.json({
@@ -584,6 +841,20 @@ const subirModAdmin = async (req, res) => {
       correccion_solicitada: false,
     });
 
+    await registrarEventoPortal({
+      req,
+      cuentaId: archivo.cuentaId,
+      usuarioId: archivo.usuarioId,
+      tipo: "FILE_MOD_SUBIDO_ADMIN",
+      resultado: "OK",
+      descripcion: "MOD subido por admin portal",
+      metadata: {
+        fileId: archivo.id,
+        nombre_modificado: archivo.nombre_modificado,
+      },
+      creado_por: usuarioInternoActual(req),
+    });
+
     res.json({
       mensaje: "MOD cargado correctamente",
       archivo: mapearFileAdmin(archivo),
@@ -648,6 +919,20 @@ const cargarCreditos = async (req, res) => {
       cuenta: mapearCuentaAdmin(resultado.cuenta),
       movimiento: resultado.movimiento,
     });
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: resultado.cuenta.id,
+      tipo: "CREDITOS_CARGADOS",
+      resultado: "OK",
+      descripcion: "Creditos cargados manualmente por admin",
+      metadata: {
+        monto,
+        saldo_nuevo: resultado.cuenta.saldo_creditos,
+        referencia: limpiarTexto(req.body.referencia),
+      },
+      creado_por: usuarioInternoActual(req),
+    });
   } catch (error) {
     console.error("ERROR CARGANDO CREDITOS PORTAL:", error);
     res.status(error.status || 500).json({
@@ -683,10 +968,68 @@ const listarMovimientosCuenta = async (req, res) => {
   }
 };
 
+const listarAuditoria = async (req, res) => {
+  try {
+    const eventos = await buscarEventosAuditoria({
+      cuentaId: req.query.cuentaId,
+      usuarioId: req.query.usuarioId,
+      tipo: req.query.tipo,
+      limit: req.query.limit,
+    });
+
+    res.json(eventos.map(mapearEventoAuditoria));
+  } catch (error) {
+    console.error("ERROR LISTANDO AUDITORIA PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const listarAuditoriaUsuario = async (req, res) => {
+  try {
+    const usuario = await PortalUsuario.findByPk(req.params.id);
+
+    if (!usuario) {
+      return res.status(404).json({ error: "Usuario portal no encontrado" });
+    }
+
+    const eventos = await buscarEventosAuditoria({
+      usuarioId: usuario.id,
+      limit: req.query.limit,
+    });
+
+    res.json(eventos.map(mapearEventoAuditoria));
+  } catch (error) {
+    console.error("ERROR AUDITORIA USUARIO PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const listarAuditoriaCuenta = async (req, res) => {
+  try {
+    const cuenta = await PortalCuenta.findByPk(req.params.id);
+
+    if (!cuenta) {
+      return res.status(404).json({ error: "Cuenta portal no encontrada" });
+    }
+
+    const eventos = await buscarEventosAuditoria({
+      cuentaId: cuenta.id,
+      limit: req.query.limit,
+    });
+
+    res.json(eventos.map(mapearEventoAuditoria));
+  } catch (error) {
+    console.error("ERROR AUDITORIA CUENTA PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   crearCuenta,
   listarCuentas,
+  editarCuenta,
   crearUsuarioCuenta,
+  editarUsuarioPortal,
   resetPasswordUsuario,
   actualizarEstadoCuenta,
   actualizarEstadoUsuario,
@@ -697,4 +1040,7 @@ module.exports = {
   subirModAdmin,
   cargarCreditos,
   listarMovimientosCuenta,
+  listarAuditoria,
+  listarAuditoriaUsuario,
+  listarAuditoriaCuenta,
 };

@@ -61,21 +61,33 @@ const PortalUsuario = sequelize.define(
   }
 );
 
+const pareceHashBcrypt = (valor) =>
+  typeof valor === "string" && /^\$2[aby]\$\d{2}\$/.test(valor);
+
+const normalizarEmail = (usuario) => {
+  if (usuario.email) {
+    usuario.email = String(usuario.email).trim().toLowerCase();
+  }
+};
+
 const hashPassword = async (usuario) => {
-  if (
-    usuario.password &&
-    !usuario.password.startsWith("$2a$") &&
-    !usuario.password.startsWith("$2b$")
-  ) {
+  if (usuario.password && !pareceHashBcrypt(usuario.password)) {
     usuario.password = await bcrypt.hash(usuario.password, 10);
   }
 };
 
+PortalUsuario.beforeValidate(normalizarEmail);
 PortalUsuario.beforeCreate(hashPassword);
 PortalUsuario.beforeUpdate(async (usuario) => {
+  if (usuario.changed("email")) {
+    normalizarEmail(usuario);
+  }
+
   if (usuario.changed("password")) {
     await hashPassword(usuario);
   }
 });
+
+PortalUsuario.pareceHashBcrypt = pareceHashBcrypt;
 
 module.exports = PortalUsuario;

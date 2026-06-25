@@ -6,6 +6,7 @@ const {
   PortalFileService,
   PortalCreditoMovimiento,
 } = require("../models");
+const { registrarEventoPortal } = require("./portalAuthController");
 
 const ESTADOS_DESCARGABLES = ["MOD_LISTO", "CORREGIDO", "ENTREGADO"];
 
@@ -153,6 +154,21 @@ const crearPortalFile = async (req, res) => {
       mensaje: "Archivo recibido correctamente",
       archivo: mapearArchivoPortal(archivo, req.portal.cuenta),
     });
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: req.portal.cuenta.id,
+      usuarioId: req.portal.usuario.id,
+      tipo: "FILE_SUBIDO",
+      resultado: "OK",
+      descripcion: "Archivo original subido desde portal externo",
+      metadata: {
+        fileId: archivo.id,
+        tipo_servicio: archivo.tipo_servicio,
+        nombre_original: archivo.nombre_original,
+      },
+      creado_por: req.portal.usuario.email,
+    });
   } catch (error) {
     console.error("ERROR CREANDO PORTAL FILE:", error);
     res.status(500).json({ error: error.message });
@@ -200,6 +216,19 @@ const solicitarCorreccionPortal = async (req, res) => {
       estado: "CORRECCION_SOLICITADA",
       correccion_solicitada: true,
       observacion_correccion: limpiarTexto(req.body.observacion_correccion),
+    });
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: req.portal.cuenta.id,
+      usuarioId: req.portal.usuario.id,
+      tipo: "FILE_CORRECCION_SOLICITADA",
+      resultado: "OK",
+      descripcion: "Correccion solicitada desde portal externo",
+      metadata: {
+        fileId: archivo.id,
+      },
+      creado_por: req.portal.usuario.email,
     });
 
     res.json({
@@ -269,6 +298,20 @@ const descargarModPortal = async (req, res) => {
           );
 
           if (saldoAnterior < creditosRequeridos) {
+            await registrarEventoPortal({
+              req,
+              cuentaId: req.portal.cuenta.id,
+              usuarioId: req.portal.usuario.id,
+              tipo: "DESCARGA_BLOQUEADA_SIN_CREDITOS",
+              resultado: "ERROR",
+              descripcion: "Descarga bloqueada por saldo insuficiente",
+              metadata: {
+                fileId: archivoBloqueado.id,
+                saldo: saldoAnterior,
+                requeridos: creditosRequeridos,
+              },
+              creado_por: req.portal.usuario.email,
+            });
             throw crearError(402, "Saldo de creditos insuficiente");
           }
 
@@ -295,6 +338,22 @@ const descargarModPortal = async (req, res) => {
             { transaction }
           );
 
+          await registrarEventoPortal({
+            req,
+            cuentaId: cuenta.id,
+            usuarioId: req.portal.usuario.id,
+            tipo: "CREDITOS_CONSUMIDOS",
+            resultado: "OK",
+            descripcion: "Creditos consumidos por descarga MOD",
+            metadata: {
+              fileId: archivoBloqueado.id,
+              monto: creditosRequeridos,
+              saldo_anterior: saldoAnterior,
+              saldo_nuevo: saldoNuevo,
+            },
+            creado_por: req.portal.usuario.email,
+          });
+
           await archivoBloqueado.update(
             {
               creditos_consumidos: true,
@@ -312,6 +371,20 @@ const descargarModPortal = async (req, res) => {
         descargas_count: Number(archivo.descargas_count || 0) + 1,
       });
     }
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: req.portal.cuenta.id,
+      usuarioId: req.portal.usuario.id,
+      tipo: "FILE_MOD_DESCARGADO",
+      resultado: "OK",
+      descripcion: "MOD descargado desde portal externo",
+      metadata: {
+        fileId: archivo.id,
+        nombre_modificado: archivo.nombre_modificado,
+      },
+      creado_por: req.portal.usuario.email,
+    });
 
     const ruta = path.resolve(archivo.archivo_modificado);
     const nombre = archivo.nombre_modificado || path.basename(ruta);

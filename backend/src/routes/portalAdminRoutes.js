@@ -6,7 +6,9 @@ const fs = require("fs");
 const {
   crearCuenta,
   listarCuentas,
+  editarCuenta,
   crearUsuarioCuenta,
+  editarUsuarioPortal,
   resetPasswordUsuario,
   actualizarEstadoCuenta,
   actualizarEstadoUsuario,
@@ -17,6 +19,9 @@ const {
   subirModAdmin,
   cargarCreditos,
   listarMovimientosCuenta,
+  listarAuditoria,
+  listarAuditoriaUsuario,
+  listarAuditoriaCuenta,
 } = require("../controllers/portalAdminController");
 
 const router = express.Router();
@@ -49,14 +54,20 @@ const upload = multer({
   },
 });
 
+router.get("/auditoria", listarAuditoria);
+
 router.post("/cuentas", crearCuenta);
 router.get("/cuentas", listarCuentas);
+router.get("/cuentas/:id/auditoria", listarAuditoriaCuenta);
+router.patch("/cuentas/:id", editarCuenta);
 router.patch("/cuentas/:id/estado", actualizarEstadoCuenta);
 router.post("/cuentas/:id/usuarios", crearUsuarioCuenta);
 router.post("/cuentas/:id/creditos", cargarCreditos);
 router.get("/cuentas/:id/movimientos", listarMovimientosCuenta);
 router.delete("/cuentas/:id", eliminarCuentaPrueba);
 
+router.get("/usuarios/:id/auditoria", listarAuditoriaUsuario);
+router.patch("/usuarios/:id", editarUsuarioPortal);
 router.patch("/usuarios/:id/estado", actualizarEstadoUsuario);
 router.post("/usuarios/:id/reset-password", resetPasswordUsuario);
 
