@@ -6,6 +6,11 @@ const fs = require("fs");
 const {
   crearCuenta,
   listarCuentas,
+  crearUsuarioCuenta,
+  resetPasswordUsuario,
+  actualizarEstadoCuenta,
+  actualizarEstadoUsuario,
+  eliminarCuentaPrueba,
   listarFilesAdmin,
   obtenerFileAdmin,
   actualizarFileAdmin,
@@ -46,8 +51,14 @@ const upload = multer({
 
 router.post("/cuentas", crearCuenta);
 router.get("/cuentas", listarCuentas);
+router.patch("/cuentas/:id/estado", actualizarEstadoCuenta);
+router.post("/cuentas/:id/usuarios", crearUsuarioCuenta);
 router.post("/cuentas/:id/creditos", cargarCreditos);
 router.get("/cuentas/:id/movimientos", listarMovimientosCuenta);
+router.delete("/cuentas/:id", eliminarCuentaPrueba);
+
+router.patch("/usuarios/:id/estado", actualizarEstadoUsuario);
+router.post("/usuarios/:id/reset-password", resetPasswordUsuario);
 
 router.get("/files", listarFilesAdmin);
 router.get("/files/:id", obtenerFileAdmin);

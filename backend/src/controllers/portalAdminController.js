@@ -28,6 +28,18 @@ const normalizarMonto = (valor, defecto = 0) => {
   return Math.max(0, Number(numero.toFixed(2)));
 };
 
+const normalizarBoolean = (valor, defecto) => {
+  if (valor === undefined || valor === null) return defecto;
+  if (typeof valor === "boolean") return valor;
+
+  const texto = String(valor).trim().toLowerCase();
+
+  if (["true", "1", "si", "sí", "yes"].includes(texto)) return true;
+  if (["false", "0", "no"].includes(texto)) return false;
+
+  return defecto;
+};
+
 const usuarioInternoActual = (req) => {
   return (
     req.usuario?.username ||
@@ -116,19 +128,29 @@ const crearCuenta = async (req, res) => {
     }
 
     const usuarioEmail = limpiarTexto(
-      req.body.usuario_email || req.body.email_usuario || req.body.email
+      req.body.usuario_email || req.body.email_usuario
     ).toLowerCase();
     const usuarioPassword = limpiarTexto(
       req.body.usuario_password || req.body.password
     );
     const usuarioNombre = limpiarTexto(
-      req.body.usuario_nombre || req.body.nombre_usuario || req.body.contacto
+      req.body.usuario_nombre || req.body.nombre_usuario
     );
 
     if (!usuarioEmail || !usuarioPassword || !usuarioNombre) {
       return res.status(400).json({
         error:
           "Para crear cuenta portal debes enviar usuario_nombre, usuario_email y usuario_password. Ese email sera el login del portal.",
+      });
+    }
+
+    const usuarioExistente = await PortalUsuario.findOne({
+      where: { email: usuarioEmail },
+    });
+
+    if (usuarioExistente) {
+      return res.status(409).json({
+        error: "Ya existe un usuario portal con ese email de login",
       });
     }
 
@@ -209,17 +231,212 @@ const listarCuentas = async (req, res) => {
       order: [["createdAt", "DESC"]],
     });
 
-    res.json(
-      cuentas.map((cuenta) => {
+    const cuentasMapeadas = await Promise.all(
+      cuentas.map(async (cuenta) => {
         const json = cuenta.toJSON();
+        const totalArchivos = await PortalFileService.count({
+          where: { cuentaId: json.id },
+        });
+        const totalMovimientos = await PortalCreditoMovimiento.count({
+          where: { cuentaId: json.id },
+        });
+
         return {
           ...mapearCuentaAdmin(json),
           Usuarios: (json.PortalUsuarios || []).map(mapearUsuarioAdmin),
+          total_archivos: totalArchivos,
+          total_movimientos: totalMovimientos,
+          puede_eliminar_prueba: totalArchivos === 0 && totalMovimientos === 0,
         };
       })
     );
+
+    res.json(cuentasMapeadas);
   } catch (error) {
     console.error("ERROR LISTANDO CUENTAS PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const crearUsuarioCuenta = async (req, res) => {
+  try {
+    const cuenta = await PortalCuenta.findByPk(req.params.id);
+
+    if (!cuenta) {
+      return res.status(404).json({
+        error: "Cuenta portal no encontrada",
+      });
+    }
+
+    const nombre = limpiarTexto(req.body.nombre || req.body.usuario_nombre);
+    const email = limpiarTexto(req.body.email || req.body.usuario_email).toLowerCase();
+    const password = limpiarTexto(req.body.password || req.body.usuario_password);
+
+    if (!nombre || !email || !password) {
+      return res.status(400).json({
+        error: "Nombre, email y password son obligatorios para crear usuario portal",
+      });
+    }
+
+    const existente = await PortalUsuario.findOne({
+      where: { email },
+    });
+
+    if (existente) {
+      return res.status(409).json({
+        error: "Ya existe un usuario portal con ese email de login",
+      });
+    }
+
+    const usuario = await PortalUsuario.create({
+      cuentaId: cuenta.id,
+      nombre,
+      email,
+      password,
+      activo: true,
+      aprobado: true,
+    });
+
+    res.status(201).json({
+      mensaje: "Usuario portal creado correctamente",
+      usuario: mapearUsuarioAdmin(usuario),
+    });
+  } catch (error) {
+    console.error("ERROR CREANDO USUARIO PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const resetPasswordUsuario = async (req, res) => {
+  try {
+    const usuario = await PortalUsuario.findByPk(req.params.id);
+
+    if (!usuario) {
+      return res.status(404).json({
+        error: "Usuario portal no encontrado",
+      });
+    }
+
+    const password = limpiarTexto(req.body.password);
+
+    if (!password) {
+      return res.status(400).json({
+        error: "La nueva clave es obligatoria",
+      });
+    }
+
+    await usuario.update({ password });
+
+    res.json({
+      mensaje: `Clave actualizada para ${usuario.email}`,
+      usuario: mapearUsuarioAdmin(usuario),
+    });
+  } catch (error) {
+    console.error("ERROR RESET PASSWORD PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const actualizarEstadoCuenta = async (req, res) => {
+  try {
+    const cuenta = await PortalCuenta.findByPk(req.params.id);
+
+    if (!cuenta) {
+      return res.status(404).json({
+        error: "Cuenta portal no encontrada",
+      });
+    }
+
+    const payload = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "activo")) {
+      payload.activo = normalizarBoolean(req.body.activo, cuenta.activo);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "aprobado")) {
+      payload.aprobado = normalizarBoolean(req.body.aprobado, cuenta.aprobado);
+    }
+
+    await cuenta.update(payload);
+
+    res.json({
+      mensaje: "Estado de cuenta portal actualizado",
+      cuenta: mapearCuentaAdmin(cuenta),
+    });
+  } catch (error) {
+    console.error("ERROR ACTUALIZANDO ESTADO CUENTA PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const actualizarEstadoUsuario = async (req, res) => {
+  try {
+    const usuario = await PortalUsuario.findByPk(req.params.id);
+
+    if (!usuario) {
+      return res.status(404).json({
+        error: "Usuario portal no encontrado",
+      });
+    }
+
+    const payload = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "activo")) {
+      payload.activo = normalizarBoolean(req.body.activo, usuario.activo);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "aprobado")) {
+      payload.aprobado = normalizarBoolean(req.body.aprobado, usuario.aprobado);
+    }
+
+    await usuario.update(payload);
+
+    res.json({
+      mensaje: "Estado de usuario portal actualizado",
+      usuario: mapearUsuarioAdmin(usuario),
+    });
+  } catch (error) {
+    console.error("ERROR ACTUALIZANDO ESTADO USUARIO PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const eliminarCuentaPrueba = async (req, res) => {
+  try {
+    const cuenta = await PortalCuenta.findByPk(req.params.id);
+
+    if (!cuenta) {
+      return res.status(404).json({
+        error: "Cuenta portal no encontrada",
+      });
+    }
+
+    const totalArchivos = await PortalFileService.count({
+      where: { cuentaId: cuenta.id },
+    });
+    const totalMovimientos = await PortalCreditoMovimiento.count({
+      where: { cuentaId: cuenta.id },
+    });
+
+    if (totalArchivos > 0 || totalMovimientos > 0) {
+      return res.status(400).json({
+        error: "La cuenta tiene historial. Se recomienda desactivar.",
+      });
+    }
+
+    await sequelize.transaction(async (transaction) => {
+      await PortalUsuario.destroy({
+        where: { cuentaId: cuenta.id },
+        transaction,
+      });
+      await cuenta.destroy({ transaction });
+    });
+
+    res.json({
+      mensaje: "Cuenta de prueba eliminada correctamente",
+    });
+  } catch (error) {
+    console.error("ERROR ELIMINANDO CUENTA PORTAL:", error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -469,6 +686,11 @@ const listarMovimientosCuenta = async (req, res) => {
 module.exports = {
   crearCuenta,
   listarCuentas,
+  crearUsuarioCuenta,
+  resetPasswordUsuario,
+  actualizarEstadoCuenta,
+  actualizarEstadoUsuario,
+  eliminarCuentaPrueba,
   listarFilesAdmin,
   obtenerFileAdmin,
   actualizarFileAdmin,

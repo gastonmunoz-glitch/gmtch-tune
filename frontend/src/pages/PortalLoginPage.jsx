@@ -49,7 +49,13 @@ function PortalLoginPage() {
 
       navigate("/portal");
     } catch (err) {
-      setError(err.message || "No se pudo iniciar sesión en el portal.");
+      if (err.status === 401) {
+        setError(
+          "Credenciales inválidas. Recuerda usar el Email de login portal, no el email de la cuenta/taller."
+        );
+      } else {
+        setError(err.message || "No se pudo iniciar sesión en el portal.");
+      }
     } finally {
       setCargando(false);
     }
@@ -140,4 +146,3 @@ function PortalLoginPage() {
 }
 
 export default PortalLoginPage;
-

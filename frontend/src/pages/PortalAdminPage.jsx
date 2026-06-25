@@ -8,6 +8,7 @@ import {
   portalAdminUpdateFile,
   portalAdminUploadMod,
 } from "../services/portalApi";
+import api from "../services/api";
 
 const estados = [
   "RECIBIDO",
@@ -30,6 +31,9 @@ const fecha = (valor) => {
   return d.toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" });
 };
 
+const mensajeError = (err, fallback) =>
+  err.response?.data?.error || err.message || fallback;
+
 function PortalAdminPage() {
   const [cuentas, setCuentas] = useState([]);
   const [archivos, setArchivos] = useState([]);
@@ -40,6 +44,8 @@ function PortalAdminPage() {
   const [ediciones, setEdiciones] = useState({});
   const [mods, setMods] = useState({});
   const [cuentaMovimiento, setCuentaMovimiento] = useState("");
+  const [nuevoUsuarioPorCuenta, setNuevoUsuarioPorCuenta] = useState({});
+  const [resetPasswordPorUsuario, setResetPasswordPorUsuario] = useState({});
   const [nuevaCuenta, setNuevaCuenta] = useState({
     nombre_taller: "",
     contacto: "",
@@ -86,6 +92,16 @@ function PortalAdminPage() {
     setNuevaCuenta((actual) => ({ ...actual, [campo]: valor }));
   };
 
+  const actualizarNuevoUsuario = (cuentaId, campo, valor) => {
+    setNuevoUsuarioPorCuenta((actual) => ({
+      ...actual,
+      [cuentaId]: {
+        ...(actual[cuentaId] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
   const crearCuenta = async (event) => {
     event.preventDefault();
     setError("");
@@ -119,6 +135,114 @@ function PortalAdminPage() {
       await cargar();
     } catch (err) {
       setError(err.message || "No se pudo crear la cuenta.");
+    }
+  };
+
+  const crearUsuarioPortal = async (event, cuenta) => {
+    event.preventDefault();
+    setError("");
+    setMensaje("");
+
+    const form = nuevoUsuarioPorCuenta[cuenta.id] || {};
+
+    if (!form.nombre || !form.email || !form.password) {
+      setError("Debes completar nombre, email y password del usuario portal.");
+      return;
+    }
+
+    try {
+      const res = await api.post(`/portal/admin/cuentas/${cuenta.id}/usuarios`, {
+        nombre: form.nombre,
+        email: form.email,
+        password: form.password,
+      });
+
+      setMensaje(
+        res.data?.mensaje || `Usuario portal creado: ${form.email.trim()}`
+      );
+      setNuevoUsuarioPorCuenta((actual) => ({
+        ...actual,
+        [cuenta.id]: { nombre: "", email: "", password: "" },
+      }));
+      await cargar();
+    } catch (err) {
+      setError(mensajeError(err, "No se pudo crear usuario portal."));
+    }
+  };
+
+  const actualizarEstadoCuenta = async (cuenta, cambios) => {
+    try {
+      setError("");
+      setMensaje("");
+      const res = await api.patch(`/portal/admin/cuentas/${cuenta.id}/estado`, {
+        activo: cuenta.activo,
+        aprobado: cuenta.aprobado,
+        ...cambios,
+      });
+      setMensaje(res.data?.mensaje || "Estado de cuenta actualizado.");
+      await cargar();
+    } catch (err) {
+      setError(mensajeError(err, "No se pudo actualizar la cuenta."));
+    }
+  };
+
+  const actualizarEstadoUsuario = async (usuario, cambios) => {
+    try {
+      setError("");
+      setMensaje("");
+      const res = await api.patch(`/portal/admin/usuarios/${usuario.id}/estado`, {
+        activo: usuario.activo,
+        aprobado: usuario.aprobado,
+        ...cambios,
+      });
+      setMensaje(res.data?.mensaje || "Estado de usuario actualizado.");
+      await cargar();
+    } catch (err) {
+      setError(mensajeError(err, "No se pudo actualizar el usuario portal."));
+    }
+  };
+
+  const resetearPasswordUsuario = async (usuario) => {
+    const password = resetPasswordPorUsuario[usuario.id] || "";
+
+    if (!password.trim()) {
+      setError("Debes ingresar una nueva clave para el usuario portal.");
+      return;
+    }
+
+    try {
+      setError("");
+      setMensaje("");
+      const res = await api.post(
+        `/portal/admin/usuarios/${usuario.id}/reset-password`,
+        { password }
+      );
+      setMensaje(res.data?.mensaje || `Clave actualizada para ${usuario.email}`);
+      setResetPasswordPorUsuario((actual) => ({
+        ...actual,
+        [usuario.id]: "",
+      }));
+      await cargar();
+    } catch (err) {
+      setError(mensajeError(err, "No se pudo resetear la clave."));
+    }
+  };
+
+  const eliminarCuentaPrueba = async (cuenta) => {
+    const confirmar = window.confirm(
+      `¿Eliminar cuenta de prueba ${cuenta.nombre_taller}? Solo se eliminará si no tiene historial.`
+    );
+
+    if (!confirmar) return;
+
+    try {
+      setError("");
+      setMensaje("");
+      const res = await api.delete(`/portal/admin/cuentas/${cuenta.id}`);
+      setMensaje(res.data?.mensaje || "Cuenta de prueba eliminada.");
+      await cargar();
+    } catch (err) {
+      setError(mensajeError(err, "No se pudo eliminar la cuenta de prueba."));
     }
   };
 
@@ -301,6 +425,39 @@ function PortalAdminPage() {
                 <p className="text-xs font-bold uppercase text-gray-500">
                   {cuenta.activo ? "Activa" : "Inactiva"} / {cuenta.aprobado ? "Aprobada" : "Pendiente"}
                 </p>
+                <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
+                  Archivos: {cuenta.total_archivos ?? 0} / Movimientos: {cuenta.total_movimientos ?? 0}
+                </p>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => actualizarEstadoCuenta(cuenta, { activo: !cuenta.activo })}
+                    className="border-2 border-black px-3 py-2 text-[10px] font-black uppercase"
+                  >
+                    {cuenta.activo ? "Desactivar cuenta" : "Activar cuenta"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => actualizarEstadoCuenta(cuenta, { aprobado: !cuenta.aprobado })}
+                    className="border-2 border-black px-3 py-2 text-[10px] font-black uppercase"
+                  >
+                    {cuenta.aprobado ? "Pausar aprobación" : "Aprobar cuenta"}
+                  </button>
+                  {cuenta.puede_eliminar_prueba ? (
+                    <button
+                      type="button"
+                      onClick={() => eliminarCuentaPrueba(cuenta)}
+                      className="border-2 border-red-600 px-3 py-2 text-[10px] font-black uppercase text-red-700"
+                    >
+                      Eliminar cuenta de prueba
+                    </button>
+                  ) : (
+                    <span className="border-2 border-yellow-500 px-3 py-2 text-[10px] font-black uppercase text-yellow-700">
+                      Tiene historial: desactivar
+                    </span>
+                  )}
+                </div>
 
                 <div className="mt-3 border-t-2 border-black pt-3">
                   <p className="text-[10px] font-black uppercase text-blue-700">
@@ -314,20 +471,108 @@ function PortalAdminPage() {
                             {usuario.nombre || "Usuario portal"}
                           </p>
                           <p className="text-xs font-bold text-gray-700">
-                            Email de login portal: {usuario.email || "No registrado"}
+                            Email de login portal:{" "}
+                            {usuario.email ? (
+                              <a href={`mailto:${usuario.email}`} className="text-blue-700 underline">
+                                {usuario.email}
+                              </a>
+                            ) : (
+                              "No registrado"
+                            )}
                           </p>
                           <p className="text-[10px] font-bold uppercase text-gray-500">
                             {usuario.activo ? "Activo" : "Inactivo"} / {usuario.aprobado ? "Aprobado" : "Pendiente"}
                           </p>
+                          <p className="text-[10px] font-bold uppercase text-gray-500">
+                            Último login: {fecha(usuario.last_login_at)}
+                          </p>
+                          <p className="text-[10px] font-bold uppercase text-gray-500">
+                            Última actividad: {fecha(usuario.last_seen_at)}
+                          </p>
+
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => actualizarEstadoUsuario(usuario, { activo: !usuario.activo })}
+                              className="border border-black px-2 py-1 text-[9px] font-black uppercase"
+                            >
+                              {usuario.activo ? "Desactivar usuario" : "Activar usuario"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => actualizarEstadoUsuario(usuario, { aprobado: !usuario.aprobado })}
+                              className="border border-black px-2 py-1 text-[9px] font-black uppercase"
+                            >
+                              {usuario.aprobado ? "Pausar usuario" : "Aprobar usuario"}
+                            </button>
+                          </div>
+
+                          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                            <input
+                              className={inputClass}
+                              type="password"
+                              placeholder="Nueva clave portal"
+                              value={resetPasswordPorUsuario[usuario.id] || ""}
+                              onChange={(e) =>
+                                setResetPasswordPorUsuario((actual) => ({
+                                  ...actual,
+                                  [usuario.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <button
+                              type="button"
+                              onClick={() => resetearPasswordUsuario(usuario)}
+                              className="bg-black px-3 py-2 text-[9px] font-black uppercase text-white"
+                            >
+                              Reset clave
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <p className="mt-2 text-xs font-bold text-red-700">
-                      Sin usuario portal creado.
+                      Esta cuenta no tiene usuario de login. No podrá iniciar sesión.
                     </p>
                   )}
                 </div>
+
+                <form
+                  onSubmit={(event) => crearUsuarioPortal(event, cuenta)}
+                  className="mt-3 border-t-2 border-black pt-3"
+                >
+                  <p className="text-[10px] font-black uppercase text-gray-500">
+                    Crear usuario portal en esta cuenta
+                  </p>
+                  <div className="mt-2 grid grid-cols-1 gap-2">
+                    <input
+                      className={inputClass}
+                      placeholder="Nombre usuario portal"
+                      value={nuevoUsuarioPorCuenta[cuenta.id]?.nombre || ""}
+                      onChange={(e) => actualizarNuevoUsuario(cuenta.id, "nombre", e.target.value)}
+                    />
+                    <input
+                      className={inputClass}
+                      placeholder="Email de login portal"
+                      value={nuevoUsuarioPorCuenta[cuenta.id]?.email || ""}
+                      onChange={(e) => actualizarNuevoUsuario(cuenta.id, "email", e.target.value)}
+                    />
+                    <input
+                      className={inputClass}
+                      type="password"
+                      placeholder="Password inicial"
+                      value={nuevoUsuarioPorCuenta[cuenta.id]?.password || ""}
+                      onChange={(e) => actualizarNuevoUsuario(cuenta.id, "password", e.target.value)}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="mt-2 bg-blue-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-black"
+                  >
+                    Crear usuario portal
+                  </button>
+                </form>
 
                 <button type="button" onClick={() => verMovimientos(cuenta.id)} className="mt-3 border-2 border-black px-3 py-2 text-[10px] font-black uppercase">
                   Ver movimientos
