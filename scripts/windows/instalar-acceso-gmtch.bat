@@ -3,6 +3,7 @@ setlocal
 
 set "APP_NAME=GMTCH Tune OS"
 set "APP_URL=https://gmtchtune.com/login"
+set "BAT_DIR=%~dp0"
 set "ROOT=%~dp0..\.."
 for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 
@@ -15,17 +16,25 @@ echo Proyecto detectado en: %ROOT%
   echo $ErrorActionPreference = 'Stop'
   echo $appName = 'GMTCH Tune OS'
   echo $appUrl = 'https://gmtchtune.com/login'
+  echo $scriptDir = '%BAT_DIR%'
   echo $root = '%ROOT%'
   echo $desktopShortcut = Join-Path $env:USERPROFILE 'Desktop\GMTCH Tune OS.lnk'
   echo $startupDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
   echo $startupShortcut = Join-Path $startupDir 'GMTCH Tune OS.lnk'
   echo $programDataDir = Join-Path $env:ProgramData 'GMTCH Tune'
-  echo $iconSource = Join-Path $root 'frontend\public\brand\gmtch-isotipo.png'
+  echo $portableIconSource = Join-Path $scriptDir 'gmtch-isotipo.png'
+  echo $repoIconSource = Join-Path $root 'frontend\public\brand\gmtch-isotipo.png'
+  echo $iconSource = $null
+  echo if (Test-Path $portableIconSource^) {
+  echo   $iconSource = $portableIconSource
+  echo } elseif (Test-Path $repoIconSource^) {
+  echo   $iconSource = $repoIconSource
+  echo }
   echo $iconPath = Join-Path $programDataDir 'gmtch.ico'
   echo $iconOk = $false
   echo try {
   echo   New-Item -ItemType Directory -Force -Path $programDataDir ^| Out-Null
-  echo   if (Test-Path $iconSource^) {
+  echo   if ($iconSource -and (Test-Path $iconSource^)^) {
   echo     Add-Type -AssemblyName System.Drawing
   echo     $bitmap = [System.Drawing.Bitmap]::FromFile($iconSource^)
   echo     $icon = [System.Drawing.Icon]::FromHandle($bitmap.GetHicon(^)^)
@@ -35,6 +44,8 @@ echo Proyecto detectado en: %ROOT%
   echo     $icon.Dispose(^)
   echo     $bitmap.Dispose(^)
   echo     $iconOk = Test-Path $iconPath
+  echo   } else {
+  echo     Write-Host 'No se encontro gmtch-isotipo.png. Se usara el icono del navegador.'
   echo   }
   echo } catch {
   echo   Write-Host 'No se pudo crear icono personalizado. Se usara el icono del navegador.'
