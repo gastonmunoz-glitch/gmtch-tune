@@ -31,12 +31,14 @@ const MOTIVOS_ARCHIVO = [
 ];
 
 const FILTROS = [
-  { value: "TODOS", label: "Todos" },
-  { value: "PENDIENTE_MASTER", label: "Pendiente Master" },
+  { value: "PENDIENTES", label: "Pendientes" },
+  { value: "EN_PROCESO", label: "En proceso" },
   { value: "MOD_LISTO", label: "MOD listo" },
-  { value: "PENDIENTE_POST", label: "Pendiente post escritura" },
-  { value: "CORRECCIONES", label: "Correcciones" },
-  { value: "OK_CIERRE", label: "OK cierre" },
+  { value: "PENDIENTE_POST", label: "Post escritura pendiente" },
+  { value: "CORRECCIONES", label: "Corrección pendiente" },
+  { value: "FINALIZADOS", label: "Finalizados" },
+  { value: "ARCHIVADOS", label: "Archivados" },
+  { value: "TODOS", label: "Todos" },
 ];
 
 const ESTADOS_PROCESAMIENTO_EXTERNO = [
@@ -200,6 +202,44 @@ const estadoLabel = (estado) => {
   return ESTADOS[estado] || estado || "Sin estado";
 };
 
+const obtenerResponsablePrincipal = (archivo) => {
+  return (
+    archivo.tuner_asignado_a ||
+    archivo.operador_ecu_asignado_a ||
+    archivo.slave_asignado_a ||
+    "Sin responsable"
+  );
+};
+
+const obtenerProximaAccion = (archivo) => {
+  if (archivo.archivado || archivo.estado === "ARCHIVADO") return "Archivado";
+  if (archivo.estado === "FINALIZADO_TECNICO" || archivo.estado === "FINALIZADO") {
+    return "Trabajo técnico finalizado";
+  }
+  if (archivo.estado === "REQUIERE_CORRECCION" || archivo.correccion_pendiente) {
+    return "Resolver corrección";
+  }
+  if (!archivo.archivo_original) return "Subir archivo original";
+  if (archivo.post_escritura_estado === "OK") return "Finalizar técnico";
+  if (archivo.archivo_modificado && archivo.estado === "MODIFICADO_LISTO") {
+    return "Notificar operador ECU";
+  }
+  if (["NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(archivo.estado)) {
+    return "Registrar post escritura";
+  }
+  if (
+    archivo.procesamiento_externo_estado &&
+    !["COMPLETADO", "NO_APLICA"].includes(archivo.procesamiento_externo_estado)
+  ) {
+    return "Procesar archivo externo";
+  }
+  if (archivo.estado === "ORIGINAL_CARGADO" || archivo.estado === "NOTIFICADO_MASTER") {
+    return archivo.tuner_asignado_a ? "Subir MOD" : "Asignar o avisar Master";
+  }
+
+  return "Revisar siguiente etapa";
+};
+
 const obtenerClienteVehiculo = (archivo) => {
   const orden = archivo?.OrdenTrabajo;
   const vehiculo = orden?.Vehiculo;
@@ -230,7 +270,7 @@ export default function ArchivosECUPage() {
   const [error, setError] = useState("");
   const [bloqueoDiagnostico, setBloqueoDiagnostico] = useState(null);
 
-  const [filtro, setFiltro] = useState("TODOS");
+  const [filtro, setFiltro] = useState("PENDIENTES");
   const [busqueda, setBusqueda] = useState("");
 
   const [nuevo, setNuevo] = useState({
@@ -385,9 +425,25 @@ export default function ArchivosECUPage() {
 
       if (filtro === "TODOS") return true;
 
-      if (filtro === "PENDIENTE_MASTER") {
-        return ["ORIGINAL_CARGADO", "NOTIFICADO_MASTER"].includes(
-          archivo.estado
+      if (filtro === "PENDIENTES") {
+        return (
+          !archivo.archivado &&
+          ["ORIGINAL_CARGADO", "NOTIFICADO_MASTER"].includes(archivo.estado)
+        );
+      }
+
+      if (filtro === "EN_PROCESO") {
+        return (
+          !archivo.archivado &&
+          ![
+            "MODIFICADO_LISTO",
+            "NOTIFICADO_SLAVE",
+            "POST_ESCRITURA_PENDIENTE",
+            "REQUIERE_CORRECCION",
+            "FINALIZADO",
+            "FINALIZADO_TECNICO",
+            "ARCHIVADO",
+          ].includes(archivo.estado)
         );
       }
 
@@ -406,11 +462,17 @@ export default function ArchivosECUPage() {
       }
 
       if (filtro === "CORRECCIONES") {
-        return archivo.estado === "REQUIERE_CORRECCION";
+        return archivo.estado === "REQUIERE_CORRECCION" || archivo.correccion_pendiente;
       }
 
-      if (filtro === "OK_CIERRE") {
-        return archivo.estado === "POST_ESCRITURA_OK";
+      if (filtro === "FINALIZADOS") {
+        return ["POST_ESCRITURA_OK", "FINALIZADO", "FINALIZADO_TECNICO"].includes(
+          archivo.estado
+        );
+      }
+
+      if (filtro === "ARCHIVADOS") {
+        return archivo.archivado || archivo.estado === "ARCHIVADO";
       }
 
       return true;
@@ -932,6 +994,15 @@ export default function ArchivosECUPage() {
           </button>
         </header>
 
+        <section className="border border-amber-500/40 bg-amber-500/10 rounded-3xl p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
+            Regla operativa File Service
+          </p>
+          <p className="mt-2 text-sm md:text-base font-semibold text-amber-50">
+            Todo archivo recibido por WhatsApp debe quedar registrado aquí. Si no está en File Service, no existe oficialmente.
+          </p>
+        </section>
+
         {mensaje && (
           <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 p-4 rounded-2xl">
             {mensaje}
@@ -1115,7 +1186,7 @@ export default function ArchivosECUPage() {
 
               <p className="text-xs text-slate-500 mt-2 mb-4">
                 Estos datos son opcionales. Un Master puede completarlos si los
-                tiene; un Slave o taller pequeno puede dejarlo vacio.
+                tiene; un Slave o taller pequeño puede dejarlo vacío.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1243,17 +1314,22 @@ export default function ArchivosECUPage() {
                 className="bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500 min-w-[260px]"
               />
 
-              <select
-                value={filtro}
-                onChange={(e) => setFiltro(e.target.value)}
-                className="bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
-              >
+              <div className="flex flex-wrap gap-2">
                 {FILTROS.map((item) => (
-                  <option key={item.value} value={item.value}>
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setFiltro(item.value)}
+                    className={`px-3 py-2 rounded-xl border text-xs font-semibold uppercase transition ${
+                      filtro === item.value
+                        ? "bg-blue-600 border-blue-400 text-white"
+                        : "bg-slate-950 border-slate-700 text-slate-300 hover:border-blue-500"
+                    }`}
+                  >
                     {item.label}
-                  </option>
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
 
@@ -1306,6 +1382,8 @@ export default function ArchivosECUPage() {
               };
 
               const puedeFinalizar = archivo.post_escritura_estado === "OK";
+              const responsablePrincipal = obtenerResponsablePrincipal(archivo);
+              const proximaAccion = obtenerProximaAccion(archivo);
 
               return (
                 <article
@@ -1340,6 +1418,25 @@ export default function ArchivosECUPage() {
                         Orden #{archivo.ordenId} · Servicio:{" "}
                         {archivo.tipo_servicio || "-"}
                       </p>
+
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-3">
+                          <p className="text-xs uppercase text-slate-500">
+                            Responsable principal
+                          </p>
+                          <p className="font-semibold text-slate-100">
+                            {responsablePrincipal}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                          <p className="text-xs uppercase text-emerald-300">
+                            Próxima acción
+                          </p>
+                          <p className="font-semibold text-emerald-100">
+                            {proximaAccion}
+                          </p>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="text-sm text-slate-400 md:text-right">
@@ -1367,12 +1464,12 @@ export default function ArchivosECUPage() {
                     </div>
                   </div>
 
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
+                  <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Responsables File Service
-                    </p>
+                    </summary>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
                       {RESPONSABLES_FILE_SERVICE.map((responsable) => {
                         const opciones = usuariosPorRoles(responsable.roles);
                         const valorActual = archivo[responsable.campo] || "";
@@ -1429,9 +1526,14 @@ export default function ArchivosECUPage() {
                         );
                       })}
                     </div>
-                  </div>
+                  </details>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                  <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+                      Datos técnicos ECU avanzados
+                    </summary>
+
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3">
                       <p className="text-slate-500">Lectura</p>
                       <p>{archivo.metodo_lectura || "-"}</p>
@@ -1458,6 +1560,8 @@ export default function ArchivosECUPage() {
                       </p>
                     </div>
                   </div>
+
+                  </details>
 
                   <div className="flex flex-wrap gap-2">
                     {archivo.archivo_original && (
@@ -1495,12 +1599,12 @@ export default function ArchivosECUPage() {
                   </div>
 
                   {versiones.length > 0 && (
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-                      <h3 className="font-semibold mb-3">
+                    <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                      <summary className="cursor-pointer font-semibold">
                         Historial de MOD cargados
-                      </h3>
+                      </summary>
 
-                      <div className="space-y-2">
+                      <div className="mt-3 space-y-2">
                         {versiones.map((version, index) => (
                           <div
                             key={`${version.version || index}-${
@@ -1536,7 +1640,7 @@ export default function ArchivosECUPage() {
                           </div>
                         ))}
                       </div>
-                    </div>
+                    </details>
                   )}
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1606,9 +1710,12 @@ export default function ArchivosECUPage() {
                       </button>
                     </div>
 
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                      <h3 className="font-semibold">Notificaciones</h3>
+                    <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                      <summary className="cursor-pointer font-semibold">
+                        Notificaciones / WhatsApp
+                      </summary>
 
+                      <div className="mt-3 space-y-3">
                       <button
                         onClick={() => notificarMaster(archivo)}
                         className="w-full px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500"
@@ -1628,7 +1735,8 @@ export default function ArchivosECUPage() {
                         La notificacion interna se registra al crear el File Service.
                         WhatsApp es un aviso manual opcional.
                       </p>
-                    </div>
+                      </div>
+                    </details>
                   </div>
 
                   <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
@@ -1835,6 +1943,9 @@ export default function ArchivosECUPage() {
                           Sin scanner post escritura y DTC/SIN DTC no se permite
                           finalizar.
                         </p>
+                        <p className="text-xs font-semibold text-yellow-300 mt-2">
+                          Un archivo sin post escritura registrada es un trabajo inconcluso.
+                        </p>
                       </div>
 
                       {archivo.post_escritura_estado && (
@@ -1990,11 +2101,12 @@ export default function ArchivosECUPage() {
                     )}
                   </div>
 
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                    <h3 className="font-semibold text-slate-200">
+                  <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <summary className="cursor-pointer font-semibold text-slate-200">
                       Archivar File Service
-                    </h3>
+                    </summary>
 
+                    <div className="mt-3 space-y-3">
                     <p className="text-xs text-slate-500">
                       Archivar reemplaza eliminar. El registro queda guardado
                       para auditoría, pero sale del listado activo.
@@ -2040,7 +2152,8 @@ export default function ArchivosECUPage() {
                     >
                       Archivar
                     </button>
-                  </div>
+                    </div>
+                  </details>
                 </article>
               );
             })}

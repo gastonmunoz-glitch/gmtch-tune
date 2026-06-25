@@ -1093,6 +1093,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         </button>
       </div>
 
+      <ReglaOperativaGMTCH />
+
       <DashboardSection title="Comercial">
         <StatCard label="Caja hoy" val={formatoCLP(stats.cajaHoy)} color="border-black bg-black text-white" />
         <StatCard label="Caja semana" val={formatoCLP(stats.cajaSemana)} color="border-blue-500" />
@@ -1317,6 +1319,34 @@ const ChecklistOperativoSection = ({ items = [] }) => (
     </div>
   </section>
 );
+
+const ReglaOperativaGMTCH = () => {
+  const frases = [
+    "Trabajo que no está en Gmtch Tune OS, no existe oficialmente.",
+    "WhatsApp puede recibir información, pero la plataforma es la fuente oficial.",
+    "Sin orden no hay trabajo. Sin evidencia no hay respaldo. Sin cierre no hay entrega.",
+    "La pelota siempre debe tener responsable.",
+    "Cierre técnico no es cierre comercial.",
+  ];
+
+  return (
+    <section className="border-4 border-black bg-yellow-50 p-5 rounded-2xl">
+      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-yellow-700">
+        Regla operativa GMTCH
+      </p>
+      <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+        {frases.slice(0, 3).map((frase) => (
+          <div
+            key={frase}
+            className="border-2 border-black bg-white p-3 text-xs font-black uppercase leading-relaxed text-black"
+          >
+            {frase}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
 
 const DashboardSection = ({ title, children }) => (
   <section className="space-y-4">
