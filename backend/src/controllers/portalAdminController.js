@@ -16,10 +16,12 @@ const ESTADOS_VALIDOS = [
   "EN_PROCESO",
   "MOD_LISTO",
   "CORRECCION_SOLICITADA",
+  "REQUIERE_NUEVA_LECTURA",
   "CORREGIDO",
   "ENTREGADO",
   "RECHAZADO",
 ];
+let columnasNuevaLecturaPreparadas = false;
 
 const limpiarTexto = (valor) => {
   if (valor === null || valor === undefined) return "";
@@ -42,6 +44,41 @@ const normalizarBoolean = (valor, defecto) => {
   if (["false", "0", "no"].includes(texto)) return false;
 
   return defecto;
+};
+
+const prepararColumnasNuevaLectura = async () => {
+  if (columnasNuevaLecturaPreparadas) return;
+
+  await sequelize.query(`
+    ALTER TABLE portal_file_services
+      ADD COLUMN IF NOT EXISTS requiere_nueva_lectura BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_motivo TEXT,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_instrucciones TEXT,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_solicitada_at TIMESTAMP WITH TIME ZONE,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_solicitada_por VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS archivo_nueva_lectura VARCHAR(500),
+      ADD COLUMN IF NOT EXISTS nombre_nueva_lectura VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS nueva_lectura_subida_at TIMESTAMP WITH TIME ZONE,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_subida_por VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS nueva_lectura_historial JSONB DEFAULT '[]'::jsonb
+  `);
+
+  columnasNuevaLecturaPreparadas = true;
+};
+
+const normalizarHistorialNuevaLectura = (valor) => {
+  if (Array.isArray(valor)) return valor;
+
+  if (typeof valor === "string" && valor.trim()) {
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 };
 
 const usuarioInternoActual = (req) => {
@@ -143,6 +180,17 @@ const mapearFileAdmin = (archivo) => {
     descargas_count: json.descargas_count,
     correccion_solicitada: json.correccion_solicitada,
     observacion_correccion: json.observacion_correccion,
+    requiere_nueva_lectura: Boolean(json.requiere_nueva_lectura),
+    nueva_lectura_motivo: json.nueva_lectura_motivo,
+    nueva_lectura_instrucciones: json.nueva_lectura_instrucciones,
+    nueva_lectura_solicitada_at: json.nueva_lectura_solicitada_at,
+    nueva_lectura_solicitada_por: json.nueva_lectura_solicitada_por,
+    nombre_nueva_lectura: json.nombre_nueva_lectura,
+    nueva_lectura_subida_at: json.nueva_lectura_subida_at,
+    nueva_lectura_subida_por: json.nueva_lectura_subida_por,
+    nueva_lectura_historial: normalizarHistorialNuevaLectura(
+      json.nueva_lectura_historial
+    ),
     Cuenta: json.PortalCuenta ? mapearCuentaAdmin(json.PortalCuenta) : null,
     Usuario: json.PortalUsuario ? mapearUsuarioAdmin(json.PortalUsuario) : null,
     createdAt: json.createdAt,
@@ -700,6 +748,8 @@ const eliminarCuentaPrueba = async (req, res) => {
 
 const listarFilesAdmin = async (req, res) => {
   try {
+    await prepararColumnasNuevaLectura();
+
     const archivos = await PortalFileService.findAll({
       include: [
         { model: PortalCuenta, required: false },
@@ -732,6 +782,8 @@ const listarFilesAdmin = async (req, res) => {
 
 const obtenerFileAdmin = async (req, res) => {
   try {
+    await prepararColumnasNuevaLectura();
+
     const archivo = await PortalFileService.findByPk(req.params.id, {
       include: [
         { model: PortalCuenta, required: false },
@@ -769,6 +821,8 @@ const obtenerFileAdmin = async (req, res) => {
 
 const actualizarFileAdmin = async (req, res) => {
   try {
+    await prepararColumnasNuevaLectura();
+
     const archivo = await PortalFileService.findByPk(req.params.id);
 
     if (!archivo) {
@@ -817,8 +871,83 @@ const actualizarFileAdmin = async (req, res) => {
   }
 };
 
+const solicitarNuevaLecturaAdmin = async (req, res) => {
+  try {
+    await prepararColumnasNuevaLectura();
+
+    const archivo = await PortalFileService.findByPk(req.params.id);
+
+    if (!archivo) {
+      return res.status(404).json({
+        error: "Solicitud portal no encontrada",
+      });
+    }
+
+    const motivo = limpiarTexto(req.body.motivo_tecnico || req.body.motivo);
+    const instrucciones = limpiarTexto(
+      req.body.instrucciones_nueva_lectura || req.body.instrucciones
+    );
+
+    if (!motivo || !instrucciones) {
+      return res.status(400).json({
+        error: "Motivo tecnico e instrucciones de nueva lectura son obligatorios",
+      });
+    }
+
+    const ahora = new Date();
+    const solicitadoPor = usuarioInternoActual(req);
+    const historial = normalizarHistorialNuevaLectura(
+      archivo.nueva_lectura_historial
+    );
+    const evento = {
+      tipo: "NUEVA_LECTURA_SOLICITADA",
+      motivo,
+      instrucciones,
+      solicitado_por: solicitadoPor,
+      fecha: ahora.toISOString(),
+      archivo_original_actual: archivo.archivo_original || null,
+      nombre_original_actual: archivo.nombre_original || null,
+    };
+
+    await archivo.update({
+      estado: "REQUIERE_NUEVA_LECTURA",
+      requiere_nueva_lectura: true,
+      nueva_lectura_motivo: motivo,
+      nueva_lectura_instrucciones: instrucciones,
+      nueva_lectura_solicitada_at: ahora,
+      nueva_lectura_solicitada_por: solicitadoPor,
+      nueva_lectura_historial: [evento, ...historial],
+    });
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: archivo.cuentaId,
+      usuarioId: archivo.usuarioId,
+      tipo: "FILE_NUEVA_LECTURA_SOLICITADA",
+      resultado: "OK",
+      descripcion: "GMTCH solicito nueva lectura desde portal admin",
+      metadata: {
+        fileId: archivo.id,
+        motivo,
+        instrucciones,
+      },
+      creado_por: solicitadoPor,
+    });
+
+    res.json({
+      mensaje: "Requerimiento enviado al portal del master/slave.",
+      archivo: mapearFileAdmin(archivo),
+    });
+  } catch (error) {
+    console.error("ERROR SOLICITANDO NUEVA LECTURA PORTAL ADMIN:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 const subirModAdmin = async (req, res) => {
   try {
+    await prepararColumnasNuevaLectura();
+
     if (!req.file) {
       return res.status(400).json({
         error: "Debes adjuntar el MOD",
@@ -1037,6 +1166,7 @@ module.exports = {
   listarFilesAdmin,
   obtenerFileAdmin,
   actualizarFileAdmin,
+  solicitarNuevaLecturaAdmin,
   subirModAdmin,
   cargarCreditos,
   listarMovimientosCuenta,

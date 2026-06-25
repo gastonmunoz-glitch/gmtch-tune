@@ -9,6 +9,7 @@ const {
 const { registrarEventoPortal } = require("./portalAuthController");
 
 const ESTADOS_DESCARGABLES = ["MOD_LISTO", "CORREGIDO", "ENTREGADO"];
+let columnasNuevaLecturaPreparadas = false;
 
 const limpiarTexto = (valor) => {
   if (valor === null || valor === undefined) return "";
@@ -25,6 +26,41 @@ const crearError = (status, message) => {
   const error = new Error(message);
   error.status = status;
   return error;
+};
+
+const prepararColumnasNuevaLectura = async () => {
+  if (columnasNuevaLecturaPreparadas) return;
+
+  await sequelize.query(`
+    ALTER TABLE portal_file_services
+      ADD COLUMN IF NOT EXISTS requiere_nueva_lectura BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_motivo TEXT,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_instrucciones TEXT,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_solicitada_at TIMESTAMP WITH TIME ZONE,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_solicitada_por VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS archivo_nueva_lectura VARCHAR(500),
+      ADD COLUMN IF NOT EXISTS nombre_nueva_lectura VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS nueva_lectura_subida_at TIMESTAMP WITH TIME ZONE,
+      ADD COLUMN IF NOT EXISTS nueva_lectura_subida_por VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS nueva_lectura_historial JSONB DEFAULT '[]'::jsonb
+  `);
+
+  columnasNuevaLecturaPreparadas = true;
+};
+
+const normalizarHistorialNuevaLectura = (valor) => {
+  if (Array.isArray(valor)) return valor;
+
+  if (typeof valor === "string" && valor.trim()) {
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 };
 
 const archivoExiste = (ruta) => {
@@ -68,6 +104,17 @@ const mapearArchivoPortal = (archivo, cuenta) => ({
   descargas_count: archivo.descargas_count,
   correccion_solicitada: archivo.correccion_solicitada,
   observacion_correccion: archivo.observacion_correccion,
+  requiere_nueva_lectura: Boolean(archivo.requiere_nueva_lectura),
+  nueva_lectura_motivo: archivo.nueva_lectura_motivo,
+  nueva_lectura_instrucciones: archivo.nueva_lectura_instrucciones,
+  nueva_lectura_solicitada_at: archivo.nueva_lectura_solicitada_at,
+  nueva_lectura_solicitada_por: archivo.nueva_lectura_solicitada_por,
+  nombre_nueva_lectura: archivo.nombre_nueva_lectura,
+  nueva_lectura_subida_at: archivo.nueva_lectura_subida_at,
+  nueva_lectura_subida_por: archivo.nueva_lectura_subida_por,
+  nueva_lectura_historial: normalizarHistorialNuevaLectura(
+    archivo.nueva_lectura_historial
+  ),
   createdAt: archivo.createdAt,
   updatedAt: archivo.updatedAt,
 });
@@ -104,6 +151,8 @@ const obtenerCreditos = async (req, res) => {
 
 const obtenerPortalFiles = async (req, res) => {
   try {
+    await prepararColumnasNuevaLectura();
+
     const archivos = await PortalFileService.findAll({
       where: {
         cuentaId: req.portal.cuenta.id,
@@ -120,6 +169,8 @@ const obtenerPortalFiles = async (req, res) => {
 
 const crearPortalFile = async (req, res) => {
   try {
+    await prepararColumnasNuevaLectura();
+
     if (!req.file) {
       return res.status(400).json({
         error: "Debes adjuntar el archivo original",
@@ -177,6 +228,8 @@ const crearPortalFile = async (req, res) => {
 
 const obtenerPortalFilePorId = async (req, res) => {
   try {
+    await prepararColumnasNuevaLectura();
+
     const archivo = await PortalFileService.findOne({
       where: {
         id: req.params.id,
@@ -199,6 +252,8 @@ const obtenerPortalFilePorId = async (req, res) => {
 
 const solicitarCorreccionPortal = async (req, res) => {
   try {
+    await prepararColumnasNuevaLectura();
+
     const archivo = await PortalFileService.findOne({
       where: {
         id: req.params.id,
@@ -241,8 +296,95 @@ const solicitarCorreccionPortal = async (req, res) => {
   }
 };
 
+const subirNuevaLecturaPortal = async (req, res) => {
+  try {
+    await prepararColumnasNuevaLectura();
+
+    if (!req.file) {
+      return res.status(400).json({
+        error: "Debes adjuntar el archivo de nueva lectura",
+      });
+    }
+
+    const archivo = await PortalFileService.findOne({
+      where: {
+        id: req.params.id,
+        cuentaId: req.portal.cuenta.id,
+      },
+    });
+
+    if (!archivo) {
+      return res.status(404).json({
+        error: "Archivo no encontrado",
+      });
+    }
+
+    if (String(archivo.estado || "").toUpperCase() !== "REQUIERE_NUEVA_LECTURA") {
+      return res.status(400).json({
+        error: "Esta solicitud no tiene una nueva lectura pendiente",
+      });
+    }
+
+    const ahora = new Date();
+    const historial = normalizarHistorialNuevaLectura(
+      archivo.nueva_lectura_historial
+    );
+    const evento = {
+      tipo: "NUEVA_LECTURA_SUBIDA",
+      archivo_anterior: archivo.archivo_original || null,
+      nombre_anterior: archivo.nombre_original || null,
+      archivo: req.file.path,
+      nombre: req.file.originalname || req.file.filename,
+      usuario: req.portal.usuario.email,
+      fecha: ahora.toISOString(),
+      motivo: archivo.nueva_lectura_motivo || "",
+      instrucciones: archivo.nueva_lectura_instrucciones || "",
+    };
+
+    await archivo.update({
+      estado: "EN_REVISION",
+      requiere_nueva_lectura: false,
+      archivo_nueva_lectura: req.file.path,
+      nombre_nueva_lectura: req.file.originalname || req.file.filename,
+      nueva_lectura_subida_at: ahora,
+      nueva_lectura_subida_por: req.portal.usuario.email,
+      nueva_lectura_historial: [evento, ...historial],
+      archivo_original: req.file.path,
+      nombre_original: req.file.originalname || req.file.filename,
+      archivo_modificado: null,
+      nombre_modificado: null,
+      fecha_mod_listo: null,
+      correccion_solicitada: false,
+    });
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: req.portal.cuenta.id,
+      usuarioId: req.portal.usuario.id,
+      tipo: "FILE_NUEVA_LECTURA_SUBIDA",
+      resultado: "OK",
+      descripcion: "Usuario externo subio nueva lectura solicitada por GMTCH",
+      metadata: {
+        fileId: archivo.id,
+        nombre_nueva_lectura: archivo.nombre_nueva_lectura,
+      },
+      creado_por: req.portal.usuario.email,
+    });
+
+    res.json({
+      mensaje: "Nueva lectura recibida correctamente. GMTCH la revisara antes de continuar.",
+      archivo: mapearArchivoPortal(archivo, req.portal.cuenta),
+    });
+  } catch (error) {
+    console.error("ERROR SUBIENDO NUEVA LECTURA PORTAL:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 const descargarModPortal = async (req, res) => {
   try {
+    await prepararColumnasNuevaLectura();
+
     const archivo = await PortalFileService.findOne({
       where: {
         id: req.params.id,
@@ -410,6 +552,7 @@ module.exports = {
   crearPortalFile,
   obtenerPortalFilePorId,
   solicitarCorreccionPortal,
+  subirNuevaLecturaPortal,
   descargarModPortal,
   mapearArchivoPortal,
 };

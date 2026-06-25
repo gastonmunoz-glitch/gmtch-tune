@@ -111,6 +111,12 @@ export const portalSolicitarCorreccion = (id, payload) =>
     body: payload,
   });
 
+export const portalSubirNuevaLectura = (id, formData) =>
+  requestPortal(`/portal/files/${id}/nueva-lectura`, {
+    method: "POST",
+    body: formData,
+  });
+
 export const portalDownloadMod = (id) =>
   requestPortal(`/portal/files/${id}/descargar-mod`, {
     expectBlob: true,
@@ -145,6 +151,13 @@ export const portalAdminUploadMod = (id, formData) =>
   requestPortal(`/portal/admin/files/${id}/mod`, {
     method: "POST",
     body: formData,
+    tokenType: "internal",
+  });
+
+export const portalAdminSolicitarNuevaLectura = (id, payload) =>
+  requestPortal(`/portal/admin/files/${id}/solicitar-nueva-lectura`, {
+    method: "POST",
+    body: payload,
     tokenType: "internal",
   });
 

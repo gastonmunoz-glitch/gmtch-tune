@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { portalGetCreditos, portalListFiles, portalMe } from "../services/portalApi";
 
-const estadosActivos = ["RECIBIDO", "EN_REVISION", "EN_PROCESO", "CORRECCION_SOLICITADA"];
+const estadosActivos = [
+  "RECIBIDO",
+  "EN_REVISION",
+  "EN_PROCESO",
+  "CORRECCION_SOLICITADA",
+  "REQUIERE_NUEVA_LECTURA",
+];
 
 const numero = (valor) => {
   const n = Number(valor);
@@ -108,8 +114,13 @@ function PortalDashboardPage() {
         archivo.correccion_solicitada ||
         String(archivo.estado || "").toUpperCase() === "CORRECCION_SOLICITADA"
     ).length;
+    const nuevasLecturas = archivos.filter(
+      (archivo) =>
+        archivo.requiere_nueva_lectura ||
+        String(archivo.estado || "").toUpperCase() === "REQUIERE_NUEVA_LECTURA"
+    ).length;
 
-    return { activos, modListos, correcciones };
+    return { activos, modListos, correcciones, nuevasLecturas };
   }, [archivos]);
 
   return (
@@ -146,11 +157,12 @@ function PortalDashboardPage() {
           </div>
         )}
 
-        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           <StatPortal label="Saldo de créditos" value={saldo} color="border-blue-500" />
           <StatPortal label="Archivos activos" value={stats.activos} color="border-yellow-500" />
           <StatPortal label="MOD listos" value={stats.modListos} color="border-green-500" />
           <StatPortal label="Correcciones pendientes" value={stats.correcciones} color="border-red-500" />
+          <StatPortal label="Nueva lectura requerida" value={stats.nuevasLecturas} color="border-yellow-500" />
         </div>
 
         <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">

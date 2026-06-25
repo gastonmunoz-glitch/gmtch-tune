@@ -9,6 +9,7 @@ const {
   crearPortalFile,
   obtenerPortalFilePorId,
   solicitarCorreccionPortal,
+  subirNuevaLecturaPortal,
   descargarModPortal,
 } = require("../controllers/portalFileController");
 
@@ -47,6 +48,7 @@ router.get("/", obtenerPortalFiles);
 router.post("/", upload.single("archivo"), crearPortalFile);
 router.get("/:id/descargar-mod", descargarModPortal);
 router.post("/:id/correccion", solicitarCorreccionPortal);
+router.post("/:id/nueva-lectura", upload.single("archivo"), subirNuevaLecturaPortal);
 router.get("/:id", obtenerPortalFilePorId);
 
 creditosRouter.get("/", obtenerCreditos);

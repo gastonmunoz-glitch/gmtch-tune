@@ -16,6 +16,7 @@ const {
   listarFilesAdmin,
   obtenerFileAdmin,
   actualizarFileAdmin,
+  solicitarNuevaLecturaAdmin,
   subirModAdmin,
   cargarCreditos,
   listarMovimientosCuenta,
@@ -74,6 +75,7 @@ router.post("/usuarios/:id/reset-password", resetPasswordUsuario);
 router.get("/files", listarFilesAdmin);
 router.get("/files/:id", obtenerFileAdmin);
 router.patch("/files/:id", actualizarFileAdmin);
+router.post("/files/:id/solicitar-nueva-lectura", solicitarNuevaLecturaAdmin);
 router.post("/files/:id/mod", upload.single("archivo"), subirModAdmin);
 
 module.exports = router;

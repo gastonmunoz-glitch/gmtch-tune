@@ -125,6 +125,58 @@ const PortalFileService = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: true,
     },
+
+    requiere_nueva_lectura: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    nueva_lectura_motivo: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    nueva_lectura_instrucciones: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    nueva_lectura_solicitada_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    nueva_lectura_solicitada_por: {
+      type: DataTypes.STRING(160),
+      allowNull: true,
+    },
+
+    archivo_nueva_lectura: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+    },
+
+    nombre_nueva_lectura: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+
+    nueva_lectura_subida_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    nueva_lectura_subida_por: {
+      type: DataTypes.STRING(160),
+      allowNull: true,
+    },
+
+    nueva_lectura_historial: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
   },
   {
     tableName: "portal_file_services",

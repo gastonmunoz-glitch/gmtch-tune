@@ -5,9 +5,11 @@ import {
   portalGetFile,
   portalListFiles,
   portalSolicitarCorreccion,
+  portalSubirNuevaLectura,
 } from "../services/portalApi";
 
 const estadoLabels = {
+  REQUIERE_NUEVA_LECTURA: "Requiere nueva lectura",
   RECIBIDO: "Recibido",
   EN_REVISION: "En revisión",
   EN_PROCESO: "En proceso",
@@ -37,6 +39,7 @@ function PortalMisArchivosPage() {
   const [archivos, setArchivos] = useState([]);
   const [detalle, setDetalle] = useState(null);
   const [correcciones, setCorrecciones] = useState({});
+  const [nuevasLecturas, setNuevasLecturas] = useState({});
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [cargando, setCargando] = useState(true);
@@ -108,6 +111,29 @@ function PortalMisArchivosPage() {
     }
   };
 
+  const subirNuevaLectura = async (archivo) => {
+    const file = nuevasLecturas[archivo.id];
+
+    if (!file) {
+      setError("Debes adjuntar el archivo de nueva lectura solicitado por GMTCH.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("archivo", file);
+
+    try {
+      setError("");
+      setMensaje("");
+      await portalSubirNuevaLectura(archivo.id, formData);
+      setNuevasLecturas((actual) => ({ ...actual, [archivo.id]: null }));
+      setMensaje("Nueva lectura enviada correctamente. GMTCH la revisara antes de continuar.");
+      await cargar();
+    } catch (err) {
+      setError(err.message || "No se pudo subir la nueva lectura.");
+    }
+  };
+
   return (
     <main className="min-h-screen bg-black text-white">
       <header className="border-b border-slate-800 px-5 py-5">
@@ -153,7 +179,10 @@ function PortalMisArchivosPage() {
         <div className="mt-8 space-y-4">
           {archivos.map((archivo) => {
             const estado = String(archivo.estado || "").toUpperCase();
-            const puedeDescargar = archivo.puede_descargar || archivo.mod_listo;
+            const requiereNuevaLectura =
+              archivo.requiere_nueva_lectura || estado === "REQUIERE_NUEVA_LECTURA";
+            const puedeDescargar =
+              !requiereNuevaLectura && (archivo.puede_descargar || archivo.mod_listo);
 
             return (
               <article key={archivo.id} className="border border-slate-700 bg-slate-950 p-5">
@@ -166,6 +195,11 @@ function PortalMisArchivosPage() {
                       <span className="border border-slate-600 px-3 py-1 text-[10px] font-black uppercase text-slate-300">
                         {estadoLabels[estado] || estado || "Sin estado"}
                       </span>
+                      {requiereNuevaLectura && (
+                        <span className="border border-yellow-500 bg-yellow-500/10 px-3 py-1 text-[10px] font-black uppercase text-yellow-200">
+                          GMTCH solicita nueva lectura
+                        </span>
+                      )}
                       {archivo.correccion_solicitada && (
                         <span className="border border-red-500 px-3 py-1 text-[10px] font-black uppercase text-red-300">
                           Corrección solicitada
@@ -188,6 +222,41 @@ function PortalMisArchivosPage() {
                   </div>
 
                   <div className="space-y-3">
+                    {requiereNuevaLectura && (
+                      <div className="border border-yellow-500 bg-yellow-950/30 p-4">
+                        <p className="text-sm font-black uppercase text-yellow-200">
+                          GMTCH solicita nueva lectura
+                        </p>
+                        <p className="mt-2 text-sm font-bold text-yellow-100">
+                          Tu archivo requiere una nueva lectura antes de continuar.
+                        </p>
+                        <p className="mt-3 text-xs font-bold text-slate-200">
+                          Motivo tecnico: {archivo.nueva_lectura_motivo || "No registrado"}
+                        </p>
+                        <p className="mt-2 text-xs font-bold text-slate-200">
+                          Instrucciones: {archivo.nueva_lectura_instrucciones || "No registradas"}
+                        </p>
+                        <div className="mt-4 flex flex-col gap-2">
+                          <input
+                            type="file"
+                            className="w-full border border-slate-700 bg-black px-3 py-2 text-xs font-bold text-white outline-none focus:border-blue-500"
+                            onChange={(event) =>
+                              setNuevasLecturas((actual) => ({
+                                ...actual,
+                                [archivo.id]: event.target.files?.[0] || null,
+                              }))
+                            }
+                          />
+                          <button
+                            type="button"
+                            onClick={() => subirNuevaLectura(archivo)}
+                            className="bg-yellow-500 px-4 py-2 text-xs font-black uppercase text-black hover:bg-white"
+                          >
+                            Subir nueva lectura
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -273,6 +342,20 @@ function PortalMisArchivosPage() {
                 {detalle.observaciones_cliente}
               </p>
             )}
+            {(detalle.requiere_nueva_lectura ||
+              String(detalle.estado || "").toUpperCase() === "REQUIERE_NUEVA_LECTURA") && (
+              <div className="mt-5 border border-yellow-500 bg-yellow-950/30 p-4 text-sm font-bold text-yellow-100">
+                <p className="font-black uppercase text-yellow-200">
+                  GMTCH solicita nueva lectura
+                </p>
+                <p className="mt-2">
+                  Motivo tecnico: {detalle.nueva_lectura_motivo || "No registrado"}
+                </p>
+                <p className="mt-2">
+                  Instrucciones: {detalle.nueva_lectura_instrucciones || "No registradas"}
+                </p>
+              </div>
+            )}
           </aside>
         )}
       </section>
@@ -281,4 +364,3 @@ function PortalMisArchivosPage() {
 }
 
 export default PortalMisArchivosPage;
-

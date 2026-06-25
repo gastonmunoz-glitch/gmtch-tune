@@ -5,6 +5,7 @@ import {
   portalAdminListCuentas,
   portalAdminListFiles,
   portalAdminMovimientos,
+  portalAdminSolicitarNuevaLectura,
   portalAdminUpdateFile,
   portalAdminUploadMod,
 } from "../services/portalApi";
@@ -16,6 +17,7 @@ const estados = [
   "EN_PROCESO",
   "MOD_LISTO",
   "CORRECCION_SOLICITADA",
+  "REQUIERE_NUEVA_LECTURA",
   "CORREGIDO",
   "ENTREGADO",
   "RECHAZADO",
@@ -43,6 +45,7 @@ function PortalAdminPage() {
   const [cargando, setCargando] = useState(true);
   const [ediciones, setEdiciones] = useState({});
   const [mods, setMods] = useState({});
+  const [nuevasLecturas, setNuevasLecturas] = useState({});
   const [cuentaMovimiento, setCuentaMovimiento] = useState("");
   const [nuevoUsuarioPorCuenta, setNuevoUsuarioPorCuenta] = useState({});
   const [resetPasswordPorUsuario, setResetPasswordPorUsuario] = useState({});
@@ -424,6 +427,47 @@ function PortalAdminPage() {
       await cargar();
     } catch (err) {
       setError(err.message || "No se pudo subir el MOD.");
+    }
+  };
+
+  const editarNuevaLectura = (id, campo, valor) => {
+    setNuevasLecturas((actual) => ({
+      ...actual,
+      [id]: {
+        ...(actual[id] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const solicitarNuevaLectura = async (archivo) => {
+    const form = nuevasLecturas[archivo.id] || {};
+    const motivo = (form.motivo_tecnico || "").trim();
+    const instrucciones = (form.instrucciones_nueva_lectura || "").trim();
+
+    if (!motivo || !instrucciones) {
+      setError("Debes ingresar motivo tecnico e instrucciones de nueva lectura.");
+      return;
+    }
+
+    try {
+      setError("");
+      setMensaje("");
+      await portalAdminSolicitarNuevaLectura(archivo.id, {
+        motivo_tecnico: motivo,
+        instrucciones_nueva_lectura: instrucciones,
+      });
+      setMensaje("Requerimiento enviado al portal del master/slave.");
+      setNuevasLecturas((actual) => ({
+        ...actual,
+        [archivo.id]: {
+          motivo_tecnico: "",
+          instrucciones_nueva_lectura: "",
+        },
+      }));
+      await cargar();
+    } catch (err) {
+      setError(err.message || "No se pudo solicitar la nueva lectura.");
     }
   };
 
@@ -838,6 +882,28 @@ function PortalAdminPage() {
                     )}
                   </div>
 
+                  {archivo.requiere_nueva_lectura && (
+                    <div className="mt-3 border-2 border-yellow-500 bg-yellow-50 p-3 text-xs font-bold text-yellow-900">
+                      <p className="font-black uppercase">
+                        Nueva lectura solicitada al portal
+                      </p>
+                      <p className="mt-1">
+                        Motivo: {archivo.nueva_lectura_motivo || "No registrado"}
+                      </p>
+                      <p className="mt-1">
+                        Instrucciones: {archivo.nueva_lectura_instrucciones || "No registradas"}
+                      </p>
+                      <p className="mt-1 text-[10px] uppercase">
+                        Por: {archivo.nueva_lectura_solicitada_por || "GMTCH"} / {fecha(archivo.nueva_lectura_solicitada_at)}
+                      </p>
+                    </div>
+                  )}
+                  {archivo.nombre_nueva_lectura && (
+                    <p className="mt-2 text-xs font-bold text-blue-700">
+                      Ultima nueva lectura: {archivo.nombre_nueva_lectura} / {fecha(archivo.nueva_lectura_subida_at)}
+                    </p>
+                  )}
+
                   <div className="space-y-3">
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                       <select className={inputClass} value={edit.estado || archivo.estado || "RECIBIDO"} onChange={(e) => editarFile(archivo.id, "estado", e.target.value)}>
@@ -851,6 +917,33 @@ function PortalAdminPage() {
                       </button>
                     </div>
                     <textarea className={`${inputClass} min-h-[80px]`} placeholder="Observaciones internas" value={edit.observaciones_internas ?? archivo.observaciones_internas ?? ""} onChange={(e) => editarFile(archivo.id, "observaciones_internas", e.target.value)} />
+                    <details className="border-2 border-yellow-500 bg-yellow-50 p-3">
+                      <summary className="cursor-pointer text-[10px] font-black uppercase text-yellow-900">
+                        Solicitar nueva lectura
+                      </summary>
+                      <p className="mt-2 text-xs font-bold text-yellow-900">
+                        Usalo cuando la lectura original no sea tecnicamente valida para continuar.
+                      </p>
+                      <textarea
+                        className={`${inputClass} mt-3 min-h-[70px]`}
+                        placeholder="Motivo tecnico"
+                        value={nuevasLecturas[archivo.id]?.motivo_tecnico || ""}
+                        onChange={(e) => editarNuevaLectura(archivo.id, "motivo_tecnico", e.target.value)}
+                      />
+                      <textarea
+                        className={`${inputClass} mt-3 min-h-[90px]`}
+                        placeholder="Instrucciones. Ej: Lectura EEPROM por KESS3 no valida. Requiere lectura in-circuit con programador EEPROM."
+                        value={nuevasLecturas[archivo.id]?.instrucciones_nueva_lectura || ""}
+                        onChange={(e) => editarNuevaLectura(archivo.id, "instrucciones_nueva_lectura", e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => solicitarNuevaLectura(archivo)}
+                        className="mt-3 border-2 border-black bg-black px-4 py-2 text-xs font-black uppercase text-white hover:bg-yellow-500 hover:text-black"
+                      >
+                        Solicitar nueva lectura
+                      </button>
+                    </details>
                     <div className="flex flex-col gap-2 md:flex-row">
                       <input type="file" className={inputClass} onChange={(e) => setMods((actual) => ({ ...actual, [archivo.id]: e.target.files?.[0] || null }))} />
                       <button type="button" onClick={() => subirMod(archivo)} className="bg-blue-600 px-4 py-2 text-xs font-black uppercase text-white hover:bg-black">
