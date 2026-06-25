@@ -5,6 +5,7 @@ function LoginPage({ setAuth, setUsuario }) {
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
   const [cargando, setCargando] = useState(false);
+  const [logoOk, setLogoOk] = useState(true);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -55,9 +56,19 @@ function LoginPage({ setAuth, setUsuario }) {
         className="relative z-10 bg-[#141414] p-12 border-t-4 border-blue-600 shadow-[0_20px_50px_rgba(0,0,0,1)] w-full max-w-md space-y-8 rounded-b-xl"
       >
         <div className="text-center">
-          <h1 className="text-5xl font-black italic tracking-tighter text-white">
-            GMTCH<span className="text-blue-600">TUNE</span>
-          </h1>
+          {logoOk ? (
+            <img
+              src="/brand/gmtch-logo.png"
+              alt="GMTCH Tune"
+              className="mx-auto h-auto w-full max-w-[280px] object-contain"
+              onError={() => setLogoOk(false)}
+            />
+          ) : (
+            <h1 className="text-5xl font-black italic tracking-tighter text-white">
+              GMTCH<span className="text-blue-600">TUNE</span>
+            </h1>
+          )}
+
           <p className="text-[9px] font-black text-blue-400 uppercase tracking-[0.4em] mt-2">
             Industrial Performance Software
           </p>
@@ -98,7 +109,7 @@ function LoginPage({ setAuth, setUsuario }) {
           disabled={cargando}
           className="w-full bg-blue-600 text-white py-5 font-black uppercase text-sm tracking-widest hover:bg-white hover:text-black transition-all duration-300 shadow-[0_0_20px_rgba(59,130,246,0.4)] active:scale-95 disabled:bg-gray-700"
         >
-          {cargando ? "VALIDANDO..." : "EJECUTAR LOGIN"}
+          {cargando ? "VALIDANDO..." : "INICIAR SESIÓN"}
         </button>
 
         <div className="pt-6 border-t border-[#222] text-center">

@@ -12,6 +12,7 @@ import DiagnosticoPage from "./pages/DiagnosticoPage";
 import RecepcionRapidaPage from "./pages/RecepcionRapidaPage";
 import LoginPage from "./pages/LoginPage";
 import UsuariosPage from "./pages/UsuariosPage";
+import LandingPage from "./pages/LandingPage";
 
 const PERMISOS_RUTAS = {
   "/": [
@@ -150,6 +151,10 @@ function App() {
   const [notificaciones, setNotificaciones] = useState([]);
   const [notificacionesNoLeidas, setNotificacionesNoLeidas] = useState(0);
   const [notificacionesError, setNotificacionesError] = useState("");
+  const [logoOk, setLogoOk] = useState(true);
+  const rutaActual = window.location.pathname;
+  const rutaLandingPublica = rutaActual === "/web" || rutaActual === "/inicio";
+  const rutaLoginPublica = rutaActual === "/login";
 
   const cargarNotificaciones = async () => {
     if (!localStorage.getItem("token")) return;
@@ -293,15 +298,38 @@ function App() {
 
   return (
     <Router>
-      {!auth ? (
+      {rutaLandingPublica ? (
+        <Routes>
+          <Route path="/web" element={<LandingPage />} />
+          <Route path="/inicio" element={<LandingPage />} />
+          <Route path="*" element={<Navigate to="/web" />} />
+        </Routes>
+      ) : rutaLoginPublica && !auth ? (
+        <Routes>
+          <Route
+            path="/login"
+            element={<LoginPage setAuth={setAuth} setUsuario={setUsuario} />}
+          />
+          <Route path="*" element={<Navigate to="/login" />} />
+        </Routes>
+      ) : !auth ? (
         <LoginPage setAuth={setAuth} setUsuario={setUsuario} />
       ) : (
         <div className="min-h-screen bg-slate-200">
           <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-black text-white h-16 px-4 flex items-center justify-between shadow-xl">
             <div>
-              <h1 className="text-lg font-black italic tracking-tighter text-blue-500">
-                GMTCH TUNE
-              </h1>
+              {logoOk ? (
+                <img
+                  src="/brand/gmtch-logo.png"
+                  alt="GMTCH Tune"
+                  className="h-8 w-auto max-w-[150px] object-contain"
+                  onError={() => setLogoOk(false)}
+                />
+              ) : (
+                <h1 className="text-lg font-black italic tracking-tighter text-blue-500">
+                  GMTCH TUNE
+                </h1>
+              )}
 
               <p className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
                 {usuario?.rol || "ROLE ACCESS"}
@@ -334,9 +362,18 @@ function App() {
             >
               <div className="p-8 border-b border-gray-800 flex items-start justify-between">
                 <div>
-                  <h1 className="text-2xl font-black italic tracking-tighter text-blue-500">
-                    GMTCH TUNE
-                  </h1>
+                  {logoOk ? (
+                    <img
+                      src="/brand/gmtch-logo.png"
+                      alt="GMTCH Tune"
+                      className="h-12 w-auto max-w-[180px] object-contain"
+                      onError={() => setLogoOk(false)}
+                    />
+                  ) : (
+                    <h1 className="text-2xl font-black italic tracking-tighter text-blue-500">
+                      GMTCH TUNE
+                    </h1>
+                  )}
 
                   <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">
                     Role Access System
