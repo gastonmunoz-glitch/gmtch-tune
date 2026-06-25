@@ -170,6 +170,41 @@ const limpiarSesion = () => {
   localStorage.removeItem("userId");
 };
 
+const SOUND_ALERTS_KEY = "gmtch_sound_alerts_enabled";
+
+const obtenerIdNotificacion = (notificacion) =>
+  String(
+    notificacion?.id ||
+      `${notificacion?.createdAt || ""}-${notificacion?.titulo || ""}-${notificacion?.mensaje || ""}`
+  );
+
+const esNotificacionNoLeida = (notificacion) => notificacion && !notificacion.leida;
+
+const reproducirSonidoNotificacion = () => {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+
+    const contexto = new AudioContext();
+    const oscilador = contexto.createOscillator();
+    const ganancia = contexto.createGain();
+
+    oscilador.type = "sine";
+    oscilador.frequency.setValueAtTime(880, contexto.currentTime);
+    oscilador.frequency.setValueAtTime(660, contexto.currentTime + 0.12);
+    ganancia.gain.setValueAtTime(0.0001, contexto.currentTime);
+    ganancia.gain.exponentialRampToValueAtTime(0.16, contexto.currentTime + 0.02);
+    ganancia.gain.exponentialRampToValueAtTime(0.0001, contexto.currentTime + 0.32);
+
+    oscilador.connect(ganancia);
+    ganancia.connect(contexto.destination);
+    oscilador.start();
+    oscilador.stop(contexto.currentTime + 0.34);
+  } catch {
+    // El navegador puede bloquear audio sin gesto del usuario. No debe romper la app.
+  }
+};
+
 function App() {
   const [usuario, setUsuario] = useState(() => leerUsuarioLocal());
   const [auth, setAuth] = useState(localStorage.getItem("token") ? true : false);
@@ -178,7 +213,14 @@ function App() {
   const [notificaciones, setNotificaciones] = useState([]);
   const [notificacionesNoLeidas, setNotificacionesNoLeidas] = useState(0);
   const [notificacionesError, setNotificacionesError] = useState("");
+  const [alertaNotificacion, setAlertaNotificacion] = useState(null);
+  const [sonidoNotificacionesActivo, setSonidoNotificacionesActivo] = useState(
+    () => localStorage.getItem(SOUND_ALERTS_KEY) === "true"
+  );
   const [logoOk, setLogoOk] = useState(true);
+  const notificacionesInicializadasRef = useRef(false);
+  const notificacionesNoLeidasRef = useRef(new Set());
+  const alertaNotificacionTimerRef = useRef(null);
   const rutaActual = window.location.pathname;
   const rutaLandingPublica = rutaActual === "/web" || rutaActual === "/inicio";
   const rutaLoginPublica = rutaActual === "/login";
@@ -186,6 +228,20 @@ function App() {
   const rutaPortalExterno =
     rutaActual === "/portal" ||
     (rutaActual.startsWith("/portal/") && rutaActual !== "/portal/login");
+
+  const mostrarAlertaNotificacion = (notificacion) => {
+    if (!notificacion) return;
+
+    setAlertaNotificacion(notificacion);
+
+    if (alertaNotificacionTimerRef.current) {
+      window.clearTimeout(alertaNotificacionTimerRef.current);
+    }
+
+    alertaNotificacionTimerRef.current = window.setTimeout(() => {
+      setAlertaNotificacion(null);
+    }, 8000);
+  };
 
   const cargarNotificaciones = async () => {
     if (!localStorage.getItem("token")) return;
@@ -200,8 +256,30 @@ function App() {
           ? data.notificaciones
           : [];
 
+      const noLeidas = items.filter(esNotificacionNoLeida);
+      const idsNoLeidas = new Set(noLeidas.map(obtenerIdNotificacion));
+
+      if (notificacionesInicializadasRef.current) {
+        const nuevas = noLeidas.filter(
+          (notificacion) =>
+            !notificacionesNoLeidasRef.current.has(obtenerIdNotificacion(notificacion))
+        );
+
+        if (nuevas.length > 0) {
+          const masReciente = nuevas[0];
+          mostrarAlertaNotificacion(masReciente);
+
+          if (sonidoNotificacionesActivo) {
+            reproducirSonidoNotificacion();
+          }
+        }
+      } else {
+        notificacionesInicializadasRef.current = true;
+      }
+
+      notificacionesNoLeidasRef.current = idsNoLeidas;
       setNotificaciones(items);
-      setNotificacionesNoLeidas(Number(data.noLeidas || 0));
+      setNotificacionesNoLeidas(Number(data.noLeidas ?? noLeidas.length));
     } catch (err) {
       console.error("Error cargando notificaciones:", err.response?.data || err.message);
       setNotificaciones([]);
@@ -263,6 +341,9 @@ function App() {
     setNotificacionesOpen(false);
     setNotificaciones([]);
     setNotificacionesNoLeidas(0);
+    setAlertaNotificacion(null);
+    notificacionesInicializadasRef.current = false;
+    notificacionesNoLeidasRef.current = new Set();
   };
 
   const closeSidebar = () => {
@@ -272,6 +353,9 @@ function App() {
   const marcarNotificacionLeida = async (id) => {
     try {
       await api.patch(`/notificaciones/${id}/leida`);
+      if (String(alertaNotificacion?.id) === String(id)) {
+        setAlertaNotificacion(null);
+      }
       await cargarNotificaciones();
     } catch (err) {
       console.error("Error marcando notificacion:", err.response?.data || err.message);
@@ -282,6 +366,7 @@ function App() {
   const marcarTodasNotificacionesLeidas = async () => {
     try {
       await api.patch("/notificaciones/marcar-todas-leidas");
+      setAlertaNotificacion(null);
       await cargarNotificaciones();
     } catch (err) {
       console.error("Error marcando notificaciones:", err.response?.data || err.message);
@@ -289,11 +374,33 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    if (auth) {
-      cargarNotificaciones();
+  const alternarSonidoNotificaciones = () => {
+    const siguiente = !sonidoNotificacionesActivo;
+    setSonidoNotificacionesActivo(siguiente);
+    localStorage.setItem(SOUND_ALERTS_KEY, String(siguiente));
+
+    if (siguiente) {
+      reproducirSonidoNotificacion();
     }
-  }, [auth, usuario?.rol, usuario?.username]);
+  };
+
+  useEffect(() => {
+    if (!auth) return undefined;
+
+    cargarNotificaciones();
+
+    const intervaloNotificaciones = window.setInterval(cargarNotificaciones, 30000);
+    return () => window.clearInterval(intervaloNotificaciones);
+  }, [auth, usuario?.rol, usuario?.username, sonidoNotificacionesActivo]);
+
+  useEffect(
+    () => () => {
+      if (alertaNotificacionTimerRef.current) {
+        window.clearTimeout(alertaNotificacionTimerRef.current);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!auth || !usuario?.id) return undefined;
@@ -501,9 +608,21 @@ function App() {
                 notificaciones={notificaciones}
                 noLeidas={notificacionesNoLeidas}
                 error={notificacionesError}
+                sonidoActivo={sonidoNotificacionesActivo}
                 onActualizar={cargarNotificaciones}
                 onMarcarLeida={marcarNotificacionLeida}
                 onMarcarTodas={marcarTodasNotificacionesLeidas}
+                onAlternarSonido={alternarSonidoNotificaciones}
+              />
+
+              <AlertaNotificacionFlotante
+                notificacion={alertaNotificacion}
+                onCerrar={() => setAlertaNotificacion(null)}
+                onVer={() => {
+                  setNotificacionesOpen(true);
+                  setAlertaNotificacion(null);
+                }}
+                onMarcarLeida={marcarNotificacionLeida}
               />
 
               <Routes>
@@ -678,16 +797,18 @@ const NotificacionesInternas = ({
   notificaciones,
   noLeidas,
   error,
+  sonidoActivo,
   onActualizar,
   onMarcarLeida,
   onMarcarTodas,
+  onAlternarSonido,
 }) => {
   const ultimas = notificaciones.slice(0, 5);
 
   return (
     <section className="mb-6 flex justify-end">
       <div className="relative w-full max-w-xl">
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-col items-stretch justify-end gap-2 sm:flex-row sm:items-center">
           <button
             type="button"
             onClick={onActualizar}
@@ -698,17 +819,33 @@ const NotificacionesInternas = ({
 
           <button
             type="button"
+            onClick={onAlternarSonido}
+            className={`border-2 border-black px-3 py-2 rounded-lg text-[10px] font-black uppercase transition ${
+              sonidoActivo
+                ? "bg-green-600 text-white hover:bg-green-700"
+                : "bg-yellow-100 text-black hover:bg-yellow-200"
+            }`}
+          >
+            {sonidoActivo ? "Sonido activo" : "Activar sonido"}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setAbiertas((actual) => !actual)}
             className="relative bg-black text-white border-2 border-black px-4 py-2 rounded-lg font-black uppercase text-xs hover:bg-blue-700 transition"
           >
             Campana
             {noLeidas > 0 && (
-              <span className="absolute -top-2 -right-2 bg-red-600 text-white border-2 border-black rounded-full min-w-[26px] h-[26px] px-1 flex items-center justify-center text-[10px] font-black">
+              <span className="absolute -top-3 -right-3 bg-red-700 text-white border-2 border-white rounded-full min-w-[30px] h-[30px] px-2 flex items-center justify-center text-[11px] font-black shadow-lg ring-4 ring-red-200 animate-pulse">
                 {noLeidas}
               </span>
             )}
           </button>
         </div>
+
+        <p className="mt-2 text-right text-[10px] font-black uppercase text-gray-500">
+          Activa las alertas sonoras para no perder tareas asignadas.
+        </p>
 
         {abiertas && (
           <div className="absolute right-0 mt-3 z-30 w-full bg-white border-4 border-black rounded-2xl shadow-[10px_10px_0px_0px_rgba(0,0,0,1)] overflow-hidden">
@@ -797,6 +934,72 @@ const NotificacionesInternas = ({
         )}
       </div>
     </section>
+  );
+};
+
+const AlertaNotificacionFlotante = ({
+  notificacion,
+  onCerrar,
+  onVer,
+  onMarcarLeida,
+}) => {
+  if (!notificacion) return null;
+
+  return (
+    <div className="fixed bottom-5 right-5 z-[60] w-[calc(100%-2.5rem)] max-w-md border-4 border-red-700 bg-white rounded-2xl shadow-[10px_10px_0px_0px_rgba(127,29,29,0.85)] overflow-hidden">
+      <div className="bg-red-700 px-4 py-3 text-white">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-100">
+              Centro de atención
+            </p>
+            <h2 className="text-lg font-black uppercase leading-tight">
+              Nueva alerta operativa
+            </h2>
+          </div>
+
+          <button
+            type="button"
+            onClick={onCerrar}
+            className="rounded-full border-2 border-white px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white hover:text-red-700 transition"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+
+      <div className="p-4">
+        <p className="text-[10px] font-black uppercase text-blue-700">
+          {notificacion.tipo || "GENERAL"}
+        </p>
+        <h3 className="mt-1 text-sm font-black uppercase text-black">
+          {notificacion.titulo || "Notificación interna"}
+        </h3>
+        <p className="mt-2 text-sm font-bold leading-relaxed text-gray-700">
+          {notificacion.mensaje || "Tienes una nueva tarea o alerta operativa."}
+        </p>
+        <p className="mt-3 text-[10px] font-black uppercase text-gray-400">
+          {formatearFechaNotificacion(notificacion.createdAt)}
+        </p>
+
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={onVer}
+            className="flex-1 bg-black px-4 py-3 text-xs font-black uppercase text-white rounded-lg hover:bg-blue-700 transition"
+          >
+            Ver
+          </button>
+          <button
+            type="button"
+            onClick={() => onMarcarLeida(notificacion.id)}
+            className="flex-1 border-2 border-black bg-white px-4 py-3 text-xs font-black uppercase text-black rounded-lg hover:bg-gray-100 transition"
+          >
+            Marcar leída
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
 
