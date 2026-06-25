@@ -8,24 +8,12 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 8080,
     strictPort: false,
-    allowedHosts: [
-      "gmtchtune.com",
-      "www.gmtchtune.com",
-      "abundant-emotion-production-830a.up.railway.app",
-      ".up.railway.app",
-    ],
+    allowedHosts: true,
   },
 
   server: {
     host: "0.0.0.0",
     port: 5173,
-    allowedHosts: [
-      "localhost",
-      "127.0.0.1",
-      "gmtchtune.com",
-      "www.gmtchtune.com",
-      "abundant-emotion-production-830a.up.railway.app",
-      ".up.railway.app",
-    ],
+    allowedHosts: true,
   },
 });
