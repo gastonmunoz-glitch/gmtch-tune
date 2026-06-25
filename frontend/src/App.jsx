@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, Navigate } from "react-router-dom";
 import api from "./services/api";
 
@@ -134,6 +134,21 @@ const tieneRol = (usuario, roles = []) => {
   if (usuario.rol === "OWNER") return true;
   return roles.includes(usuario.rol);
 };
+
+const puedeVerMetricasComerciales = (usuario) =>
+  ["OWNER", "ADMIN"].includes(String(usuario?.rol || "").toUpperCase());
+
+const puedeVerOperacion = (usuario) =>
+  [
+    "OWNER",
+    "ADMIN",
+    "SUPERVISOR",
+    "RECEPCION",
+    "OPERADOR_SCANNER",
+    "OPERADOR_ECU",
+    "MECANICO",
+    "TUNER",
+  ].includes(String(usuario?.rol || "").toUpperCase());
 
 const limpiarSesion = () => {
   localStorage.removeItem("token");
@@ -714,6 +729,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     usuario?.rol
   );
   const puedeVerFileService = tieneRol(usuario, PERMISOS_RUTAS["/archivos-ecu"]);
+  const mostrarComercial = puedeVerMetricasComerciales(usuario);
+  const mostrarOperacion = puedeVerOperacion(usuario);
 
   const [stats, setStats] = useState({
     cajaHoy: 0,
@@ -737,6 +754,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     ultimaActualizacion: null,
   });
   const [cargandoDashboard, setCargandoDashboard] = useState(false);
+  const [toasts, setToasts] = useState([]);
+  const toastKeysRef = useRef(new Set());
 
   const normalizarArray = (respuesta) => {
     const data = respuesta?.data;
@@ -769,11 +788,22 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     return Number.isNaN(fecha.getTime()) ? null : fecha;
   };
 
-  const mismoDia = (fecha, base) =>
-    fecha &&
-    fecha.getFullYear() === base.getFullYear() &&
-    fecha.getMonth() === base.getMonth() &&
-    fecha.getDate() === base.getDate();
+  const inicioDiaLocal = (base) => {
+    const fecha = new Date(base);
+    fecha.setHours(0, 0, 0, 0);
+    return fecha;
+  };
+
+  const finDiaLocal = (base) => {
+    const fecha = new Date(base);
+    fecha.setHours(23, 59, 59, 999);
+    return fecha;
+  };
+
+  const dentroDelDiaLocal = (fecha, base) => {
+    if (!fecha) return false;
+    return fecha >= inicioDiaLocal(base) && fecha <= finDiaLocal(base);
+  };
 
   const inicioSemana = (base) => {
     const fecha = new Date(base);
@@ -810,14 +840,68 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const crearItemChecklist = (label, contador) => ({
     label,
     contador,
-    estado: contador > 0 ? "Atencion" : "OK",
+    estado: contador > 0 ? "Atención" : "OK",
   });
+
+  const cerrarToast = (id) => {
+    setToasts((actuales) => actuales.filter((toast) => toast.id !== id));
+  };
+
+  const agregarToast = (toast) => {
+    if (!toast?.id || toastKeysRef.current.has(toast.id)) return;
+
+    toastKeysRef.current.add(toast.id);
+
+    setToasts((actuales) => {
+      const siguiente = [
+        {
+          ...toast,
+          creadoEn: Date.now(),
+        },
+        ...actuales.filter((item) => item.id !== toast.id),
+      ];
+
+      return siguiente.slice(0, 3);
+    });
+
+    window.setTimeout(() => {
+      cerrarToast(toast.id);
+    }, 7000);
+  };
+
+  const crearToastsDesdeAlertas = (alertas = []) => {
+    alertas.slice(0, 8).forEach((alerta) => {
+      const tipoTexto = String(alerta.tipo || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+      const debeAvisar =
+        alerta.severidad === "critica" ||
+        tipoTexto.includes("cliente prioritario") ||
+        tipoTexto.includes("correccion pendiente") ||
+        tipoTexto.includes("pago pendiente");
+
+      if (!debeAvisar) return;
+
+      agregarToast({
+        id: `toast-${alerta.id}`,
+        tipo: alerta.severidad === "critica" ? "critico" : "atencion",
+        titulo: alerta.tipo,
+        mensaje: `${alerta.referencia} - ${alerta.estado} - ${alerta.tiempo}`,
+      });
+    });
+  };
 
   const calcularDashboard = (ordenes, clientes, vehiculos, archivos) => {
     const hoy = new Date();
     const desdeSemana = inicioSemana(hoy);
     const pagadasMes = [];
     const alertasOperativas = [];
+    const agregarAlerta = (alerta) => {
+      if (!alerta?.id) return;
+      if (alertasOperativas.some((item) => item.id === alerta.id)) return;
+      alertasOperativas.push(alerta);
+    };
     const esVerdadero = (valor) =>
       valor === true || String(valor || "").toLowerCase() === "true";
     const clientesExcluidosIds = new Set(
@@ -861,13 +945,13 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         const fechaCreacion = parseFecha(orden.createdAt);
         const pagado = montoPagadoOrden(orden);
 
-        if (mismoDia(fechaCreacion, hoy)) {
+        if (dentroDelDiaLocal(fechaCreacion, hoy)) {
           acc.trabajosIngresadosHoy += numero(orden.monto_total);
         }
 
         if (!fechaPago || pagado <= 0) return acc;
 
-        if (mismoDia(fechaPago, hoy)) acc.cajaHoy += pagado;
+        if (dentroDelDiaLocal(fechaPago, hoy)) acc.cajaHoy += pagado;
         if (fechaPago >= desdeSemana) acc.cajaSemana += pagado;
 
         if (
@@ -895,7 +979,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       const fechaEntrega =
         parseFecha(orden.entregado_at) ||
         (estado === "ENTREGADO" ? parseFecha(orden.updatedAt) : null);
-      return estado === "ENTREGADO" && mismoDia(fechaEntrega, hoy);
+      return estado === "ENTREGADO" && dentroDelDiaLocal(fechaEntrega, hoy);
     }).length;
 
     const fileServiceActivos = archivos.filter((archivo) => {
@@ -945,12 +1029,36 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       const estadoPago = String(orden.estado_pago || "").toUpperCase();
       const referenciaFecha = parseFecha(orden.updatedAt);
       const horas = horasDesde(referenciaFecha, hoy);
+      const categoriaCliente = String(
+        orden?.Vehiculo?.Cliente?.categoria_cliente ||
+          orden?.Cliente?.categoria_cliente ||
+          orden?.cliente_categoria_cliente ||
+          ""
+      ).toUpperCase();
+
+      if (
+        estado !== "ENTREGADO" &&
+        ["VIP", "FLOTA", "TALLER_ALIADO", "GARANTIA_RECLAMO"].includes(
+          categoriaCliente
+        )
+      ) {
+        agregarAlerta({
+          id: `orden-${orden.id}-cliente-prioritario-${categoriaCliente}`,
+          severidad:
+            categoriaCliente === "GARANTIA_RECLAMO" ? "critica" : "atencion",
+          tipo: `Cliente prioritario: ${categoriaCliente}`,
+          referencia: `Orden #${orden.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: orden.estado || "ACTIVA",
+          horas,
+        });
+      }
 
       if (estado === "RECEPCIONADO" && horas > 2) {
-        alertasOperativas.push({
+        agregarAlerta({
           id: `orden-${orden.id}-recepcionado`,
           severidad: "atencion",
-          tipo: "Recepcion detenida",
+          tipo: "Recepcionado más de 2h",
           referencia: `Orden #${orden.id}`,
           tiempo: formatoTiempo(horas),
           estado: orden.estado || "RECEPCIONADO",
@@ -959,10 +1067,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       }
 
       if (estado === "PARA_DIAGNOSTICO" && horas > 4) {
-        alertasOperativas.push({
+        agregarAlerta({
           id: `orden-${orden.id}-diagnostico`,
           severidad: "atencion",
-          tipo: "Diagnostico pendiente",
+          tipo: "Diagnóstico pendiente más de 4h",
           referencia: `Orden #${orden.id}`,
           tiempo: formatoTiempo(horas),
           estado: orden.estado || "PARA_DIAGNOSTICO",
@@ -971,10 +1079,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       }
 
       if (estado === "EN_PROGRAMACION" && horas > 24) {
-        alertasOperativas.push({
+        agregarAlerta({
           id: `orden-${orden.id}-programacion`,
           severidad: "critica",
-          tipo: "Programacion detenida",
+          tipo: "Programación detenida más de 24h",
           referencia: `Orden #${orden.id}`,
           tiempo: formatoTiempo(horas),
           estado: orden.estado || "EN_PROGRAMACION",
@@ -983,9 +1091,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       }
 
       if (estado === "LISTO_PARA_ENTREGA" && estadoPago !== "PAGADO") {
-        alertasOperativas.push({
+        agregarAlerta({
           id: `orden-${orden.id}-pago-pendiente`,
-          severidad: "critica",
+          severidad: "atencion",
           tipo: "Lista para entrega con pago pendiente",
           referencia: `Orden #${orden.id}`,
           tiempo: formatoTiempo(horas),
@@ -1009,10 +1117,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         ) &&
         String(archivo.post_escritura_estado || "").toUpperCase() !== "OK"
       ) {
-        alertasOperativas.push({
+        agregarAlerta({
           id: `file-${archivo.id}-post`,
           severidad: "atencion",
-          tipo: "MOD listo sin post escritura",
+          tipo: "File Service sin post escritura OK",
           referencia: `File #${archivo.id}`,
           tiempo: formatoTiempo(horas),
           estado: archivo.estado || "PENDIENTE_POST",
@@ -1021,10 +1129,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       }
 
       if (estado === "REQUIERE_CORRECCION" || archivo.correccion_pendiente === true) {
-        alertasOperativas.push({
+        agregarAlerta({
           id: `file-${archivo.id}-correccion`,
           severidad: "critica",
-          tipo: "File Service requiere correccion",
+          tipo: "File Service con corrección pendiente",
           referencia: `File #${archivo.id}`,
           tiempo: formatoTiempo(horas),
           estado: archivo.estado || "REQUIERE_CORRECCION",
@@ -1033,10 +1141,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       }
 
       if (activo && horas > 24) {
-        alertasOperativas.push({
+        agregarAlerta({
           id: `file-${archivo.id}-activo-24`,
-          severidad: "seguimiento",
-          tipo: "File Service activo mas de 24h",
+          severidad: horas > 48 ? "critica" : "atencion",
+          tipo: "File Service activo más de 24h",
           referencia: `File #${archivo.id}`,
           tiempo: formatoTiempo(horas),
           estado: archivo.estado || "ACTIVO",
@@ -1079,10 +1187,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       ).length,
       alertasOperativas: alertasOrdenadas,
       checklistOperativo: [
-        crearItemChecklist("Ordenes sin diagnostico", ordenesSinDiagnostico),
+        crearItemChecklist("Órdenes sin diagnóstico", ordenesSinDiagnostico),
         crearItemChecklist("File Service sin post escritura OK", fileServiceSinPostOk),
-        crearItemChecklist("File Service con correccion pendiente", correccionesPendientes),
-        crearItemChecklist("Ordenes listas para entrega", listasEntrega),
+        crearItemChecklist("File Service con corrección pendiente", correccionesPendientes),
+        crearItemChecklist("Órdenes listas para entrega", listasEntrega),
         crearItemChecklist("Pagos pendientes", pagosPendientes),
         crearItemChecklist("Entregadas hoy", entregadasHoy),
       ],
@@ -1120,7 +1228,15 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       const archivos =
         archivosRes.status === "fulfilled" ? normalizarArray(archivosRes.value) : [];
 
-      setStats(calcularDashboard(ordenes, clientes, vehiculos, archivos));
+      const dashboardCalculado = calcularDashboard(
+        ordenes,
+        clientes,
+        vehiculos,
+        archivos
+      );
+
+      setStats(dashboardCalculado);
+      crearToastsDesdeAlertas(dashboardCalculado.alertasOperativas);
       if (actualizarNotificaciones) {
         await actualizarNotificaciones();
       }
@@ -1133,10 +1249,15 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
   useEffect(() => {
     fetchStats();
+
+    const intervaloDashboard = window.setInterval(fetchStats, 60000);
+    return () => window.clearInterval(intervaloDashboard);
   }, [usuario?.rol]);
 
   return (
     <div className="space-y-10">
+      <ToastStack toasts={toasts} onCerrar={cerrarToast} />
+
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <h1 className="text-4xl md:text-5xl font-black text-black uppercase tracking-tighter">
@@ -1148,7 +1269,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           </p>
 
           <p className="text-xs font-bold uppercase text-gray-400 mt-1">
-            Ultima actualizacion: {stats.ultimaActualizacion || "Pendiente"}
+            Última actualización: {stats.ultimaActualizacion || "Pendiente"}
+          </p>
+
+          <p className="text-[11px] font-bold uppercase text-gray-400 mt-1">
+            Auto actualización cada 60s
           </p>
         </div>
 
@@ -1164,37 +1289,49 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
       <ReglaOperativaGMTCH />
 
-      <DashboardSection title="Comercial">
-        <StatCard label="Caja hoy" val={formatoCLP(stats.cajaHoy)} color="border-black bg-black text-white" />
-        <StatCard label="Caja semana" val={formatoCLP(stats.cajaSemana)} color="border-blue-500" />
-        <StatCard label="Caja mes" val={formatoCLP(stats.cajaMes)} color="border-blue-500" />
-        <StatCard label="Trabajos ingresados hoy" val={formatoCLP(stats.trabajosIngresadosHoy)} color="border-yellow-500" />
-        <StatCard label="Total pagado mes" val={formatoCLP(stats.totalPagadoMes)} color="border-green-500" />
-        <StatCard label="Ticket promedio mes" val={formatoCLP(stats.ticketPromedioMes)} color="border-green-500" />
-      </DashboardSection>
+      {mostrarComercial ? (
+        <DashboardSection title="Comercial">
+          <StatCard label="Caja hoy" val={formatoCLP(stats.cajaHoy)} color="border-black bg-black text-white" />
+          <StatCard label="Caja semana" val={formatoCLP(stats.cajaSemana)} color="border-blue-500" />
+          <StatCard label="Caja mes" val={formatoCLP(stats.cajaMes)} color="border-blue-500" />
+          <StatCard label="Trabajos ingresados hoy" val={formatoCLP(stats.trabajosIngresadosHoy)} color="border-yellow-500" />
+          <StatCard label="Total pagado mes" val={formatoCLP(stats.totalPagadoMes)} color="border-green-500" />
+          <StatCard label="Ticket promedio mes" val={formatoCLP(stats.ticketPromedioMes)} color="border-green-500" />
+        </DashboardSection>
+      ) : (
+        <section className="border-4 border-black bg-white p-4 rounded-2xl text-xs font-black uppercase text-gray-500">
+          Métricas comerciales ocultas para este rol.
+        </section>
+      )}
 
-      <DashboardSection title="Operacion">
-        <StatCard label="Ordenes activas" val={stats.ordenesActivas} color="border-yellow-500" />
-        <StatCard label="Listas para entrega" val={stats.listasEntrega} color="border-emerald-500" />
-        <StatCard label="Pendientes de pago" val={stats.pendientesPago} color="border-red-500" />
-        <StatCard label="Entregadas hoy" val={stats.entregadasHoy} color="border-blue-500" />
-      </DashboardSection>
+      {mostrarOperacion && (
+        <DashboardSection title="Operación">
+          <StatCard label="Órdenes activas" val={stats.ordenesActivas} color="border-yellow-500" />
+          <StatCard label="Listas para entrega" val={stats.listasEntrega} color="border-emerald-500" />
+          <StatCard label="Pendientes de pago" val={stats.pendientesPago} color="border-red-500" />
+          <StatCard label="Entregadas hoy" val={stats.entregadasHoy} color="border-blue-500" />
+        </DashboardSection>
+      )}
 
-      <DashboardSection title="File Service">
-        <StatCard label="Activos" val={stats.fileServiceActivos} color="border-purple-500" />
-        <StatCard label="Pendientes post escritura" val={stats.fileServicePostPendiente} color="border-yellow-500" />
-        <StatCard label="Correcciones pendientes" val={stats.fileServiceCorrecciones} color="border-red-500" />
-      </DashboardSection>
+      {puedeVerFileService && (
+        <DashboardSection title="File Service">
+          <StatCard label="Activos" val={stats.fileServiceActivos} color="border-purple-500" />
+          <StatCard label="Pendientes post escritura" val={stats.fileServicePostPendiente} color="border-yellow-500" />
+          <StatCard label="Correcciones pendientes" val={stats.fileServiceCorrecciones} color="border-red-500" />
+        </DashboardSection>
+      )}
 
       <AlertasOperativasSection alertas={stats.alertasOperativas} />
 
       <ChecklistOperativoSection items={stats.checklistOperativo} />
 
-      <DashboardSection title="Base de datos">
-        <StatCard label="Clientes" val={stats.clientes} color="border-blue-500" />
-        <StatCard label="Vehiculos" val={stats.vehiculos} color="border-green-500" />
-        <StatCard label="Ordenes" val={stats.ordenes} color="border-yellow-500" />
-      </DashboardSection>
+      {puedeVerBase && (
+        <DashboardSection title="Base de datos">
+          <StatCard label="Clientes" val={stats.clientes} color="border-blue-500" />
+          <StatCard label="Vehículos" val={stats.vehiculos} color="border-green-500" />
+          <StatCard label="Órdenes" val={stats.ordenes} color="border-yellow-500" />
+        </DashboardSection>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {tieneRol(usuario, PERMISOS_RUTAS["/flujo"]) && (
@@ -1237,6 +1374,62 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   );
 }
 
+const ToastStack = ({ toasts = [], onCerrar }) => {
+  if (!toasts.length) return null;
+
+  const clasesPorTipo = {
+    critico: "border-red-600 bg-red-50 text-red-900",
+    atencion: "border-yellow-500 bg-yellow-50 text-yellow-900",
+    exito: "border-green-500 bg-green-50 text-green-900",
+    informacion: "border-blue-500 bg-blue-50 text-blue-900",
+  };
+
+  const labelPorTipo = {
+    critico: "Crítico",
+    atencion: "Atención",
+    exito: "Éxito",
+    informacion: "Información",
+  };
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 flex w-[calc(100%-2rem)] max-w-sm flex-col gap-3 pointer-events-none">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={
+            "pointer-events-auto border-4 rounded-2xl p-4 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] " +
+            (clasesPorTipo[toast.tipo] || clasesPorTipo.informacion)
+          }
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-wide">
+                {labelPorTipo[toast.tipo] || labelPorTipo.informacion}
+              </p>
+              <p className="mt-1 text-sm font-black uppercase leading-tight">
+                {toast.titulo}
+              </p>
+              {toast.mensaje && (
+                <p className="mt-2 text-xs font-bold leading-relaxed">
+                  {toast.mensaje}
+                </p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onCerrar(toast.id)}
+              className="rounded-full border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase text-black"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const AlertasOperativasSection = ({ alertas = [] }) => {
   const resumen = alertas.reduce(
     (acc, alerta) => {
@@ -1253,14 +1446,14 @@ const AlertasOperativasSection = ({ alertas = [] }) => {
   const visibles = alertas.slice(0, 5);
 
   const severidadClass = {
-    critica: "bg-red-50 border-red-500 text-red-800",
-    atencion: "bg-yellow-50 border-yellow-500 text-yellow-800",
+    critica: "bg-red-100 border-red-600 text-red-900",
+    atencion: "bg-yellow-100 border-yellow-500 text-yellow-900",
     seguimiento: "bg-blue-50 border-blue-500 text-blue-800",
   };
 
   const severidadLabel = {
-    critica: "Criticas",
-    atencion: "Atencion",
+    critica: "Críticas",
+    atencion: "Atención",
     seguimiento: "Seguimiento",
   };
 
@@ -1272,13 +1465,13 @@ const AlertasOperativasSection = ({ alertas = [] }) => {
         </h2>
 
         <p className="text-[11px] font-bold uppercase text-gray-400">
-          updatedAt es una aproximacion del tiempo por etapa
+          updatedAt es una aproximación del tiempo por etapa
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <MiniAlertCard label="Criticas" value={resumen.critica} color="border-red-500" />
-        <MiniAlertCard label="Atencion" value={resumen.atencion} color="border-yellow-500" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <MiniAlertCard label="Críticas" value={resumen.critica} color="border-red-500" />
+        <MiniAlertCard label="Atención" value={resumen.atencion} color="border-yellow-500" />
         <MiniAlertCard label="Seguimiento" value={resumen.seguimiento} color="border-blue-500" />
       </div>
 
@@ -1292,7 +1485,7 @@ const AlertasOperativasSection = ({ alertas = [] }) => {
             {visibles.map((alerta) => (
               <div
                 key={alerta.id}
-                className="grid grid-cols-1 md:grid-cols-12 gap-3 p-4 items-center"
+                className="grid grid-cols-1 md:grid-cols-12 gap-3 p-4 md:p-5 items-center"
               >
                 <div className="md:col-span-3">
                   <span
@@ -1391,8 +1584,8 @@ const ChecklistOperativoSection = ({ items = [] }) => (
 
 const ReglaOperativaGMTCH = () => {
   const frases = [
-    "Trabajo que no está en Gmtch Tune OS, no existe oficialmente.",
-    "WhatsApp puede recibir información, pero la plataforma es la fuente oficial.",
+    "La plataforma es la fuente oficial. Lo que no se registra, no se puede controlar.",
+    "WhatsApp puede recibir información, pero Gmtch Tune OS ordena el trabajo.",
     "Sin orden no hay trabajo. Sin evidencia no hay respaldo. Sin cierre no hay entrega.",
     "La pelota siempre debe tener responsable.",
     "Cierre técnico no es cierre comercial.",
