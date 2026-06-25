@@ -106,12 +106,20 @@ function LandingPage() {
             </a>
           </nav>
 
-          <Link
-            to="/"
-            className="border border-blue-500 bg-blue-600 px-4 py-2 text-xs font-black uppercase text-white hover:bg-white hover:text-black"
-          >
-            Acceso plataforma
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/portal/login"
+              className="hidden border border-slate-600 px-4 py-2 text-xs font-black uppercase text-white hover:border-blue-500 hover:text-blue-300 sm:block"
+            >
+              Portal File Service
+            </Link>
+            <Link
+              to="/"
+              className="border border-blue-500 bg-blue-600 px-4 py-2 text-xs font-black uppercase text-white hover:bg-white hover:text-black"
+            >
+              Acceso plataforma
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -156,6 +164,12 @@ function LandingPage() {
                   className="border border-white px-6 py-4 text-center text-xs font-black uppercase text-white hover:bg-white hover:text-black"
                 >
                   Acceso plataforma
+                </Link>
+                <Link
+                  to="/portal/login"
+                  className="border border-blue-500 px-6 py-4 text-center text-xs font-black uppercase text-blue-200 hover:bg-blue-600 hover:text-white"
+                >
+                  Portal File Service
                 </Link>
               </div>
             </div>

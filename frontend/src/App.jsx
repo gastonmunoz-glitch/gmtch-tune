@@ -13,6 +13,12 @@ import RecepcionRapidaPage from "./pages/RecepcionRapidaPage";
 import LoginPage from "./pages/LoginPage";
 import UsuariosPage from "./pages/UsuariosPage";
 import LandingPage from "./pages/LandingPage";
+import PortalLoginPage from "./pages/PortalLoginPage";
+import PortalDashboardPage from "./pages/PortalDashboardPage";
+import PortalNuevoArchivoPage from "./pages/PortalNuevoArchivoPage";
+import PortalMisArchivosPage from "./pages/PortalMisArchivosPage";
+import PortalCreditosPage from "./pages/PortalCreditosPage";
+import PortalAdminPage from "./pages/PortalAdminPage";
 
 const PERMISOS_RUTAS = {
   "/": [
@@ -65,6 +71,7 @@ const PERMISOS_RUTAS = {
     "MECANICO",
   ],
   "/usuarios": ["OWNER"],
+  "/portal-admin": ["OWNER"],
 };
 
 const MENU = [
@@ -113,6 +120,11 @@ const MENU = [
     to: "/usuarios",
     label: "Usuarios / Roles",
     roles: PERMISOS_RUTAS["/usuarios"],
+  },
+  {
+    to: "/portal-admin",
+    label: "Portal Masters",
+    roles: PERMISOS_RUTAS["/portal-admin"],
   },
 ];
 
@@ -170,6 +182,10 @@ function App() {
   const rutaActual = window.location.pathname;
   const rutaLandingPublica = rutaActual === "/web" || rutaActual === "/inicio";
   const rutaLoginPublica = rutaActual === "/login";
+  const rutaPortalLogin = rutaActual === "/portal/login";
+  const rutaPortalExterno =
+    rutaActual === "/portal" ||
+    (rutaActual.startsWith("/portal/") && rutaActual !== "/portal/login");
 
   const cargarNotificaciones = async () => {
     if (!localStorage.getItem("token")) return;
@@ -318,6 +334,47 @@ function App() {
           <Route path="/web" element={<LandingPage />} />
           <Route path="/inicio" element={<LandingPage />} />
           <Route path="*" element={<Navigate to="/web" />} />
+        </Routes>
+      ) : rutaPortalLogin ? (
+        <Routes>
+          <Route path="/portal/login" element={<PortalLoginPage />} />
+          <Route path="*" element={<Navigate to="/portal/login" />} />
+        </Routes>
+      ) : rutaPortalExterno ? (
+        <Routes>
+          <Route
+            path="/portal"
+            element={
+              <PortalProtegido>
+                <PortalDashboardPage />
+              </PortalProtegido>
+            }
+          />
+          <Route
+            path="/portal/nuevo-archivo"
+            element={
+              <PortalProtegido>
+                <PortalNuevoArchivoPage />
+              </PortalProtegido>
+            }
+          />
+          <Route
+            path="/portal/mis-archivos"
+            element={
+              <PortalProtegido>
+                <PortalMisArchivosPage />
+              </PortalProtegido>
+            }
+          />
+          <Route
+            path="/portal/creditos"
+            element={
+              <PortalProtegido>
+                <PortalCreditosPage />
+              </PortalProtegido>
+            }
+          />
+          <Route path="*" element={<Navigate to="/portal" />} />
         </Routes>
       ) : rutaLoginPublica && !auth ? (
         <Routes>
@@ -543,6 +600,15 @@ function App() {
                   }
                 />
 
+                <Route
+                  path="/portal-admin"
+                  element={
+                    <Protegido usuario={usuario} roles={PERMISOS_RUTAS["/portal-admin"]}>
+                      <PortalAdminPage />
+                    </Protegido>
+                  }
+                />
+
                 <Route path="*" element={<Navigate to="/" />} />
               </Routes>
             </main>
@@ -562,6 +628,16 @@ const destacadoStyle =
 const Protegido = ({ usuario, roles, children }) => {
   if (!tieneRol(usuario, roles)) {
     return <AccesoDenegado usuario={usuario} />;
+  }
+
+  return children;
+};
+
+const PortalProtegido = ({ children }) => {
+  const portalToken = localStorage.getItem("portalToken");
+
+  if (!portalToken) {
+    return <Navigate to="/portal/login" />;
   }
 
   return children;
