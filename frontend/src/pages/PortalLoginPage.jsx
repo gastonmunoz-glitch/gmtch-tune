@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { portalLogin } from "../services/portalApi";
 
 const LogoPortal = () => {
@@ -24,40 +24,61 @@ const LogoPortal = () => {
 };
 
 function PortalLoginPage() {
-  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [mensaje, setMensaje] = useState("");
   const [cargando, setCargando] = useState(false);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
+    setMensaje("");
 
     if (!email.trim() || !password.trim()) {
       setError("Debes ingresar email y contraseña.");
       return;
     }
 
+    let redirigiendo = false;
+
     try {
       setCargando(true);
       const data = await portalLogin(email.trim(), password);
+      const portalToken = data?.portalToken || data?.token || data?.accessToken;
 
-      localStorage.setItem("portalToken", data.portalToken);
+      if (!portalToken) {
+        setError("Login correcto pero respuesta inválida. Contacta a GMTCH.");
+        return;
+      }
+
+      localStorage.setItem("portalToken", portalToken);
       localStorage.setItem("portalUsuario", JSON.stringify(data.usuario || {}));
       localStorage.setItem("portalCuenta", JSON.stringify(data.cuenta || {}));
 
-      navigate("/portal");
+      redirigiendo = true;
+      setMensaje("Ingreso correcto, cargando portal...");
+
+      window.setTimeout(() => {
+        window.location.assign("/portal");
+      }, 250);
     } catch (err) {
       if (err.status === 401) {
         setError(
           "Credenciales inválidas. Recuerda usar el Email de login portal, no el email de la cuenta/taller."
         );
+      } else if (
+        err.name === "TypeError" ||
+        /failed to fetch|network|fetch/i.test(err.message || "")
+      ) {
+        setError("No se pudo conectar con el portal.");
       } else {
         setError(err.message || "No se pudo iniciar sesión en el portal.");
       }
     } finally {
-      setCargando(false);
+      if (!redirigiendo) {
+        setCargando(false);
+      }
     }
   };
 
@@ -94,6 +115,12 @@ function PortalLoginPage() {
           {error && (
             <div className="mt-5 border border-red-500 bg-red-950/40 p-3 text-sm font-bold text-red-200">
               {error}
+            </div>
+          )}
+
+          {mensaje && (
+            <div className="mt-5 border border-green-500 bg-green-950/40 p-3 text-sm font-bold text-green-200">
+              {mensaje}
             </div>
           )}
 
