@@ -6,11 +6,16 @@ set "APP_URL=https://gmtchtune.com/login"
 set "BAT_DIR=%~dp0"
 set "ROOT=%~dp0..\.."
 for %%I in ("%ROOT%") do set "ROOT=%%~fI"
+set "REPO_ICON=%ROOT%\frontend\public\brand\gmtch-isotipo.png"
 
 set "PS1=%TEMP%\gmtch-instalar-acceso-%RANDOM%.ps1"
 
 echo Instalando accesos directos de %APP_NAME%...
-echo Proyecto detectado en: %ROOT%
+if exist "%REPO_ICON%" (
+  echo Proyecto detectado en: %ROOT%
+) else (
+  echo Modo portable. Se buscara gmtch-isotipo.png junto al instalador.
+)
 
 > "%PS1%" (
   echo $ErrorActionPreference = 'Stop'
@@ -51,16 +56,17 @@ echo Proyecto detectado en: %ROOT%
   echo   Write-Host 'No se pudo crear icono personalizado. Se usara el icono del navegador.'
   echo   $iconOk = $false
   echo }
-  echo $edgeCandidates = @(
-  echo   Join-Path ${env:ProgramFiles(x86^)} 'Microsoft\Edge\Application\msedge.exe',
-  echo   Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe',
-  echo   Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe'
-  echo ^)
-  echo $chromeCandidates = @(
-  echo   Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe',
-  echo   Join-Path ${env:ProgramFiles(x86^)} 'Google\Chrome\Application\chrome.exe',
-  echo   Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe'
-  echo ^)
+  echo $programFiles = [Environment]::GetFolderPath('ProgramFiles'^)
+  echo $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86'^)
+  echo $localAppData = $env:LOCALAPPDATA
+  echo $edgeCandidates = @(^)
+  echo if ($programFilesX86^) { $edgeCandidates += Join-Path $programFilesX86 'Microsoft\Edge\Application\msedge.exe' }
+  echo if ($programFiles^) { $edgeCandidates += Join-Path $programFiles 'Microsoft\Edge\Application\msedge.exe' }
+  echo if ($localAppData^) { $edgeCandidates += Join-Path $localAppData 'Microsoft\Edge\Application\msedge.exe' }
+  echo $chromeCandidates = @(^)
+  echo if ($programFiles^) { $chromeCandidates += Join-Path $programFiles 'Google\Chrome\Application\chrome.exe' }
+  echo if ($programFilesX86^) { $chromeCandidates += Join-Path $programFilesX86 'Google\Chrome\Application\chrome.exe' }
+  echo if ($localAppData^) { $chromeCandidates += Join-Path $localAppData 'Google\Chrome\Application\chrome.exe' }
   echo $browser = $edgeCandidates ^| Where-Object { Test-Path $_ } ^| Select-Object -First 1
   echo $browserName = 'Microsoft Edge'
   echo if (-not $browser^) {
