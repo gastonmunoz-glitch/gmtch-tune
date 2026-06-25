@@ -80,6 +80,37 @@ const OrdenTrabajo = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+
+    feedback_operario: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    detalle_pendiente: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    recomendacion_futura: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    requiere_seguimiento: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    feedback_por: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+
+    feedback_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "ordenes_trabajo",

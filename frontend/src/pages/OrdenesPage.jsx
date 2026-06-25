@@ -158,6 +158,7 @@ function OrdenesPage() {
   const [ordenes, setOrdenes] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
+  const [feedbackOrdenes, setFeedbackOrdenes] = useState({});
   const [filtro, setFiltro] = useState("ACTIVAS");
   const [cargando, setCargando] = useState(false);
 
@@ -340,6 +341,47 @@ function OrdenesPage() {
     return usuarios.filter(
       (usuario) => usuario.activo !== false && roles.includes(usuario.rol)
     );
+  };
+
+  const feedbackActual = (orden) =>
+    feedbackOrdenes[orden.id] || {
+      feedback_operario: orden.feedback_operario || "",
+      detalle_pendiente: orden.detalle_pendiente || "",
+      recomendacion_futura: orden.recomendacion_futura || "",
+      requiere_seguimiento: orden.requiere_seguimiento === true,
+    };
+
+  const actualizarFeedbackLocal = (orden, campo, valor) => {
+    setFeedbackOrdenes((prev) => ({
+      ...prev,
+      [orden.id]: {
+        ...feedbackActual(orden),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const guardarFeedback = async (orden) => {
+    const feedback = feedbackActual(orden);
+
+    try {
+      await api.patch(`/ordenes/${orden.id}`, {
+        feedback_operario: feedback.feedback_operario,
+        detalle_pendiente: feedback.detalle_pendiente,
+        recomendacion_futura: feedback.recomendacion_futura,
+        requiere_seguimiento: feedback.requiere_seguimiento,
+      });
+
+      await recargar();
+      setFeedbackOrdenes((prev) => {
+        const siguiente = { ...prev };
+        delete siguiente[orden.id];
+        return siguiente;
+      });
+    } catch (err) {
+      console.error("ERROR GUARDANDO FEEDBACK:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "No se pudo guardar el feedback.");
+    }
   };
 
   const asignarResponsable = async (orden, campo, valor) => {
@@ -547,6 +589,7 @@ function OrdenesPage() {
               o.Vehiculo?.Cliente?.excluir_estadisticas === true;
             const ordenExcluida = o.excluir_estadisticas === true;
             const noCuentaEstadisticas = clienteExcluido || ordenExcluida;
+            const feedback = feedbackActual(o);
             const pagoConfirmado = o.estado_pago === "PAGADO";
             const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
               textoQR(o)
@@ -688,6 +731,86 @@ function OrdenesPage() {
                           </p>
                         )}
                       </div>
+
+                      <details className="mt-4 border-2 border-black bg-slate-50 p-3">
+                        <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-700">
+                          Feedback operativo
+                        </summary>
+
+                        <div className="mt-3 space-y-3">
+                          <textarea
+                            className="w-full border-2 border-black p-2 text-xs font-bold"
+                            rows="2"
+                            placeholder="Observación del operario"
+                            value={feedback.feedback_operario}
+                            onChange={(event) =>
+                              actualizarFeedbackLocal(
+                                o,
+                                "feedback_operario",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <textarea
+                            className="w-full border-2 border-black p-2 text-xs font-bold"
+                            rows="2"
+                            placeholder="Detalle pendiente"
+                            value={feedback.detalle_pendiente}
+                            onChange={(event) =>
+                              actualizarFeedbackLocal(
+                                o,
+                                "detalle_pendiente",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <textarea
+                            className="w-full border-2 border-black p-2 text-xs font-bold"
+                            rows="2"
+                            placeholder="Recomendación futura"
+                            value={feedback.recomendacion_futura}
+                            onChange={(event) =>
+                              actualizarFeedbackLocal(
+                                o,
+                                "recomendacion_futura",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <label className="flex items-center gap-2 text-[10px] font-black uppercase text-gray-600">
+                            <input
+                              type="checkbox"
+                              checked={feedback.requiere_seguimiento}
+                              onChange={(event) =>
+                                actualizarFeedbackLocal(
+                                  o,
+                                  "requiere_seguimiento",
+                                  event.target.checked
+                                )
+                              }
+                            />
+                            Requiere seguimiento
+                          </label>
+
+                          {(o.feedback_por || o.feedback_at) && (
+                            <p className="text-[9px] font-bold uppercase text-gray-500">
+                              Feedback por: {o.feedback_por || "No registrado"} ·{" "}
+                              {formatearFecha(o.feedback_at)}
+                            </p>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => guardarFeedback(o)}
+                            className="bg-black text-white px-4 py-2 font-black uppercase text-[10px]"
+                          >
+                            Guardar feedback
+                          </button>
+                        </div>
+                      </details>
                     </div>
                   </div>
 

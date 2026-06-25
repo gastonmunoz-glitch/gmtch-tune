@@ -277,6 +277,13 @@ function VehiculoDetallePage() {
             const diagnosticos = normalizarLista(orden.Diagnosticos, orden.Diagnostico);
             const fotos = normalizarLista(orden.FotoVehiculos, orden.FotosVehiculo);
             const archivos = normalizarLista(orden.ArchivoECUs, orden.ArchivosECU);
+            const tieneFeedback =
+              Boolean(String(orden.feedback_operario || "").trim()) ||
+              Boolean(String(orden.detalle_pendiente || "").trim()) ||
+              Boolean(String(orden.recomendacion_futura || "").trim()) ||
+              orden.requiere_seguimiento === true ||
+              Boolean(orden.feedback_por) ||
+              Boolean(orden.feedback_at);
 
             return (
               <article key={orden.id} className="p-6 space-y-5">
@@ -361,6 +368,23 @@ function VehiculoDetallePage() {
                     <Info label="Observacion pago" value={orden.observacion_pago} />
                   </Panel>
                 </div>
+
+                {tieneFeedback && (
+                  <Panel title="Feedback operativo">
+                    <Info label="Observacion operario" value={orden.feedback_operario} />
+                    <Info label="Detalle pendiente" value={orden.detalle_pendiente} />
+                    <Info
+                      label="Recomendacion futura"
+                      value={orden.recomendacion_futura}
+                    />
+                    <Info
+                      label="Requiere seguimiento"
+                      value={orden.requiere_seguimiento ? "Si" : "No"}
+                    />
+                    <Info label="Feedback por" value={orden.feedback_por} />
+                    <Info label="Fecha feedback" value={formatearFecha(orden.feedback_at)} />
+                  </Panel>
+                )}
 
                 {diagnosticos.length > 0 && (
                   <Panel title="Diagnosticos asociados">

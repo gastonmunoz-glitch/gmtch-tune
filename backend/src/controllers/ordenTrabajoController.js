@@ -164,6 +164,28 @@ const prepararColumnas = async () => {
     SET "excluir_estadisticas" = false
     WHERE "excluir_estadisticas" IS NULL;
 
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "feedback_operario" TEXT;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "detalle_pendiente" TEXT;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "recomendacion_futura" TEXT;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "requiere_seguimiento" BOOLEAN DEFAULT false;
+
+    UPDATE "ordenes_trabajo"
+    SET "requiere_seguimiento" = false
+    WHERE "requiere_seguimiento" IS NULL;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "feedback_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "feedback_at" TIMESTAMP;
+
     ALTER TABLE "clientes"
     ADD COLUMN IF NOT EXISTS "excluir_estadisticas" BOOLEAN DEFAULT false;
 
@@ -297,6 +319,12 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     motivo_ingreso: row.motivo_ingreso,
     monto_total: row.monto_total,
     excluir_estadisticas: row.excluir_estadisticas,
+    feedback_operario: row.feedback_operario,
+    detalle_pendiente: row.detalle_pendiente,
+    recomendacion_futura: row.recomendacion_futura,
+    requiere_seguimiento: row.requiere_seguimiento,
+    feedback_por: row.feedback_por,
+    feedback_at: row.feedback_at,
 
     recepcionado_por: row.recepcionado_por,
     diagnostico_asignado_a: row.diagnostico_asignado_a,
@@ -544,6 +572,9 @@ const actualizarOrden = async (req, res) => {
       "operador_ecu_asignado_a",
       "mecanico_asignado_a",
       "supervisor_asignado_a",
+      "feedback_operario",
+      "detalle_pendiente",
+      "recomendacion_futura",
     ];
 
     camposTexto.forEach((campo) => {
@@ -551,6 +582,25 @@ const actualizarOrden = async (req, res) => {
         payload[campo] = limpiarTexto(req.body[campo]);
       }
     });
+
+    const camposFeedback = [
+      "feedback_operario",
+      "detalle_pendiente",
+      "recomendacion_futura",
+      "requiere_seguimiento",
+    ];
+    const actualizaFeedback = camposFeedback.some((campo) =>
+      Object.prototype.hasOwnProperty.call(req.body, campo)
+    );
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "requiere_seguimiento")) {
+      payload.requiere_seguimiento = normalizarBoolean(req.body.requiere_seguimiento);
+    }
+
+    if (actualizaFeedback) {
+      payload.feedback_por = usuarioActual(req);
+      payload.feedback_at = new Date();
+    }
 
     const camposResponsables = [
       "recepcionado_por",
