@@ -1146,6 +1146,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     listasEntrega: 0,
     pendientesPago: 0,
     entregadasHoy: 0,
+    mecanicaAsociadaCurso: 0,
+    mecanicaIndependiente: 0,
     fileServiceActivos: 0,
     fileServicePostPendiente: 0,
     fileServiceCorrecciones: 0,
@@ -1436,6 +1438,31 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       (orden) => String(orden.estado_pago || "").toUpperCase() !== "PAGADO"
     ).length;
 
+    const mecanicaAsociadaCurso = ordenesReales.filter((orden) => {
+      const estado = String(orden.estado || "").toUpperCase();
+      const tipoIntervencion = String(
+        orden.intervencion_fisica_tipo || ""
+      ).toUpperCase();
+
+      return (
+        estado !== "ENTREGADO" &&
+        tipoIntervencion === "ASOCIADA_SERVICIO_TECNICO"
+      );
+    }).length;
+
+    const mecanicaIndependiente = ordenesReales.filter((orden) => {
+      const estado = String(orden.estado || "").toUpperCase();
+      const tipoIntervencion = String(
+        orden.intervencion_fisica_tipo || ""
+      ).toUpperCase();
+
+      return (
+        estado !== "ENTREGADO" &&
+        (tipoIntervencion === "MECANICA_INDEPENDIENTE" ||
+          ["PARA_MECANICA", "EN_MECANICA"].includes(estado))
+      );
+    }).length;
+
     ordenesReales.forEach((orden) => {
       const estado = String(orden.estado || "").toUpperCase();
       const estadoPago = String(orden.estado_pago || "").toUpperCase();
@@ -1603,6 +1630,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           String(orden.estado || "").toUpperCase() !== "ENTREGADO"
       ).length,
       entregadasHoy,
+      mecanicaAsociadaCurso,
+      mecanicaIndependiente,
       fileServiceActivos,
       fileServicePostPendiente: archivos.filter((archivo) =>
         ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
@@ -1622,6 +1651,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         crearItemChecklist("File Service con corrección pendiente", correccionesPendientes),
         crearItemChecklist("Órdenes listas para entrega", listasEntrega),
         crearItemChecklist("Correcciones técnicas pendientes", correccionesTecnicasPendientes),
+        crearItemChecklist("Mecánica asociada en curso", mecanicaAsociadaCurso),
+        crearItemChecklist("Mecánica independiente", mecanicaIndependiente),
         crearItemChecklist("Pagos pendientes", pagosPendientes),
         crearItemChecklist("Entregadas hoy", entregadasHoy),
       ],
@@ -1742,6 +1773,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           <StatCard label="Pendientes de pago" val={stats.pendientesPago} color="border-red-500" />
           <StatCard label="Entregadas hoy" val={stats.entregadasHoy} color="border-blue-500" />
           <StatCard label="Correcciones pendientes" val={stats.correccionesTecnicasPendientes} color="border-red-500" />
+          <StatCard label="Mecánica asociada" val={stats.mecanicaAsociadaCurso} color="border-orange-400" />
+          <StatCard label="Mecánica independiente" val={stats.mecanicaIndependiente} color="border-orange-600" />
         </DashboardSection>
       )}
 

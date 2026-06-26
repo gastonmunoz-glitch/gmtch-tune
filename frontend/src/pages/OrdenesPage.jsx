@@ -72,6 +72,44 @@ const TIPOS_BITACORA = [
   "OTRO",
 ];
 
+const TIPOS_INTERVENCION_FISICA = [
+  {
+    value: "SIN_INTERVENCION",
+    label: "Sin intervención física",
+  },
+  {
+    value: "ASOCIADA_SERVICIO_TECNICO",
+    label: "Mecánica asociada al servicio técnico",
+  },
+  {
+    value: "MECANICA_INDEPENDIENTE",
+    label: "Mecánica independiente / mantención",
+  },
+];
+
+const CHECKLIST_INTERVENCION_FISICA = [
+  {
+    campo: "intervencion_desmontaje_requerido",
+    label: "Desmontaje requerido",
+  },
+  {
+    campo: "intervencion_vaciado_revision_realizada",
+    label: "Vaciado/revisión física realizada",
+  },
+  {
+    campo: "intervencion_montaje_realizado",
+    label: "Montaje realizado",
+  },
+  {
+    campo: "intervencion_inspeccion_visual",
+    label: "Inspección visual",
+  },
+  {
+    campo: "intervencion_listo_programacion",
+    label: "Listo para programación/post escritura",
+  },
+];
+
 const normalizarCategoriaCliente = (categoria) => {
   const valor = String(categoria || "NORMAL").trim().toUpperCase();
   if (["MAYORISTA", "PROVEEDOR"].includes(valor)) return "TALLER_ALIADO";
@@ -361,6 +399,39 @@ function OrdenesPage() {
     } catch (err) {
       console.error("ERROR CAMBIANDO ESTADO:", err.response?.data || err.message);
       alert(err.response?.data?.error || "No se pudo cambiar el estado.");
+    }
+  };
+
+  const actualizarIntervencionFisica = async (orden, campo, valor) => {
+    try {
+      await api.patch(`/ordenes/${orden.id}`, {
+        [campo]: valor,
+      });
+
+      await recargar();
+    } catch (err) {
+      console.error(
+        "ERROR ACTUALIZANDO INTERVENCION FISICA:",
+        err.response?.data || err.message
+      );
+      alert(err.response?.data?.error || "No se pudo actualizar la intervención física.");
+    }
+  };
+
+  const enviarAMecanicaIndependiente = async (orden) => {
+    try {
+      await api.patch(`/ordenes/${orden.id}`, {
+        estado: "PARA_MECANICA",
+        intervencion_fisica_tipo: "MECANICA_INDEPENDIENTE",
+      });
+
+      await recargar();
+    } catch (err) {
+      console.error(
+        "ERROR ENVIANDO A MECANICA INDEPENDIENTE:",
+        err.response?.data || err.message
+      );
+      alert(err.response?.data?.error || "No se pudo enviar a mecánica independiente.");
     }
   };
 
@@ -732,6 +803,12 @@ function OrdenesPage() {
               : [];
             const tieneCorreccionTecnica =
               Boolean(o.correccion_estado) || historialCorreccion.length > 0;
+            const tipoIntervencionFisica =
+              o.intervencion_fisica_tipo || "SIN_INTERVENCION";
+            const intervencionAsociada =
+              tipoIntervencionFisica === "ASOCIADA_SERVICIO_TECNICO";
+            const mecanicaIndependiente =
+              tipoIntervencionFisica === "MECANICA_INDEPENDIENTE";
             const pagoConfirmado = o.estado_pago === "PAGADO";
             const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
               textoQR(o)
@@ -873,6 +950,100 @@ function OrdenesPage() {
                           </p>
                         )}
                       </div>
+
+                      <details
+                        open={intervencionAsociada || mecanicaIndependiente}
+                        className="mt-4 border-2 border-black bg-slate-50 p-3"
+                      >
+                        <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-700">
+                          Intervención física / mecánica
+                        </summary>
+
+                        <div className="mt-3 space-y-3">
+                          <p className="border-2 border-blue-700 bg-blue-50 p-2 text-[10px] font-bold uppercase text-blue-900">
+                            La intervención física asociada a DPF/escape forma
+                            parte del servicio técnico y no se gestiona como
+                            mantención independiente. Servicio sujeto a
+                            evaluación técnica, normativa aplicable y uso
+                            autorizado según corresponda.
+                          </p>
+
+                          <label className="block text-[10px] font-black uppercase text-gray-500">
+                            Tipo de intervención física
+                            <select
+                              className="mt-1 w-full border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                              value={tipoIntervencionFisica}
+                              onChange={(event) =>
+                                actualizarIntervencionFisica(
+                                  o,
+                                  "intervencion_fisica_tipo",
+                                  event.target.value
+                                )
+                              }
+                            >
+                              {TIPOS_INTERVENCION_FISICA.map((tipo) => (
+                                <option key={tipo.value} value={tipo.value}>
+                                  {tipo.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <textarea
+                            className="w-full border-2 border-black p-2 text-xs font-bold"
+                            rows="2"
+                            placeholder="Detalle físico asociado. Ej: DPF/FAP, EGR, SCR/AdBlue/DEF, línea de escape, desmontaje ECU..."
+                            defaultValue={o.intervencion_fisica_descripcion || ""}
+                            onBlur={(event) =>
+                              actualizarIntervencionFisica(
+                                o,
+                                "intervencion_fisica_descripcion",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          {intervencionAsociada && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                              {CHECKLIST_INTERVENCION_FISICA.map((item) => (
+                                <label
+                                  key={item.campo}
+                                  className="flex items-center gap-2 border border-gray-300 bg-white p-2 text-[10px] font-black uppercase text-gray-600"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={o[item.campo] === true}
+                                    onChange={(event) =>
+                                      actualizarIntervencionFisica(
+                                        o,
+                                        item.campo,
+                                        event.target.checked
+                                      )
+                                    }
+                                  />
+                                  {item.label}
+                                </label>
+                              ))}
+                            </div>
+                          )}
+
+                          {mecanicaIndependiente && (
+                            <p className="border-2 border-orange-700 bg-orange-50 p-2 text-[10px] font-bold uppercase text-orange-900">
+                              Este trabajo se considera mecánica independiente /
+                              mantención. Puede gestionarse en estado PARA_MECANICA
+                              y debe tener responsable mecánico cuando aplique.
+                            </p>
+                          )}
+
+                          {(o.intervencion_fisica_por || o.intervencion_fisica_at) && (
+                            <p className="text-[9px] font-bold uppercase text-gray-500">
+                              Actualizado por:{" "}
+                              {o.intervencion_fisica_por || "No registrado"} ·{" "}
+                              {formatearFecha(o.intervencion_fisica_at)}
+                            </p>
+                          )}
+                        </div>
+                      </details>
 
                       <details className="mt-4 border-2 border-black bg-slate-50 p-3">
                         <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-700">
@@ -1311,10 +1482,10 @@ function OrdenesPage() {
 
                     <button
                       type="button"
-                      onClick={() => cambiarEstado(o, "PARA_MECANICA")}
+                      onClick={() => enviarAMecanicaIndependiente(o)}
                       className="bg-orange-500 text-black px-4 py-2 font-black uppercase text-[10px]"
                     >
-                      Para mecánica
+                      Mecánica independiente
                     </button>
 
                     <button

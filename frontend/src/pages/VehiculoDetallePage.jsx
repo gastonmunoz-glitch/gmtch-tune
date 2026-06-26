@@ -292,6 +292,16 @@ function VehiculoDetallePage() {
               Boolean(orden.feedback_at);
             const tieneCorreccion =
               Boolean(orden.correccion_estado) || historialCorreccion.length > 0;
+            const tipoIntervencionFisica =
+              orden.intervencion_fisica_tipo || "SIN_INTERVENCION";
+            const tieneIntervencionFisica =
+              tipoIntervencionFisica !== "SIN_INTERVENCION" ||
+              Boolean(String(orden.intervencion_fisica_descripcion || "").trim()) ||
+              orden.intervencion_desmontaje_requerido === true ||
+              orden.intervencion_vaciado_revision_realizada === true ||
+              orden.intervencion_montaje_realizado === true ||
+              orden.intervencion_inspeccion_visual === true ||
+              orden.intervencion_listo_programacion === true;
 
             return (
               <article key={orden.id} className="p-6 space-y-5">
@@ -376,6 +386,52 @@ function VehiculoDetallePage() {
                     <Info label="Observacion pago" value={orden.observacion_pago} />
                   </Panel>
                 </div>
+
+                {tieneIntervencionFisica && (
+                  <Panel title="Intervencion fisica / mecanica">
+                    <Info
+                      label="Tipo"
+                      value={
+                        tipoIntervencionFisica === "ASOCIADA_SERVICIO_TECNICO"
+                          ? "Mecanica asociada al servicio tecnico"
+                          : tipoIntervencionFisica === "MECANICA_INDEPENDIENTE"
+                          ? "Mecanica independiente / mantencion"
+                          : "Sin intervencion fisica"
+                      }
+                    />
+                    <Info
+                      label="Detalle"
+                      value={orden.intervencion_fisica_descripcion}
+                    />
+                    <Info
+                      label="Desmontaje requerido"
+                      value={orden.intervencion_desmontaje_requerido ? "Si" : "No"}
+                    />
+                    <Info
+                      label="Vaciado/revision fisica"
+                      value={
+                        orden.intervencion_vaciado_revision_realizada ? "Si" : "No"
+                      }
+                    />
+                    <Info
+                      label="Montaje realizado"
+                      value={orden.intervencion_montaje_realizado ? "Si" : "No"}
+                    />
+                    <Info
+                      label="Inspeccion visual"
+                      value={orden.intervencion_inspeccion_visual ? "Si" : "No"}
+                    />
+                    <Info
+                      label="Listo programacion/post escritura"
+                      value={orden.intervencion_listo_programacion ? "Si" : "No"}
+                    />
+                    <Info label="Actualizado por" value={orden.intervencion_fisica_por} />
+                    <Info
+                      label="Fecha"
+                      value={formatearFecha(orden.intervencion_fisica_at)}
+                    />
+                  </Panel>
+                )}
 
                 {tieneFeedback && (
                   <Panel title="Feedback operativo">

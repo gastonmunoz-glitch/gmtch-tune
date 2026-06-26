@@ -130,6 +130,12 @@ const ESTADOS_CORRECCION_TECNICA = [
 
 const PRIORIDADES_CORRECCION = ["BAJA", "MEDIA", "ALTA", "URGENTE"];
 
+const TIPOS_INTERVENCION_FISICA = [
+  "SIN_INTERVENCION",
+  "ASOCIADA_SERVICIO_TECNICO",
+  "MECANICA_INDEPENDIENTE",
+];
+
 const ROLES_NOTIFICACION_CORRECCION = [
   "OWNER",
   "ADMIN",
@@ -148,6 +154,11 @@ const normalizarEstadoCorreccion = (valor) => {
 const normalizarPrioridadCorreccion = (valor) => {
   const prioridad = limpiarTexto(valor || "MEDIA").toUpperCase();
   return PRIORIDADES_CORRECCION.includes(prioridad) ? prioridad : "MEDIA";
+};
+
+const normalizarTipoIntervencionFisica = (valor) => {
+  const tipo = limpiarTexto(valor || "SIN_INTERVENCION").toUpperCase();
+  return TIPOS_INTERVENCION_FISICA.includes(tipo) ? tipo : "SIN_INTERVENCION";
 };
 
 const parseJsonSeguro = (valor, defecto = []) => {
@@ -289,6 +300,45 @@ const prepararColumnas = async () => {
     UPDATE "ordenes_trabajo"
     SET "bitacora_operativa" = '[]'::jsonb
     WHERE "bitacora_operativa" IS NULL;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "intervencion_fisica_tipo" VARCHAR(60) DEFAULT 'SIN_INTERVENCION';
+
+    UPDATE "ordenes_trabajo"
+    SET "intervencion_fisica_tipo" = 'SIN_INTERVENCION'
+    WHERE "intervencion_fisica_tipo" IS NULL;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "intervencion_fisica_descripcion" TEXT;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "intervencion_desmontaje_requerido" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "intervencion_vaciado_revision_realizada" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "intervencion_montaje_realizado" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "intervencion_inspeccion_visual" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "intervencion_listo_programacion" BOOLEAN DEFAULT false;
+
+    UPDATE "ordenes_trabajo"
+    SET
+      "intervencion_desmontaje_requerido" = COALESCE("intervencion_desmontaje_requerido", false),
+      "intervencion_vaciado_revision_realizada" = COALESCE("intervencion_vaciado_revision_realizada", false),
+      "intervencion_montaje_realizado" = COALESCE("intervencion_montaje_realizado", false),
+      "intervencion_inspeccion_visual" = COALESCE("intervencion_inspeccion_visual", false),
+      "intervencion_listo_programacion" = COALESCE("intervencion_listo_programacion", false);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "intervencion_fisica_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "intervencion_fisica_at" TIMESTAMP WITH TIME ZONE;
 
     ALTER TABLE "clientes"
     ADD COLUMN IF NOT EXISTS "excluir_estadisticas" BOOLEAN DEFAULT false;
@@ -446,6 +496,17 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     correccion_actualizada_at: row.correccion_actualizada_at,
     correccion_historial: parseJsonSeguro(row.correccion_historial, []),
     bitacora_operativa: parseJsonSeguro(row.bitacora_operativa, []),
+
+    intervencion_fisica_tipo: row.intervencion_fisica_tipo || "SIN_INTERVENCION",
+    intervencion_fisica_descripcion: row.intervencion_fisica_descripcion,
+    intervencion_desmontaje_requerido: row.intervencion_desmontaje_requerido,
+    intervencion_vaciado_revision_realizada:
+      row.intervencion_vaciado_revision_realizada,
+    intervencion_montaje_realizado: row.intervencion_montaje_realizado,
+    intervencion_inspeccion_visual: row.intervencion_inspeccion_visual,
+    intervencion_listo_programacion: row.intervencion_listo_programacion,
+    intervencion_fisica_por: row.intervencion_fisica_por,
+    intervencion_fisica_at: row.intervencion_fisica_at,
 
     recepcionado_por: row.recepcionado_por,
     diagnostico_asignado_a: row.diagnostico_asignado_a,
@@ -624,6 +685,12 @@ const crearOrden = async (req, res) => {
       motivo_ingreso: limpiarTexto(req.body.motivo_ingreso),
       monto_total: normalizarNumero(req.body.monto_total, 0),
       excluir_estadisticas: normalizarBoolean(req.body.excluir_estadisticas),
+      intervencion_fisica_tipo: normalizarTipoIntervencionFisica(
+        req.body.intervencion_fisica_tipo
+      ),
+      intervencion_fisica_descripcion: limpiarTexto(
+        req.body.intervencion_fisica_descripcion
+      ),
     });
 
     const recepcionadoPor =
@@ -696,6 +763,7 @@ const actualizarOrden = async (req, res) => {
       "feedback_operario",
       "detalle_pendiente",
       "recomendacion_futura",
+      "intervencion_fisica_descripcion",
     ];
 
     camposTexto.forEach((campo) => {
@@ -716,6 +784,42 @@ const actualizarOrden = async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(req.body, "requiere_seguimiento")) {
       payload.requiere_seguimiento = normalizarBoolean(req.body.requiere_seguimiento);
+    }
+
+    const camposIntervencionFisica = [
+      "intervencion_fisica_tipo",
+      "intervencion_fisica_descripcion",
+      "intervencion_desmontaje_requerido",
+      "intervencion_vaciado_revision_realizada",
+      "intervencion_montaje_realizado",
+      "intervencion_inspeccion_visual",
+      "intervencion_listo_programacion",
+    ];
+    const actualizaIntervencionFisica = camposIntervencionFisica.some((campo) =>
+      Object.prototype.hasOwnProperty.call(req.body, campo)
+    );
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "intervencion_fisica_tipo")) {
+      payload.intervencion_fisica_tipo = normalizarTipoIntervencionFisica(
+        req.body.intervencion_fisica_tipo
+      );
+    }
+
+    [
+      "intervencion_desmontaje_requerido",
+      "intervencion_vaciado_revision_realizada",
+      "intervencion_montaje_realizado",
+      "intervencion_inspeccion_visual",
+      "intervencion_listo_programacion",
+    ].forEach((campo) => {
+      if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
+        payload[campo] = normalizarBoolean(req.body[campo]);
+      }
+    });
+
+    if (actualizaIntervencionFisica) {
+      payload.intervencion_fisica_por = usuarioActual(req);
+      payload.intervencion_fisica_at = new Date();
     }
 
     if (actualizaFeedback) {

@@ -194,6 +194,57 @@ const OrdenTrabajo = sequelize.define(
       allowNull: false,
       defaultValue: [],
     },
+
+    intervencion_fisica_tipo: {
+      type: DataTypes.STRING(60),
+      allowNull: false,
+      defaultValue: "SIN_INTERVENCION",
+    },
+
+    intervencion_fisica_descripcion: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    intervencion_desmontaje_requerido: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    intervencion_vaciado_revision_realizada: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    intervencion_montaje_realizado: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    intervencion_inspeccion_visual: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    intervencion_listo_programacion: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    intervencion_fisica_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    intervencion_fisica_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "ordenes_trabajo",

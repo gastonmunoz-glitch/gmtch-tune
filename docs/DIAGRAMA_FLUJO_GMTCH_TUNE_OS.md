@@ -63,10 +63,14 @@ flowchart TD
   A["Recepcion"] --> B["Diagnostico"]
   B --> C{"Trabajo requerido"}
   C -->|ECU / TCU| D["Programacion ECU/TCU"]
-  C -->|Mecanica| E["Mecanica"]
+  C -->|Mecanica independiente| E["Mecanica independiente / mantencion"]
   C -->|Archivo externo| F["File Service"]
-  D --> G{"Post escritura aplica"}
-  F --> G
+  D --> X{"Intervencion fisica asociada"}
+  F --> X
+  X -->|DPF/FAP, EGR, escape, desmontaje o montaje| Y["Mecanica asociada al servicio tecnico"]
+  X -->|No aplica| G{"Post escritura aplica"}
+  Y --> Z["Checklist: desmontaje, revision fisica, montaje, inspeccion visual"]
+  Z --> G
   E --> H["Listo para entrega"]
   G -->|Si| I["Registrar post escritura"]
   G -->|No| H
@@ -74,6 +78,8 @@ flowchart TD
   H --> J["Cobro / cierre comercial"]
   J --> K["Entregado"]
 ```
+
+Regla: la mecanica asociada a DPF/FAP, EGR, SCR/AdBlue/DEF, linea de escape o desmontaje/montaje necesario forma parte del servicio tecnico ECU/File Service y no debe gestionarse como mantencion independiente. Servicio sujeto a evaluacion tecnica, normativa aplicable y uso autorizado segun corresponda.
 
 ## 5. Flujo Portal Masters / File Service
 
