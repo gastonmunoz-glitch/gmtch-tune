@@ -9,19 +9,19 @@ const INSTAGRAM_URL = "https://instagram.com/gmtchtune";
 const tabs = {
   tune: {
     label: "Servicios Tune",
-    title: "Ingenieria tecnica para ECU, TCU y diagnostico avanzado",
+    title: "Reprogramacion ECU/TCU, diagnostico y calibracion automotriz",
     text:
-      "Servicios automotrices para talleres, flotas y proyectos tecnicos, siempre segun normativa aplicable, uso autorizado y competicion donde corresponda.",
+      "Stage 1, Stage 2, Stage 3, optimizacion ECU, optimizacion TCU, scanner profesional, revision de DTC y soluciones tecnicas segun evaluacion del vehiculo.",
     cta: "Contactar por WhatsApp",
     ctaHref: WHATSAPP_URL,
     visual: "CALIBRATION CORE",
     cards: [
-      "ECU / TCU Calibration",
-      "Diagnostico avanzado",
-      "Soporte tecnico especializado",
-      "Flotas y proyectos",
-      "Trazabilidad tecnica",
-      "Uso autorizado",
+      "Stage 1 / Stage 2 / Stage 3",
+      "Optimizacion ECU",
+      "Optimizacion TCU",
+      "Scanner profesional",
+      "Revision de DTC",
+      "Flotas y proyectos tecnicos",
     ],
   },
   os: {
@@ -47,7 +47,7 @@ const tabs = {
     label: "Portal File Service",
     title: "Portal para talleres, masters y flujo externo controlado",
     text:
-      "Carga de archivo, revision tecnica, MOD listo, correcciones, nueva lectura si aplica, descarga protegida, historial y auditoria.",
+      "File Service Chile para talleres: carga de archivo, revision de lecturas, MOD listo, correcciones, requerimiento de nueva lectura, descarga protegida e historial.",
     cta: "Entrar al Portal File Service",
     ctaTo: "/portal/login",
     visual: "FILE SERVICE FLOW",
@@ -66,41 +66,105 @@ const tabs = {
 
 const servicios = [
   {
-    icon: "ECU",
-    title: "ECU / TCU Calibration",
-    text: "Calibracion y desarrollo para proyectos tecnicos con criterio profesional.",
-    badge: "MAP",
+    icon: "S1",
+    title: "Stage 1",
+    text: "Mejora de calibracion sobre vehiculo original, enfocada en respuesta, torque y eficiencia segun objetivo tecnico.",
+    badge: "ECU",
+  },
+  {
+    icon: "S2",
+    title: "Stage 2",
+    text: "Calibracion para vehiculos con mejoras de hardware. Requiere evaluacion tecnica, diagnostico y validacion del conjunto.",
+    badge: "HW",
+  },
+  {
+    icon: "S3",
+    title: "Stage 3 / proyectos especiales",
+    text: "Desarrollo para proyectos de alto nivel, competicion donde corresponda y configuraciones que requieren planificacion avanzada.",
+    badge: "PRO",
+  },
+  {
+    icon: "TCU",
+    title: "Optimizacion TCU",
+    text: "Trabajo sobre gestion de transmision cuando aplica: respuesta, estrategia de cambios y coherencia con calibracion del motor.",
+    badge: "GEAR",
   },
   {
     icon: "DTC",
     title: "Diagnostico avanzado",
-    text: "Analisis tecnico, lectura de fallas, evidencia y continuidad del proceso.",
+    text: "Scanner profesional, revision de DTC, analisis de sintomas, pruebas y evidencia para tomar decisiones tecnicas con respaldo.",
     badge: "SCAN",
   },
   {
     icon: "FS",
-    title: "File Service profesional",
-    text: "Gestion de archivos, MOD, correcciones y trazabilidad para talleres.",
+    title: "File Service para talleres",
+    text: "Revision de lecturas, soporte tecnico, MOD, correcciones, nueva lectura cuando corresponde y descarga protegida.",
     badge: "PORTAL",
+  },
+  {
+    icon: "FLT",
+    title: "Flotas y proyectos tecnicos",
+    text: "Soporte para operaciones con varios vehiculos, trazabilidad por unidad, historial y control de procesos.",
+    badge: "FLEET",
   },
   {
     icon: "LAB",
     title: "Soporte a talleres",
-    text: "Acompanamiento especializado para lectura, escritura y validacion.",
+    text: "Acompanamiento para lectura, escritura, validacion, post escritura y continuidad tecnica del trabajo.",
     badge: "HELP",
-  },
-  {
-    icon: "FLT",
-    title: "Flotas y proyectos",
-    text: "Gestion tecnica ordenada para operaciones que requieren control real.",
-    badge: "OPS",
   },
   {
     icon: "TRC",
     title: "Trazabilidad tecnica",
-    text: "Historial, responsables y evidencias para reducir desorden operativo.",
+    text: "Historial por vehiculo, responsables, evidencia, estados operativos y comunicacion ordenada.",
     badge: "TRACE",
   },
+];
+
+const stages = [
+  {
+    title: "Stage 1",
+    text:
+      "Calibracion sobre vehiculo original. Busca mejor respuesta, entrega de torque y eficiencia segun uso y condicion mecanica.",
+    tag: "Original hardware",
+  },
+  {
+    title: "Stage 2",
+    text:
+      "Calibracion para vehiculos con mejoras de hardware. Requiere evaluacion tecnica previa y validacion del conjunto.",
+    tag: "Hardware upgrades",
+  },
+  {
+    title: "Stage 3",
+    text:
+      "Proyectos especiales, desarrollo avanzado y competicion donde corresponda. Requiere diagnostico, planificacion y control.",
+    tag: "Advanced project",
+  },
+];
+
+const technicalSolutions = [
+  "DTC / diagnostico y gestion de fallas",
+  "DPF / FAP",
+  "EGR",
+  "SCR / AdBlue / DEF",
+  "NOx",
+  "Lambda / O2",
+  "TVA / mariposa admision",
+  "IMMO / inmovilizador",
+  "Vmax / limitadores",
+  "Pops & Bangs / sonido deportivo donde corresponda",
+  "Launch Control / funciones especiales si aplica",
+];
+
+const whyChoose = [
+  "Plataforma propia GMTCH Tune OS",
+  "Trazabilidad por vehiculo y orden",
+  "Historial tecnico y evidencia",
+  "Soporte postventa ordenado",
+  "Revision tecnica interna",
+  "Comunicacion clara con clientes y talleres",
+  "Experiencia ECU, TCU y File Service",
+  "Control de procesos y responsables",
 ];
 
 const osFeatures = [
@@ -140,19 +204,33 @@ const capabilityBars = [
 const gallery = [
   {
     title: "Laboratorio ECU",
-    label: "Future image: /web/laboratorio-ecu.jpg",
+    label: "Banco tecnico, lectura, revision y control de archivos",
+    badge: "LAB",
   },
   {
     title: "Diagnostico profesional",
-    label: "Future image: /web/diagnostico.jpg",
+    label: "Scanner, DTC, pruebas y evidencia tecnica",
+    badge: "SCAN",
   },
   {
     title: "File Service",
-    label: "Future image: /web/file-service.jpg",
+    label: "Carga, MOD, correcciones, nueva lectura e historial",
+    badge: "FILE",
   },
   {
-    title: "Centro de mando OS",
-    label: "Future image: /web/operacion.jpg",
+    title: "Centro de mando GMTCH Tune OS",
+    label: "Ordenes, responsables, estados y trazabilidad",
+    badge: "OS",
+  },
+  {
+    title: "Soporte a talleres",
+    label: "Acompanamiento tecnico para lectura, escritura y validacion",
+    badge: "SHOP",
+  },
+  {
+    title: "Proyectos flota",
+    label: "Gestion por unidad, historial y continuidad operativa",
+    badge: "FLEET",
   },
 ];
 
@@ -634,8 +712,9 @@ function LandingPage() {
               </h1>
 
               <p className="mt-7 max-w-3xl text-base font-semibold leading-8 text-slate-300 md:text-xl">
-                Diagnostico, calibracion, soporte tecnico y gestion operativa para talleres,
-                flotas y proyectos de alto nivel.
+                Diagnostico, calibracion automotriz, reprogramacion ECU Chile,
+                reprogramacion TCU, File Service Chile y soporte tecnico para
+                talleres, flotas y proyectos de alto nivel.
               </p>
               <p className="mt-4 max-w-3xl text-sm font-semibold leading-7 text-slate-400">
                 GMTCH Tune combina desarrollo tecnico automotriz con una plataforma propia de
@@ -667,12 +746,69 @@ function LandingPage() {
           <div className="relative mx-auto max-w-7xl">
             <SectionHeader
               eyebrow="Servicios GMTCH Tune"
-              title="Servicios tecnicos con lenguaje de ingenieria y operacion real"
-              text="Calibracion y diagnostico para proyectos tecnicos, uso autorizado, soporte especializado y competicion donde corresponda."
+              title="Servicios completos para clientes finales, talleres y flotas"
+              text="Reprogramacion ECU, reprogramacion TCU, diagnostico automotriz, calibracion automotriz, soporte a talleres y File Service con trazabilidad."
             />
             <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {servicios.map((item) => (
                 <ServiceCard key={item.title} item={item} />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="border-y border-white/10 bg-slate-950/80 px-5 py-24">
+          <div className="mx-auto max-w-7xl">
+            <SectionHeader
+              eyebrow="Etapas de desarrollo"
+              title="Stage 1, Stage 2 y Stage 3 explicados con criterio tecnico"
+              text="Cada proyecto parte con evaluacion del vehiculo, objetivo del cliente y condicion mecanica. La prioridad es trabajar con respaldo, trazabilidad y comunicacion clara."
+            />
+
+            <div className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-3">
+              {stages.map((stage, index) => (
+                <article
+                  key={stage.title}
+                  className="relative overflow-hidden border border-blue-400/25 bg-white/[0.035] p-7 backdrop-blur-xl"
+                >
+                  <div className="circuit-grid absolute inset-0 opacity-40" />
+                  <div className="relative z-10">
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300">
+                      Level 0{index + 1}
+                    </p>
+                    <h3 className="mt-5 text-3xl font-black uppercase text-white">
+                      {stage.title}
+                    </h3>
+                    <p className="mt-4 text-sm font-semibold leading-7 text-slate-300">
+                      {stage.text}
+                    </p>
+                    <span className="mt-6 inline-block border border-slate-600 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-slate-300">
+                      {stage.tag}
+                    </span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="px-5 py-24">
+          <div className="mx-auto grid max-w-7xl grid-cols-1 gap-10 lg:grid-cols-[0.95fr_1.05fr]">
+            <SectionHeader
+              eyebrow="Soluciones tecnicas"
+              title="Diagnostico, gestion de fallas y funciones especiales"
+              text="Servicios sujetos a evaluacion tecnica del vehiculo, normativa aplicable, uso autorizado y/o proyectos de competicion donde corresponda."
+            />
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {technicalSolutions.map((item) => (
+                <div
+                  key={item}
+                  className="border border-slate-700 bg-black/55 px-4 py-4 text-xs font-black uppercase tracking-[0.08em] text-slate-200 transition hover:border-blue-400 hover:bg-blue-950/20"
+                >
+                  <span className="mr-2 text-blue-300">/</span>
+                  {item}
+                </div>
               ))}
             </div>
           </div>
@@ -683,7 +819,7 @@ function LandingPage() {
             <SectionHeader
               eyebrow="GMTCH Tune OS"
               title="Plataforma propia de control operativo"
-              text="Un centro de mando para recepcion, ordenes, estados por area, File Service interno, notificaciones, responsables, historial tecnico y cierre comercial/tecnico."
+              text="La diferencia no es solo calibrar. Es controlar el proceso: recepcion, ordenes, estados operativos, archivos ECU, notificaciones, portal masters, responsables, historial tecnico y cierre comercial/tecnico."
             />
             <div>
               <DashboardMockup />
@@ -707,8 +843,8 @@ function LandingPage() {
             <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_0.9fr]">
               <SectionHeader
                 eyebrow="Portal File Service"
-                title="Flujo externo controlado para talleres, masters y slaves"
-                text="Carga, revision, validacion, MOD, correccion, nueva lectura cuando el metodo fue incorrecto, descarga protegida e historial/auditoria."
+                title="File Service profesional para talleres"
+                text="Los talleres pueden cargar archivos, recibir revision tecnica, gestionar correcciones, responder requerimientos de nueva lectura y descargar MODs con control, historial y auditoria."
               />
               <div className="grid content-end gap-3 sm:grid-cols-2">
                 <ActionButton to="/portal/login">Entrar al Portal File Service</ActionButton>
@@ -736,22 +872,37 @@ function LandingPage() {
         <section className="border-y border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.95),rgba(0,0,0,1))] px-5 py-24">
           <div className="mx-auto max-w-7xl">
             <SectionHeader
-              eyebrow="Capacidades visuales"
-              title="Indicadores dinamicos de enfoque operativo"
-              text="Estos medidores son una representacion visual de capacidades, no metricas comerciales ni promesas de resultado."
+              eyebrow="Por que elegir GMTCH Tune"
+              title="Tecnica, proceso y respaldo en una sola operacion"
+              text="GMTCH Tune no trabaja como una lista de tareas sueltas. Cada servicio se apoya en control de procesos, revision tecnica interna, comunicacion ordenada e historial."
             />
+
             <div className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
-              {capabilityBars.map(([label, value]) => (
-                <div key={label} className="border border-slate-700 bg-black/50 p-5">
-                  <div className="flex justify-between text-xs font-black uppercase tracking-[0.16em] text-slate-300">
-                    <span>{label}</span>
-                    <span className="text-blue-300">Capability</span>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {whyChoose.map((item) => (
+                  <div
+                    key={item}
+                    className="border border-slate-700 bg-black/50 px-4 py-4 text-xs font-black uppercase tracking-[0.08em] text-slate-200"
+                  >
+                    <span className="mr-2 text-blue-300">/</span>
+                    {item}
                   </div>
-                  <div className="mt-4 h-3 overflow-hidden bg-slate-800">
-                    <div className="hud-bar h-full bg-blue-400" style={{ width: `${value}%` }} />
+                ))}
+              </div>
+
+              <div className="space-y-4">
+                {capabilityBars.map(([label, value]) => (
+                  <div key={label} className="border border-slate-700 bg-black/50 p-5">
+                    <div className="flex justify-between text-xs font-black uppercase tracking-[0.16em] text-slate-300">
+                      <span>{label}</span>
+                      <span className="text-blue-300">GMTCH</span>
+                    </div>
+                    <div className="mt-4 h-3 overflow-hidden bg-slate-800">
+                      <div className="hud-bar h-full bg-blue-400" style={{ width: `${value}%` }} />
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         </section>
@@ -759,25 +910,31 @@ function LandingPage() {
         <section className="px-5 py-24">
           <div className="mx-auto max-w-7xl">
             <SectionHeader
-              eyebrow="Fotos / Operacion"
-              title="Espacios preparados para fotografia real de taller y laboratorio"
-              text="Por ahora usamos marcos tecnicos con fondos generados en CSS. Luego se pueden reemplazar por fotos locales reales sin cambiar la estructura."
+              eyebrow="Operacion tecnica"
+              title="Visuales finales de laboratorio, diagnostico y File Service"
+              text="Una presencia digital pensada para transmitir ingenieria automotriz, control, trazabilidad y soporte real a clientes, talleres y flotas."
             />
-            <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {gallery.map((item, index) => (
                 <div
                   key={item.title}
-                  className="group relative min-h-[260px] overflow-hidden border border-slate-700 bg-slate-950 p-5 transition hover:-translate-y-1 hover:border-blue-400"
+                  className="group relative min-h-[300px] overflow-hidden border border-slate-700 bg-slate-950 p-5 transition hover:-translate-y-1 hover:border-blue-400 hover:shadow-[0_0_45px_rgba(37,99,235,0.20)]"
                 >
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.35),transparent_35%),linear-gradient(135deg,rgba(15,23,42,0.9),rgba(0,0,0,1))]" />
                   <div className="circuit-grid absolute inset-0 opacity-60" />
-                  <div className="relative z-10 flex h-full min-h-[220px] flex-col justify-between">
-                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300">
-                      Frame 0{index + 1}
-                    </p>
+                  <div className="absolute left-8 top-20 h-20 w-20 border border-blue-300/40 bg-blue-400/10 shadow-[0_0_32px_rgba(59,130,246,0.18)]" />
+                  <div className="absolute bottom-10 right-8 h-24 w-32 border border-slate-500/40 bg-black/40" />
+                  <div className="absolute left-12 top-32 h-px w-2/3 bg-blue-400/40" />
+                  <div className="relative z-10 flex h-full min-h-[260px] flex-col justify-between">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300">
+                        {item.badge}
+                      </p>
+                      <span className="h-2 w-2 rounded-full bg-blue-300 shadow-[0_0_18px_rgba(96,165,250,1)]" />
+                    </div>
                     <div>
                       <h3 className="text-2xl font-black uppercase text-white">{item.title}</h3>
-                      <p className="mt-3 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                      <p className="mt-3 text-sm font-semibold leading-7 text-slate-300">
                         {item.label}
                       </p>
                     </div>
@@ -795,7 +952,7 @@ function LandingPage() {
               <SectionHeader
                 eyebrow="Contacto"
                 title="Conversemos por el canal correcto"
-                text="El formulario no guarda datos ni simula envio. Construye un mensaje y abre WhatsApp para iniciar la conversacion de forma directa."
+                text="Cotiza reprogramacion ECU, reprogramacion TCU, diagnostico automotriz, File Service, soporte a talleres o proyectos de flota."
               />
               <div className="mt-8 space-y-3 text-sm font-bold text-slate-300">
                 <p>WhatsApp: {WHATSAPP_DISPLAY}</p>
@@ -818,10 +975,10 @@ function LandingPage() {
         <section className="px-5 py-24">
           <div className="mx-auto max-w-7xl border border-blue-400/25 bg-white/[0.035] p-7 backdrop-blur-xl md:p-10">
             <h2 className="max-w-5xl text-3xl font-black uppercase leading-tight text-white md:text-5xl">
-              Una operacion tecnica no se improvisa. Se controla, se traza y se ejecuta con precision.
+              Eleva tu operacion automotriz con una plataforma tecnica disenada para trabajo real.
             </h2>
             <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <ActionButton href={WHATSAPP_URL}>WhatsApp</ActionButton>
+              <ActionButton href={WHATSAPP_URL}>Cotizar servicio</ActionButton>
               <ActionButton to="/portal/login" variant="secondary">Portal File Service</ActionButton>
               <ActionButton to="/login" variant="secondary">Acceso plataforma</ActionButton>
               <ActionButton href={INSTAGRAM_URL} variant="secondary">Instagram</ActionButton>
