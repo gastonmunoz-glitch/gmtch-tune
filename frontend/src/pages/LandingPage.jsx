@@ -1,69 +1,159 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-const WHATSAPP_URL = "https://wa.me/56943921122";
+const WHATSAPP_NUMBER = "56962267642";
+const WHATSAPP_DISPLAY = "+56 9 6226 7642";
+const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}`;
 const INSTAGRAM_URL = "https://instagram.com/gmtchtune";
+
+const tabs = {
+  tune: {
+    label: "Servicios Tune",
+    title: "Ingenieria tecnica para ECU, TCU y diagnostico avanzado",
+    text:
+      "Servicios automotrices para talleres, flotas y proyectos tecnicos, siempre segun normativa aplicable, uso autorizado y competicion donde corresponda.",
+    cta: "Contactar por WhatsApp",
+    ctaHref: WHATSAPP_URL,
+    visual: "CALIBRATION CORE",
+    cards: [
+      "ECU / TCU Calibration",
+      "Diagnostico avanzado",
+      "Soporte tecnico especializado",
+      "Flotas y proyectos",
+      "Trazabilidad tecnica",
+      "Uso autorizado",
+    ],
+  },
+  os: {
+    label: "GMTCH Tune OS",
+    title: "Centro de mando operativo para trabajo automotriz real",
+    text:
+      "Plataforma propia para recepcion, ordenes, estados, responsables, notificaciones, historial tecnico y cierre tecnico/comercial.",
+    cta: "Acceso plataforma",
+    ctaTo: "/login",
+    visual: "OPERATIONS OS",
+    cards: [
+      "Centro de mando operativo",
+      "Recepcion y seguimiento",
+      "Ordenes de trabajo",
+      "Estados operativos",
+      "Notificaciones",
+      "Responsables",
+      "Historial tecnico",
+      "Cierre tecnico y comercial",
+    ],
+  },
+  portal: {
+    label: "Portal File Service",
+    title: "Portal para talleres, masters y flujo externo controlado",
+    text:
+      "Carga de archivo, revision tecnica, MOD listo, correcciones, nueva lectura si aplica, descarga protegida, historial y auditoria.",
+    cta: "Entrar al Portal File Service",
+    ctaTo: "/portal/login",
+    visual: "FILE SERVICE FLOW",
+    cards: [
+      "Carga de archivo",
+      "Revision tecnica",
+      "MOD listo",
+      "Correcciones",
+      "Requerimiento de nueva lectura",
+      "Descarga protegida",
+      "Historial",
+      "Auditoria",
+    ],
+  },
+};
 
 const servicios = [
   {
-    title: "Reprogramacion ECU/TCU",
-    text: "Calibracion tecnica para proyectos autorizados, uso profesional y competicion donde corresponda.",
-    code: "MAP-CAL",
+    icon: "ECU",
+    title: "ECU / TCU Calibration",
+    text: "Calibracion y desarrollo para proyectos tecnicos con criterio profesional.",
+    badge: "MAP",
+  },
+  {
+    icon: "DTC",
+    title: "Diagnostico avanzado",
+    text: "Analisis tecnico, lectura de fallas, evidencia y continuidad del proceso.",
+    badge: "SCAN",
+  },
+  {
+    icon: "FS",
+    title: "File Service profesional",
+    text: "Gestion de archivos, MOD, correcciones y trazabilidad para talleres.",
+    badge: "PORTAL",
+  },
+  {
+    icon: "LAB",
+    title: "Soporte a talleres",
+    text: "Acompanamiento especializado para lectura, escritura y validacion.",
+    badge: "HELP",
+  },
+  {
+    icon: "FLT",
+    title: "Flotas y proyectos",
+    text: "Gestion tecnica ordenada para operaciones que requieren control real.",
+    badge: "OPS",
+  },
+  {
+    icon: "TRC",
+    title: "Trazabilidad tecnica",
+    text: "Historial, responsables y evidencias para reducir desorden operativo.",
+    badge: "TRACE",
+  },
+];
+
+const osFeatures = [
+  "Centro de mando operativo",
+  "Recepcion de vehiculos",
+  "Ordenes de trabajo",
+  "Estados por area",
+  "File Service interno",
+  "Notificaciones operativas",
+  "Portal Masters",
+  "Trazabilidad",
+  "Historial tecnico",
+  "Control de responsables",
+  "Cierre comercial/tecnico",
+];
+
+const fileFlow = [
+  "Carga archivo",
+  "Revision tecnica",
+  "Validacion",
+  "MOD listo",
+  "Correccion si aplica",
+  "Nueva lectura si el metodo fue incorrecto",
+  "Descarga protegida",
+  "Historial/auditoria",
+];
+
+const capabilityBars = [
+  ["Control operativo", 92],
+  ["Trazabilidad", 96],
+  ["File Service", 88],
+  ["Diagnostico", 84],
+  ["Soporte a talleres", 90],
+  ["Portal OS", 86],
+];
+
+const gallery = [
+  {
+    title: "Laboratorio ECU",
+    label: "Future image: /web/laboratorio-ecu.jpg",
   },
   {
     title: "Diagnostico profesional",
-    text: "Lectura, analisis y criterio tecnico sobre fallas, DTC, comportamiento y evidencia del vehiculo.",
-    code: "DTC-SCAN",
+    label: "Future image: /web/diagnostico.jpg",
   },
   {
-    title: "File Service para talleres",
-    text: "Recepcion de archivos, revision tecnica, MOD, correcciones y trazabilidad segun normativa aplicable.",
-    code: "FS-PORTAL",
+    title: "File Service",
+    label: "Future image: /web/file-service.jpg",
   },
   {
-    title: "Soporte tecnico",
-    text: "Acompanamiento operativo para lectura, escritura, validacion y continuidad del trabajo.",
-    code: "SUPPORT",
+    title: "Centro de mando OS",
+    label: "Future image: /web/operacion.jpg",
   },
-  {
-    title: "Flotas y proyectos",
-    text: "Gestion tecnica ordenada para talleres, flotas y proyectos de alto nivel con historial y control.",
-    code: "FLEET",
-  },
-  {
-    title: "Trazabilidad operativa",
-    text: "Ordenes, responsables, estados, evidencia y notificaciones para que el proceso no dependa de memoria.",
-    code: "TRACE",
-  },
-];
-
-const osItems = [
-  "Recepcion de vehiculos",
-  "Ordenes de trabajo",
-  "Estados operativos",
-  "Archivos ECU",
-  "Notificaciones",
-  "Portal Masters",
-  "Control interno",
-  "Trazabilidad",
-];
-
-const fileSteps = [
-  "Carga de archivo",
-  "Revision tecnica",
-  "Historial del caso",
-  "Correcciones ordenadas",
-  "Requerimiento de nueva lectura",
-  "Descarga protegida",
-];
-
-const confianza = [
-  "Operacion ordenada",
-  "Soporte a talleres",
-  "Control de procesos",
-  "Historial tecnico",
-  "Comunicacion clara",
-  "Plataforma propia",
 ];
 
 const LogoGMTCH = ({ className = "h-12 w-auto" }) => {
@@ -103,29 +193,36 @@ const SectionHeader = ({ eyebrow, title, text }) => (
   </div>
 );
 
-const CtaButton = ({ href, to, children, variant = "primary" }) => {
-  const className =
+const ActionButton = ({ href, to, children, variant = "primary" }) => {
+  const classes =
     variant === "primary"
-      ? "border border-blue-400 bg-blue-500 px-5 py-4 text-center text-xs font-black uppercase tracking-[0.12em] text-white shadow-[0_0_30px_rgba(59,130,246,0.35)] transition hover:bg-white hover:text-black"
-      : "border border-slate-500 bg-white/5 px-5 py-4 text-center text-xs font-black uppercase tracking-[0.12em] text-slate-100 backdrop-blur transition hover:border-blue-400 hover:text-blue-200";
+      ? "group relative overflow-hidden border border-blue-300 bg-blue-500 px-5 py-4 text-center text-xs font-black uppercase tracking-[0.12em] text-white shadow-[0_0_34px_rgba(59,130,246,0.34)] transition hover:bg-white hover:text-black"
+      : "group relative overflow-hidden border border-slate-500 bg-white/5 px-5 py-4 text-center text-xs font-black uppercase tracking-[0.12em] text-slate-100 backdrop-blur transition hover:border-blue-300 hover:bg-blue-500/10 hover:text-blue-100";
+
+  const content = (
+    <>
+      <span className="relative z-10">{children}</span>
+      <span className="absolute inset-y-0 left-0 w-0 bg-white/20 transition-all duration-300 group-hover:w-full" />
+    </>
+  );
 
   if (to) {
     return (
-      <Link to={to} className={className}>
-        {children}
+      <Link to={to} className={classes}>
+        {content}
       </Link>
     );
   }
 
   return (
-    <a href={href} target="_blank" rel="noreferrer" className={className}>
-      {children}
+    <a href={href} target="_blank" rel="noreferrer" className={classes}>
+      {content}
     </a>
   );
 };
 
-const TelemetryCard = ({ label, value, status = "OK" }) => (
-  <div className="border border-blue-400/25 bg-white/[0.04] p-4 backdrop-blur-xl">
+const Telemetry = ({ label, value, sub = "READY" }) => (
+  <div className="border border-blue-400/25 bg-white/[0.045] p-4 backdrop-blur-xl">
     <div className="flex items-center justify-between gap-3">
       <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">
         {label}
@@ -134,39 +231,40 @@ const TelemetryCard = ({ label, value, status = "OK" }) => (
     </div>
     <p className="mt-3 text-2xl font-black uppercase text-white">{value}</p>
     <p className="mt-1 text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">
-      {status}
+      {sub}
     </p>
   </div>
 );
 
-const TechnicalVisual = () => (
-  <div className="relative min-h-[520px] overflow-hidden border border-blue-400/30 bg-slate-950/70 p-5 shadow-[0_0_120px_rgba(37,99,235,0.22)] backdrop-blur-xl">
-    <div className="absolute inset-0 bg-[linear-gradient(rgba(96,165,250,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(96,165,250,0.08)_1px,transparent_1px)] bg-[size:34px_34px]" />
-    <div className="absolute left-8 right-8 top-20 h-px bg-blue-400/50" />
-    <div className="absolute bottom-28 left-12 right-16 h-px bg-blue-400/30" />
-    <div className="absolute bottom-12 top-14 left-20 w-px bg-blue-400/40" />
-    <div className="absolute bottom-20 top-32 right-24 w-px bg-blue-400/25" />
-    <div className="absolute left-16 top-16 h-3 w-3 rounded-full bg-blue-300 shadow-[0_0_24px_rgba(96,165,250,1)]" />
-    <div className="absolute right-24 top-20 h-3 w-3 rounded-full bg-cyan-200 shadow-[0_0_24px_rgba(103,232,249,1)]" />
-    <div className="absolute bottom-28 left-20 h-3 w-3 rounded-full bg-blue-300 shadow-[0_0_24px_rgba(96,165,250,1)]" />
+const HudVisual = () => (
+  <div className="relative min-h-[560px] overflow-hidden border border-blue-400/30 bg-slate-950/70 p-5 shadow-[0_0_130px_rgba(37,99,235,0.22)] backdrop-blur-xl">
+    <div className="circuit-grid absolute inset-0" />
+    <div className="circuit-line circuit-line-a" />
+    <div className="circuit-line circuit-line-b" />
+    <div className="circuit-line circuit-line-c" />
+    <div className="circuit-node left-[14%] top-[18%]" />
+    <div className="circuit-node right-[17%] top-[21%]" />
+    <div className="circuit-node bottom-[18%] left-[20%]" />
 
-    <div className="relative z-10 flex h-full flex-col justify-between gap-5">
+    <div className="relative z-10 flex h-full min-h-[520px] flex-col justify-between gap-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.32em] text-blue-300">
-            Technical Lab Interface
+            Technical Diagnostic HUD
           </p>
           <h3 className="mt-3 text-2xl font-black uppercase text-white">
-            ECU / TCU Calibration Core
+            ECU / TCU Control Matrix
           </h3>
         </div>
         <div className="border border-green-400/40 bg-green-400/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-green-200">
-          System online
+          OS Online
         </div>
       </div>
 
-      <div className="mx-auto grid aspect-square w-full max-w-[300px] place-items-center border border-blue-300/40 bg-black/70 shadow-[inset_0_0_45px_rgba(59,130,246,0.22),0_0_60px_rgba(59,130,246,0.25)]">
-        <div className="grid h-[72%] w-[72%] place-items-center border border-slate-500 bg-slate-950 shadow-[inset_0_0_30px_rgba(15,23,42,1)]">
+      <div className="mx-auto grid aspect-square w-full max-w-[310px] place-items-center border border-blue-300/40 bg-black/70 shadow-[inset_0_0_45px_rgba(59,130,246,0.22),0_0_60px_rgba(59,130,246,0.25)]">
+        <div className="relative grid h-[72%] w-[72%] place-items-center border border-slate-500 bg-slate-950 shadow-[inset_0_0_30px_rgba(15,23,42,1)]">
+          <div className="absolute -left-8 top-8 h-px w-8 bg-blue-400/50" />
+          <div className="absolute -right-8 bottom-8 h-px w-8 bg-blue-400/50" />
           <img
             src="/brand/gmtch-isotipo.png"
             alt="GMTCH"
@@ -182,84 +280,353 @@ const TechnicalVisual = () => (
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <TelemetryCard label="Protocol" value="CAN / BOOT" />
-        <TelemetryCard label="State" value="Validated" status="Trace ready" />
-        <TelemetryCard label="Map layer" value="CAL-02" status="Authorized" />
-        <TelemetryCard label="Support" value="Live" status="Portal" />
+        {[
+          ["ECU", "READY"],
+          ["TCU", "MAP"],
+          ["FILE", "QUEUE"],
+          ["TRACE", "OK"],
+          ["Signal", "A-17"],
+          ["Checksum", "PASS"],
+        ].map(([label, value]) => (
+          <div key={`${label}-${value}`} className="border border-slate-700 bg-black/60 p-3">
+            <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              <span>{label}</span>
+              <span className="text-blue-300">{value}</span>
+            </div>
+            <div className="mt-3 h-1 overflow-hidden bg-slate-800">
+              <div className="hud-bar h-full bg-blue-400" />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   </div>
 );
 
+const ExploreTabs = () => {
+  const [activeKey, setActiveKey] = useState("tune");
+  const active = tabs[activeKey];
+
+  return (
+    <section id="explora" className="border-y border-white/10 bg-slate-950/80 px-5 py-24">
+      <div className="mx-auto max-w-7xl">
+        <SectionHeader
+          eyebrow="Explora GMTCH"
+          title="Dos lineas tecnicas, una sola operacion controlada"
+          text="GMTCH Tune une servicios automotrices especializados con GMTCH Tune OS, una plataforma propia para controlar trabajo real."
+        />
+
+        <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-[0.78fr_1.22fr]">
+          <div className="space-y-3">
+            {Object.entries(tabs).map(([key, item]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActiveKey(key)}
+                className={`w-full border px-5 py-4 text-left text-xs font-black uppercase tracking-[0.16em] transition ${
+                  activeKey === key
+                    ? "border-blue-300 bg-blue-500 text-white shadow-[0_0_30px_rgba(59,130,246,0.24)]"
+                    : "border-slate-700 bg-black/50 text-slate-300 hover:border-blue-400"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_0.8fr]">
+            <div className="border border-blue-400/25 bg-black/55 p-6 backdrop-blur-xl">
+              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-blue-300">
+                {active.visual}
+              </p>
+              <h3 className="mt-4 text-2xl font-black uppercase text-white md:text-3xl">
+                {active.title}
+              </h3>
+              <p className="mt-4 text-sm font-semibold leading-7 text-slate-300">
+                {active.text}
+              </p>
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {active.cards.map((card) => (
+                  <div
+                    key={card}
+                    className="border border-slate-700 bg-slate-950/80 px-4 py-3 text-xs font-black uppercase text-slate-200"
+                  >
+                    <span className="mr-2 text-blue-300">/</span>
+                    {card}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-7 max-w-sm">
+                <ActionButton href={active.ctaHref} to={active.ctaTo}>
+                  {active.cta}
+                </ActionButton>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden border border-slate-700 bg-white/[0.035] p-5">
+              <div className="circuit-grid absolute inset-0 opacity-60" />
+              <div className="relative z-10">
+                <p className="text-[10px] font-black uppercase tracking-[0.26em] text-slate-400">
+                  Dynamic module
+                </p>
+                <p className="mt-4 text-4xl font-black uppercase text-blue-200">
+                  {activeKey.toUpperCase()}
+                </p>
+                <div className="mt-8 space-y-4">
+                  {[76, 88, 64, 94].map((value, index) => (
+                    <div key={value + index}>
+                      <div className="flex justify-between text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                        <span>Channel {index + 1}</span>
+                        <span>Active</span>
+                      </div>
+                      <div className="mt-2 h-2 bg-slate-800">
+                        <div
+                          className="hud-bar h-full bg-blue-400"
+                          style={{ width: `${value}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
 const ServiceCard = ({ item }) => (
-  <article className="group border border-slate-700 bg-white/[0.035] p-6 backdrop-blur-xl transition hover:border-blue-400 hover:bg-blue-950/25 hover:shadow-[0_0_45px_rgba(37,99,235,0.16)]">
+  <article className="group translate-y-0 border border-slate-700 bg-white/[0.035] p-6 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-blue-400 hover:bg-blue-950/25 hover:shadow-[0_0_45px_rgba(37,99,235,0.18)]">
     <div className="flex items-center justify-between gap-3">
-      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-blue-300">
-        {item.code}
-      </p>
-      <span className="h-px flex-1 bg-blue-400/30" />
+      <span className="grid h-12 w-12 place-items-center border border-blue-400/40 bg-blue-400/10 text-sm font-black uppercase text-blue-200">
+        {item.icon}
+      </span>
+      <span className="border border-slate-600 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-300">
+        {item.badge}
+      </span>
     </div>
-    <h3 className="mt-5 text-lg font-black uppercase text-white">{item.title}</h3>
+    <h3 className="mt-6 text-lg font-black uppercase text-white">{item.title}</h3>
     <p className="mt-4 text-sm font-semibold leading-7 text-slate-300">{item.text}</p>
   </article>
 );
 
-const ChipList = ({ items }) => (
-  <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-    {items.map((item) => (
-      <div
-        key={item}
-        className="border border-blue-400/20 bg-slate-950/70 px-4 py-4 text-xs font-black uppercase tracking-[0.08em] text-slate-100 backdrop-blur"
-      >
-        <span className="mr-2 text-blue-300">/</span>
-        {item}
-      </div>
-    ))}
+const DashboardMockup = () => (
+  <div className="border border-blue-400/25 bg-black/60 p-5 backdrop-blur-xl">
+    <div className="flex items-center justify-between border-b border-white/10 pb-4">
+      <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300">
+        GMTCH Tune OS
+      </p>
+      <span className="border border-green-400/40 px-3 py-1 text-[10px] font-black uppercase text-green-300">
+        Command center
+      </span>
+    </div>
+
+    <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+      {["Recepcion", "Diagnostico", "File Service", "Entrega"].map((item, index) => (
+        <div key={item} className="border border-slate-700 bg-slate-950 p-3">
+          <p className="text-[10px] font-black uppercase text-slate-500">Area</p>
+          <p className="mt-2 text-xs font-black uppercase text-white">{item}</p>
+          <div className="mt-3 h-1 bg-slate-800">
+            <div className="h-full bg-blue-400" style={{ width: `${62 + index * 8}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div className="mt-5 overflow-hidden border border-slate-700">
+      {[
+        ["#1042", "LISTO ENTREGA", "RECEPCION", "ATENCION"],
+        ["#1043", "EN PROGRAMACION", "ECU", "OK"],
+        ["#1044", "PAGO PENDIENTE", "CAJA", "ALERTA"],
+      ].map((row) => (
+        <div
+          key={row[0]}
+          className="grid grid-cols-4 gap-2 border-b border-slate-800 bg-slate-950/80 px-3 py-3 text-[10px] font-black uppercase text-slate-300 last:border-b-0"
+        >
+          {row.map((cell) => (
+            <span key={cell}>{cell}</span>
+          ))}
+        </div>
+      ))}
+    </div>
   </div>
 );
+
+const ContactForm = () => {
+  const [form, setForm] = useState({
+    nombre: "",
+    telefono: "",
+    email: "",
+    tipo: "Servicio ECU/TCU",
+    mensaje: "",
+  });
+
+  const whatsappHref = useMemo(() => {
+    const texto = [
+      "Hola GMTCH Tune, quiero hacer una consulta.",
+      `Nombre: ${form.nombre || "No indicado"}`,
+      `Telefono: ${form.telefono || "No indicado"}`,
+      `Email: ${form.email || "No indicado"}`,
+      `Tipo de solicitud: ${form.tipo}`,
+      `Mensaje: ${form.mensaje || "No indicado"}`,
+    ].join("\n");
+
+    return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(texto)}`;
+  }, [form]);
+
+  const update = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  return (
+    <form
+      className="border border-blue-400/25 bg-white/[0.035] p-5 backdrop-blur-xl"
+      onSubmit={(event) => {
+        event.preventDefault();
+        window.open(whatsappHref, "_blank", "noopener,noreferrer");
+      }}
+    >
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <input
+          className="border border-slate-700 bg-black px-4 py-3 text-sm font-bold text-white outline-none focus:border-blue-400"
+          placeholder="Nombre"
+          value={form.nombre}
+          onChange={(event) => update("nombre", event.target.value)}
+        />
+        <input
+          className="border border-slate-700 bg-black px-4 py-3 text-sm font-bold text-white outline-none focus:border-blue-400"
+          placeholder="Telefono"
+          value={form.telefono}
+          onChange={(event) => update("telefono", event.target.value)}
+        />
+        <input
+          className="border border-slate-700 bg-black px-4 py-3 text-sm font-bold text-white outline-none focus:border-blue-400"
+          placeholder="Email"
+          value={form.email}
+          onChange={(event) => update("email", event.target.value)}
+        />
+        <select
+          className="border border-slate-700 bg-black px-4 py-3 text-sm font-bold text-white outline-none focus:border-blue-400"
+          value={form.tipo}
+          onChange={(event) => update("tipo", event.target.value)}
+        >
+          <option>Servicio ECU/TCU</option>
+          <option>Diagnostico</option>
+          <option>File Service</option>
+          <option>Taller/Master</option>
+          <option>Flota/empresa</option>
+          <option>Soporte plataforma</option>
+        </select>
+      </div>
+      <textarea
+        className="mt-3 min-h-[130px] w-full border border-slate-700 bg-black px-4 py-3 text-sm font-bold text-white outline-none focus:border-blue-400"
+        placeholder="Mensaje"
+        value={form.mensaje}
+        onChange={(event) => update("mensaje", event.target.value)}
+      />
+      <button
+        type="submit"
+        className="mt-4 w-full border border-blue-300 bg-blue-500 px-5 py-4 text-xs font-black uppercase tracking-[0.12em] text-white transition hover:bg-white hover:text-black"
+      >
+        Enviar por WhatsApp
+      </button>
+    </form>
+  );
+};
 
 function LandingPage() {
   return (
     <div className="min-h-screen bg-black text-white selection:bg-blue-500 selection:text-white">
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/78 backdrop-blur-xl">
+      <style>{`
+        @keyframes gmtchFlow {
+          0% { transform: translateX(-100%); opacity: 0.2; }
+          45% { opacity: 1; }
+          100% { transform: translateX(120%); opacity: 0.15; }
+        }
+        @keyframes gmtchPulseGlow {
+          0%, 100% { box-shadow: 0 0 18px rgba(59, 130, 246, 0.25); }
+          50% { box-shadow: 0 0 42px rgba(59, 130, 246, 0.55); }
+        }
+        .circuit-grid {
+          background-image:
+            linear-gradient(rgba(96,165,250,0.08) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(96,165,250,0.08) 1px, transparent 1px);
+          background-size: 34px 34px;
+        }
+        .circuit-line {
+          position: absolute;
+          height: 1px;
+          background: linear-gradient(90deg, transparent, rgba(96,165,250,0.75), transparent);
+          animation: gmtchFlow 4.2s linear infinite;
+        }
+        .circuit-line-a { left: 8%; right: 8%; top: 21%; }
+        .circuit-line-b { left: 14%; right: 18%; top: 61%; animation-delay: 1.2s; }
+        .circuit-line-c { left: 22%; right: 12%; top: 78%; animation-delay: 2.1s; }
+        .circuit-node {
+          position: absolute;
+          height: 10px;
+          width: 10px;
+          border-radius: 999px;
+          background: rgb(147, 197, 253);
+          box-shadow: 0 0 24px rgba(96,165,250,1);
+          animation: gmtchPulseGlow 2.4s ease-in-out infinite;
+        }
+        .hud-bar {
+          position: relative;
+          overflow: hidden;
+        }
+        .hud-bar::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          width: 45%;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent);
+          animation: gmtchFlow 2.2s linear infinite;
+        }
+      `}</style>
+
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4">
-          <Link to="/web" className="flex items-center gap-3">
+          <a href="#inicio" className="flex items-center gap-3">
             <LogoGMTCH className="h-10 w-auto max-w-[180px]" />
-          </Link>
+          </a>
 
           <nav className="hidden items-center gap-6 text-[11px] font-black uppercase tracking-[0.18em] text-slate-400 lg:flex">
-            <a href="#servicios" className="hover:text-blue-300">
-              Servicios
-            </a>
-            <a href="#tune-os" className="hover:text-blue-300">
-              Tune OS
-            </a>
-            <a href="#file-service" className="hover:text-blue-300">
-              File Service
-            </a>
-            <a href="#contacto" className="hover:text-blue-300">
-              Contacto
-            </a>
+            <a href="#inicio" className="hover:text-blue-300">Inicio</a>
+            <a href="#servicios" className="hover:text-blue-300">Servicios</a>
+            <a href="#tune-os" className="hover:text-blue-300">GMTCH Tune OS</a>
+            <a href="#file-service" className="hover:text-blue-300">File Service</a>
+            <a href="#contacto" className="hover:text-blue-300">Contacto</a>
           </nav>
 
-          <Link
-            to="/login"
-            className="border border-blue-400/60 bg-blue-500/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.14em] text-blue-100 transition hover:bg-blue-500 hover:text-white"
-          >
-            Acceso plataforma
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/portal/login"
+              className="hidden border border-slate-600 bg-white/5 px-4 py-3 text-[10px] font-black uppercase tracking-[0.14em] text-slate-100 transition hover:border-blue-300 sm:block"
+            >
+              Portal
+            </Link>
+            <Link
+              to="/login"
+              className="border border-blue-400/60 bg-blue-500/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.14em] text-blue-100 transition hover:bg-blue-500 hover:text-white"
+            >
+              Acceso
+            </Link>
+          </div>
         </div>
       </header>
 
       <main>
-        <section className="relative overflow-hidden border-b border-white/10">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.30),transparent_32%),radial-gradient(circle_at_80%_18%,rgba(14,165,233,0.18),transparent_28%),linear-gradient(135deg,#020617_0%,#000_42%,#07111f_100%)]" />
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.045)_1px,transparent_1px)] bg-[size:52px_52px]" />
+        <section id="inicio" className="relative overflow-hidden border-b border-white/10">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(59,130,246,0.32),transparent_32%),radial-gradient(circle_at_80%_18%,rgba(14,165,233,0.18),transparent_28%),linear-gradient(135deg,#020617_0%,#000_42%,#07111f_100%)]" />
+          <div className="circuit-grid absolute inset-0 opacity-60" />
           <div className="relative mx-auto grid min-h-[calc(100vh-73px)] max-w-7xl grid-cols-1 items-center gap-10 px-5 py-16 lg:grid-cols-[1.05fr_0.95fr]">
             <div>
-              <LogoGMTCH className="mb-8 h-auto w-full max-w-[360px] md:max-w-[470px]" />
+              <LogoGMTCH className="mb-8 h-auto w-full max-w-[360px] md:max-w-[480px]" />
               <div className="inline-flex border border-blue-400/40 bg-blue-400/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.28em] text-blue-200">
-                ECU / TCU / File Service / Diagnostics
+                ECU - TCU - File Service - GMTCH Tune OS
               </div>
 
               <h1 className="mt-7 max-w-5xl text-4xl font-black uppercase leading-[0.95] text-white md:text-6xl xl:text-7xl">
@@ -270,35 +637,38 @@ function LandingPage() {
                 Diagnostico, calibracion, soporte tecnico y gestion operativa para talleres,
                 flotas y proyectos de alto nivel.
               </p>
+              <p className="mt-4 max-w-3xl text-sm font-semibold leading-7 text-slate-400">
+                GMTCH Tune combina desarrollo tecnico automotriz con una plataforma propia de
+                trazabilidad y control operativo.
+              </p>
 
-              <div className="mt-9 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <CtaButton href={WHATSAPP_URL}>Contactar por WhatsApp</CtaButton>
-                <CtaButton to="/login" variant="secondary">
-                  Acceso plataforma
-                </CtaButton>
-                <CtaButton to="/portal/login" variant="secondary">
-                  Portal File Service
-                </CtaButton>
+              <div className="mt-9 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <ActionButton href={WHATSAPP_URL}>WhatsApp</ActionButton>
+                <ActionButton to="/login" variant="secondary">Acceso plataforma</ActionButton>
+                <ActionButton to="/portal/login" variant="secondary">Portal File Service</ActionButton>
+                <ActionButton href={INSTAGRAM_URL} variant="secondary">Instagram</ActionButton>
               </div>
 
               <div className="mt-8 grid grid-cols-3 gap-3 border-t border-white/10 pt-6">
-                <TelemetryCard label="Trace" value="100%" status="Operativo" />
-                <TelemetryCard label="Portal" value="V1" status="Activo" />
-                <TelemetryCard label="Control" value="OS" status="GMTCH" />
+                <Telemetry label="Trace" value="OK" sub="Operativo" />
+                <Telemetry label="Queue" value="FS" sub="Portal" />
+                <Telemetry label="OS" value="Live" sub="GMTCH" />
               </div>
             </div>
 
-            <TechnicalVisual />
+            <HudVisual />
           </div>
         </section>
+
+        <ExploreTabs />
 
         <section id="servicios" className="relative overflow-hidden px-5 py-24">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_90%_0%,rgba(37,99,235,0.16),transparent_28%)]" />
           <div className="relative mx-auto max-w-7xl">
             <SectionHeader
-              eyebrow="Servicios principales"
-              title="Electronica automotriz, datos y criterio tecnico"
-              text="Trabajo profesional orientado a proyectos tecnicos, uso autorizado y competicion donde corresponda. Sin promesas vacias: proceso, evidencia y soporte."
+              eyebrow="Servicios GMTCH Tune"
+              title="Servicios tecnicos con lenguaje de ingenieria y operacion real"
+              text="Calibracion y diagnostico para proyectos tecnicos, uso autorizado, soporte especializado y competicion donde corresponda."
             />
             <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {servicios.map((item) => (
@@ -312,49 +682,51 @@ function LandingPage() {
           <div className="mx-auto grid max-w-7xl grid-cols-1 gap-10 lg:grid-cols-[0.85fr_1.15fr]">
             <SectionHeader
               eyebrow="GMTCH Tune OS"
-              title="Plataforma propia para operar trabajo real"
-              text="No es solo una web. GMTCH Tune OS organiza la operacion interna: recepcion, ordenes, estados, responsables, archivos ECU, notificaciones y portal masters."
+              title="Plataforma propia de control operativo"
+              text="Un centro de mando para recepcion, ordenes, estados por area, File Service interno, notificaciones, responsables, historial tecnico y cierre comercial/tecnico."
             />
-
-            <div className="border border-blue-400/25 bg-black/60 p-6 backdrop-blur-xl">
-              <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-4">
-                <p className="text-xs font-black uppercase tracking-[0.24em] text-blue-300">
-                  Operational Stack
-                </p>
-                <span className="text-[10px] font-black uppercase text-green-300">
-                  Online
-                </span>
+            <div>
+              <DashboardMockup />
+              <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {osFeatures.map((item) => (
+                  <div
+                    key={item}
+                    className="border border-slate-700 bg-black/50 px-4 py-3 text-xs font-black uppercase text-slate-200"
+                  >
+                    <span className="mr-2 text-blue-300">/</span>
+                    {item}
+                  </div>
+                ))}
               </div>
-              <ChipList items={osItems} />
-              <p className="mt-8 border-l-2 border-blue-400 pl-4 text-sm font-semibold leading-7 text-slate-300">
-                La plataforma es la fuente oficial. Lo que no se registra, no se puede controlar.
-              </p>
             </div>
           </div>
         </section>
 
         <section id="file-service" className="px-5 py-24">
           <div className="mx-auto max-w-7xl">
-            <SectionHeader
-              eyebrow="Portal File Service"
-              title="Flujo tecnico con historial, correcciones y nueva lectura"
-              text="Un proceso disenado para talleres y masters: carga de archivo, revision, trazabilidad, requerimientos tecnicos, MOD y descarga protegida."
-            />
+            <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_0.9fr]">
+              <SectionHeader
+                eyebrow="Portal File Service"
+                title="Flujo externo controlado para talleres, masters y slaves"
+                text="Carga, revision, validacion, MOD, correccion, nueva lectura cuando el metodo fue incorrecto, descarga protegida e historial/auditoria."
+              />
+              <div className="grid content-end gap-3 sm:grid-cols-2">
+                <ActionButton to="/portal/login">Entrar al Portal File Service</ActionButton>
+                <ActionButton href={WHATSAPP_URL} variant="secondary">Consultar por WhatsApp</ActionButton>
+              </div>
+            </div>
 
-            <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {fileSteps.map((step, index) => (
+            <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {fileFlow.map((step, index) => (
                 <div
                   key={step}
-                  className="relative overflow-hidden border border-slate-700 bg-white/[0.035] p-6 backdrop-blur-xl"
+                  className="relative overflow-hidden border border-slate-700 bg-white/[0.035] p-6 backdrop-blur-xl transition hover:border-blue-400"
                 >
                   <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full border border-blue-400/20" />
                   <p className="text-[10px] font-black uppercase tracking-[0.26em] text-blue-300">
                     FS-0{index + 1}
                   </p>
-                  <h3 className="mt-5 text-lg font-black uppercase text-white">{step}</h3>
-                  <p className="mt-4 text-sm font-semibold leading-7 text-slate-400">
-                    Registro controlado para mantener continuidad tecnica sin perder contexto ni evidencia.
-                  </p>
+                  <h3 className="mt-5 text-base font-black uppercase text-white">{step}</h3>
                 </div>
               ))}
             </div>
@@ -364,52 +736,102 @@ function LandingPage() {
         <section className="border-y border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.95),rgba(0,0,0,1))] px-5 py-24">
           <div className="mx-auto max-w-7xl">
             <SectionHeader
-              eyebrow="Confianza operacional"
-              title="Seriedad tecnica, comunicacion clara y control de procesos"
-              text="GMTCH trabaja con una logica simple: cada caso debe tener contexto, evidencia, responsable y cierre claro."
+              eyebrow="Capacidades visuales"
+              title="Indicadores dinamicos de enfoque operativo"
+              text="Estos medidores son una representacion visual de capacidades, no metricas comerciales ni promesas de resultado."
             />
-            <ChipList items={confianza} />
+            <div className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {capabilityBars.map(([label, value]) => (
+                <div key={label} className="border border-slate-700 bg-black/50 p-5">
+                  <div className="flex justify-between text-xs font-black uppercase tracking-[0.16em] text-slate-300">
+                    <span>{label}</span>
+                    <span className="text-blue-300">Capability</span>
+                  </div>
+                  <div className="mt-4 h-3 overflow-hidden bg-slate-800">
+                    <div className="hud-bar h-full bg-blue-400" style={{ width: `${value}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
-        <section id="contacto" className="relative overflow-hidden px-5 py-24">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(37,99,235,0.20),transparent_36%)]" />
-          <div className="relative mx-auto grid max-w-7xl grid-cols-1 gap-8 border border-blue-400/25 bg-white/[0.035] p-7 backdrop-blur-xl md:p-10 lg:grid-cols-[1fr_0.9fr]">
-            <div>
-              <p className="text-[11px] font-black uppercase tracking-[0.34em] text-blue-300">
-                Siguiente nivel
-              </p>
-              <h2 className="mt-4 text-3xl font-black uppercase leading-tight text-white md:text-5xl">
-                Eleva tu operacion automotriz con una plataforma tecnica disenada para trabajo real.
-              </h2>
-              <p className="mt-5 max-w-3xl text-sm font-semibold leading-7 text-slate-300 md:text-base">
-                Atencion tecnica en La Florida, Santiago. Soporte para vehiculos, talleres, flotas y File Service.
-              </p>
+        <section className="px-5 py-24">
+          <div className="mx-auto max-w-7xl">
+            <SectionHeader
+              eyebrow="Fotos / Operacion"
+              title="Espacios preparados para fotografia real de taller y laboratorio"
+              text="Por ahora usamos marcos tecnicos con fondos generados en CSS. Luego se pueden reemplazar por fotos locales reales sin cambiar la estructura."
+            />
+            <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {gallery.map((item, index) => (
+                <div
+                  key={item.title}
+                  className="group relative min-h-[260px] overflow-hidden border border-slate-700 bg-slate-950 p-5 transition hover:-translate-y-1 hover:border-blue-400"
+                >
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.35),transparent_35%),linear-gradient(135deg,rgba(15,23,42,0.9),rgba(0,0,0,1))]" />
+                  <div className="circuit-grid absolute inset-0 opacity-60" />
+                  <div className="relative z-10 flex h-full min-h-[220px] flex-col justify-between">
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300">
+                      Frame 0{index + 1}
+                    </p>
+                    <div>
+                      <h3 className="text-2xl font-black uppercase text-white">{item.title}</h3>
+                      <p className="mt-3 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                        {item.label}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
+          </div>
+        </section>
 
-            <div className="grid content-center gap-3">
-              <CtaButton href={WHATSAPP_URL}>WhatsApp</CtaButton>
-              <CtaButton href={INSTAGRAM_URL} variant="secondary">
-                Instagram
-              </CtaButton>
-              <CtaButton to="/portal/login" variant="secondary">
-                Portal File Service
-              </CtaButton>
-              <CtaButton to="/login" variant="secondary">
-                Acceso plataforma
-              </CtaButton>
-              <div className="mt-4 border-t border-white/10 pt-4 text-xs font-bold uppercase leading-6 text-slate-400">
-                <p>La Florida, Santiago</p>
-                <p>Lunes a viernes 9:30 a 21:00</p>
-                <p>Sabado 9:30 a 16:30</p>
+        <section id="contacto" className="relative overflow-hidden border-y border-white/10 px-5 py-24">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(37,99,235,0.20),transparent_36%)]" />
+          <div className="relative mx-auto grid max-w-7xl grid-cols-1 gap-8 lg:grid-cols-[0.82fr_1.18fr]">
+            <div>
+              <SectionHeader
+                eyebrow="Contacto"
+                title="Conversemos por el canal correcto"
+                text="El formulario no guarda datos ni simula envio. Construye un mensaje y abre WhatsApp para iniciar la conversacion de forma directa."
+              />
+              <div className="mt-8 space-y-3 text-sm font-bold text-slate-300">
+                <p>WhatsApp: {WHATSAPP_DISPLAY}</p>
+                <p>Instagram: @gmtchtune</p>
+                <p>
+                  Email: <a className="text-blue-300" href="mailto:contacto@gmtchtune.com">contacto@gmtchtune.com</a>
+                </p>
+                <p>
+                  Ventas: <a className="text-blue-300" href="mailto:ventas@gmtchtune.com">ventas@gmtchtune.com</a>
+                </p>
+                <p>
+                  File Service: <a className="text-blue-300" href="mailto:fileservice@gmtchtune.com">fileservice@gmtchtune.com</a>
+                </p>
               </div>
+            </div>
+            <ContactForm />
+          </div>
+        </section>
+
+        <section className="px-5 py-24">
+          <div className="mx-auto max-w-7xl border border-blue-400/25 bg-white/[0.035] p-7 backdrop-blur-xl md:p-10">
+            <h2 className="max-w-5xl text-3xl font-black uppercase leading-tight text-white md:text-5xl">
+              Una operacion tecnica no se improvisa. Se controla, se traza y se ejecuta con precision.
+            </h2>
+            <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <ActionButton href={WHATSAPP_URL}>WhatsApp</ActionButton>
+              <ActionButton to="/portal/login" variant="secondary">Portal File Service</ActionButton>
+              <ActionButton to="/login" variant="secondary">Acceso plataforma</ActionButton>
+              <ActionButton href={INSTAGRAM_URL} variant="secondary">Instagram</ActionButton>
             </div>
           </div>
         </section>
       </main>
 
       <footer className="border-t border-white/10 px-5 py-8 text-center text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">
-        GMTCH Tune / Ingenieria automotriz avanzada / Control tecnico y trazabilidad
+        GMTCH Tune / Ingenieria automotriz avanzada / GMTCH Tune OS / File Service
       </footer>
     </div>
   );
