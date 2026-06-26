@@ -7,8 +7,10 @@ const {
   PortalCreditoMovimiento,
 } = require("../models");
 const { registrarEventoPortal } = require("./portalAuthController");
+const { crearNotificacionesInternas } = require("./notificacionController");
 
 const ESTADOS_DESCARGABLES = ["MOD_LISTO", "CORREGIDO", "ENTREGADO"];
+const ROLES_NOTIFICACION_PORTAL = ["OWNER", "ADMIN", "OPERADOR_ECU", "TUNER"];
 let columnasNuevaLecturaPreparadas = false;
 
 const limpiarTexto = (valor) => {
@@ -26,6 +28,29 @@ const crearError = (status, message) => {
   const error = new Error(message);
   error.status = status;
   return error;
+};
+
+const crearNotificacionPortalInterna = async ({
+  tipo,
+  titulo,
+  mensaje,
+  archivo,
+}) => {
+  try {
+    await crearNotificacionesInternas({
+      rolesDestino: ROLES_NOTIFICACION_PORTAL,
+      tipo,
+      titulo,
+      mensaje,
+      archivoECUId: null,
+      ordenId: null,
+    });
+  } catch (error) {
+    console.warn(
+      "No se pudo crear notificacion interna portal:",
+      error.message
+    );
+  }
 };
 
 const prepararColumnasNuevaLectura = async () => {
@@ -220,6 +245,13 @@ const crearPortalFile = async (req, res) => {
       },
       creado_por: req.portal.usuario.email,
     });
+
+    await crearNotificacionPortalInterna({
+      tipo: "PORTAL_FILE_NUEVO",
+      titulo: "Nuevo archivo Portal File Service",
+      mensaje: `Nuevo archivo subido por ${req.portal.usuario.email} para ${archivo.tipo_servicio}.`,
+      archivo,
+    });
   } catch (error) {
     console.error("ERROR CREANDO PORTAL FILE:", error);
     res.status(500).json({ error: error.message });
@@ -284,6 +316,13 @@ const solicitarCorreccionPortal = async (req, res) => {
         fileId: archivo.id,
       },
       creado_por: req.portal.usuario.email,
+    });
+
+    await crearNotificacionPortalInterna({
+      tipo: "PORTAL_FILE_CORRECCION",
+      titulo: "Correccion enviada en Portal File Service",
+      mensaje: `El usuario ${req.portal.usuario.email} solicito correccion en File #${archivo.id}.`,
+      archivo,
     });
 
     res.json({
@@ -369,6 +408,13 @@ const subirNuevaLecturaPortal = async (req, res) => {
         nombre_nueva_lectura: archivo.nombre_nueva_lectura,
       },
       creado_por: req.portal.usuario.email,
+    });
+
+    await crearNotificacionPortalInterna({
+      tipo: "PORTAL_FILE_NUEVA_LECTURA",
+      titulo: "Nueva lectura subida por master/slave",
+      mensaje: `El usuario ${req.portal.usuario.email} subio una nueva lectura para File #${archivo.id}.`,
+      archivo,
     });
 
     res.json({

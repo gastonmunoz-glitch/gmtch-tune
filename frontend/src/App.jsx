@@ -613,6 +613,7 @@ function App() {
                 onMarcarLeida={marcarNotificacionLeida}
                 onMarcarTodas={marcarTodasNotificacionesLeidas}
                 onAlternarSonido={alternarSonidoNotificaciones}
+                onProbarSonido={reproducirSonidoNotificacion}
               />
 
               <AlertaNotificacionFlotante
@@ -802,6 +803,7 @@ const NotificacionesInternas = ({
   onMarcarLeida,
   onMarcarTodas,
   onAlternarSonido,
+  onProbarSonido,
 }) => {
   const ultimas = notificaciones.slice(0, 5);
 
@@ -827,6 +829,14 @@ const NotificacionesInternas = ({
             }`}
           >
             {sonidoActivo ? "Sonido activo" : "Activar sonido"}
+          </button>
+
+          <button
+            type="button"
+            onClick={onProbarSonido}
+            className="border-2 border-black bg-white px-3 py-2 rounded-lg text-[10px] font-black uppercase text-black hover:bg-gray-100 transition"
+          >
+            Probar sonido
           </button>
 
           <button

@@ -15,6 +15,8 @@ const {
   eliminarCuentaPrueba,
   listarFilesAdmin,
   obtenerFileAdmin,
+  descargarOriginalAdmin,
+  descargarNuevaLecturaAdmin,
   actualizarFileAdmin,
   solicitarNuevaLecturaAdmin,
   subirModAdmin,
@@ -73,6 +75,8 @@ router.patch("/usuarios/:id/estado", actualizarEstadoUsuario);
 router.post("/usuarios/:id/reset-password", resetPasswordUsuario);
 
 router.get("/files", listarFilesAdmin);
+router.get("/files/:id/download-original", descargarOriginalAdmin);
+router.get("/files/:id/download-nueva-lectura", descargarNuevaLecturaAdmin);
 router.get("/files/:id", obtenerFileAdmin);
 router.patch("/files/:id", actualizarFileAdmin);
 router.post("/files/:id/solicitar-nueva-lectura", solicitarNuevaLecturaAdmin);

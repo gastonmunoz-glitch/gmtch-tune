@@ -154,6 +154,18 @@ export const portalAdminUploadMod = (id, formData) =>
     tokenType: "internal",
   });
 
+export const portalAdminDownloadOriginal = (id) =>
+  requestPortal(`/portal/admin/files/${id}/download-original`, {
+    tokenType: "internal",
+    expectBlob: true,
+  });
+
+export const portalAdminDownloadNuevaLectura = (id) =>
+  requestPortal(`/portal/admin/files/${id}/download-nueva-lectura`, {
+    tokenType: "internal",
+    expectBlob: true,
+  });
+
 export const portalAdminSolicitarNuevaLectura = (id, payload) =>
   requestPortal(`/portal/admin/files/${id}/solicitar-nueva-lectura`, {
     method: "POST",

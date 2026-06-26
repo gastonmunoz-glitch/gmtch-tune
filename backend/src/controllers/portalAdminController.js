@@ -1,6 +1,8 @@
 const sequelize = require("../config/database");
 const { Op } = require("sequelize");
 const bcrypt = require("bcryptjs");
+const fs = require("fs");
+const path = require("path");
 const {
   PortalCuenta,
   PortalUsuario,
@@ -32,6 +34,29 @@ const normalizarMonto = (valor, defecto = 0) => {
   const numero = Number(valor);
   if (!Number.isFinite(numero)) return defecto;
   return Math.max(0, Number(numero.toFixed(2)));
+};
+
+const archivoExiste = (ruta) => {
+  if (!ruta) return false;
+  try {
+    return fs.existsSync(path.resolve(ruta));
+  } catch {
+    return false;
+  }
+};
+
+const descargarArchivoSeguro = (res, ruta, nombre) => {
+  const rutaAbsoluta = path.resolve(ruta);
+  const nombreDescarga = nombre || path.basename(rutaAbsoluta);
+
+  res.setHeader("Content-Type", "application/octet-stream");
+  return res.download(rutaAbsoluta, nombreDescarga, (error) => {
+    if (error && !res.headersSent) {
+      res.status(500).json({
+        error: "No se pudo descargar el archivo",
+      });
+    }
+  });
 };
 
 const normalizarBoolean = (valor, defecto) => {
@@ -819,6 +844,95 @@ const obtenerFileAdmin = async (req, res) => {
   }
 };
 
+const descargarOriginalAdmin = async (req, res) => {
+  try {
+    await prepararColumnasNuevaLectura();
+
+    const archivo = await PortalFileService.findByPk(req.params.id);
+
+    if (!archivo) {
+      return res.status(404).json({
+        error: "Solicitud portal no encontrada",
+      });
+    }
+
+    if (!archivo.archivo_original || !archivoExiste(archivo.archivo_original)) {
+      return res.status(404).json({
+        error: "Archivo no encontrado en almacenamiento",
+      });
+    }
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: archivo.cuentaId,
+      usuarioId: archivo.usuarioId,
+      tipo: "FILE_ORIGINAL_DESCARGADO_ADMIN",
+      resultado: "OK",
+      descripcion: "Admin descargo archivo original desde portal admin",
+      metadata: {
+        fileId: archivo.id,
+        nombre_original: archivo.nombre_original,
+      },
+      creado_por: usuarioInternoActual(req),
+    });
+
+    return descargarArchivoSeguro(
+      res,
+      archivo.archivo_original,
+      archivo.nombre_original
+    );
+  } catch (error) {
+    console.error("ERROR DESCARGANDO ORIGINAL PORTAL ADMIN:", error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+const descargarNuevaLecturaAdmin = async (req, res) => {
+  try {
+    await prepararColumnasNuevaLectura();
+
+    const archivo = await PortalFileService.findByPk(req.params.id);
+
+    if (!archivo) {
+      return res.status(404).json({
+        error: "Solicitud portal no encontrada",
+      });
+    }
+
+    if (
+      !archivo.archivo_nueva_lectura ||
+      !archivoExiste(archivo.archivo_nueva_lectura)
+    ) {
+      return res.status(404).json({
+        error: "Archivo no encontrado en almacenamiento",
+      });
+    }
+
+    await registrarEventoPortal({
+      req,
+      cuentaId: archivo.cuentaId,
+      usuarioId: archivo.usuarioId,
+      tipo: "FILE_NUEVA_LECTURA_DESCARGADA_ADMIN",
+      resultado: "OK",
+      descripcion: "Admin descargo nueva lectura desde portal admin",
+      metadata: {
+        fileId: archivo.id,
+        nombre_nueva_lectura: archivo.nombre_nueva_lectura,
+      },
+      creado_por: usuarioInternoActual(req),
+    });
+
+    return descargarArchivoSeguro(
+      res,
+      archivo.archivo_nueva_lectura,
+      archivo.nombre_nueva_lectura
+    );
+  } catch (error) {
+    console.error("ERROR DESCARGANDO NUEVA LECTURA PORTAL ADMIN:", error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 const actualizarFileAdmin = async (req, res) => {
   try {
     await prepararColumnasNuevaLectura();
@@ -1165,6 +1279,8 @@ module.exports = {
   eliminarCuentaPrueba,
   listarFilesAdmin,
   obtenerFileAdmin,
+  descargarOriginalAdmin,
+  descargarNuevaLecturaAdmin,
   actualizarFileAdmin,
   solicitarNuevaLecturaAdmin,
   subirModAdmin,

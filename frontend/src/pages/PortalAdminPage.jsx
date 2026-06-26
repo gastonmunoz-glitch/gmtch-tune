@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import {
   portalAdminCargarCreditos,
   portalAdminCrearCuenta,
+  portalAdminDownloadNuevaLectura,
+  portalAdminDownloadOriginal,
   portalAdminListCuentas,
   portalAdminListFiles,
   portalAdminMovimientos,
@@ -471,6 +473,47 @@ function PortalAdminPage() {
     }
   };
 
+  const guardarBlobDescarga = ({ blob, filename }, fallback) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename || fallback || "archivo-portal.bin";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const descargarOriginal = async (archivo) => {
+    try {
+      setError("");
+      setMensaje("");
+      const descarga = await portalAdminDownloadOriginal(archivo.id);
+      guardarBlobDescarga(descarga, archivo.nombre_original);
+      setMensaje(`Archivo original descargado para solicitud #${archivo.id}.`);
+    } catch (err) {
+      setError(
+        err.message ||
+          "No se pudo descargar el archivo. Revisa si existe en almacenamiento."
+      );
+    }
+  };
+
+  const descargarNuevaLectura = async (archivo) => {
+    try {
+      setError("");
+      setMensaje("");
+      const descarga = await portalAdminDownloadNuevaLectura(archivo.id);
+      guardarBlobDescarga(descarga, archivo.nombre_nueva_lectura);
+      setMensaje(`Nueva lectura descargada para solicitud #${archivo.id}.`);
+    } catch (err) {
+      setError(
+        err.message ||
+          "No se pudo descargar el archivo. Revisa si existe en almacenamiento."
+      );
+    }
+  };
+
   return (
     <main className="space-y-8">
       <div>
@@ -875,6 +918,26 @@ function PortalAdminPage() {
                     <p className="mt-2 text-xs font-black uppercase">
                       Original: {archivo.nombre_original || "No registrado"} / MOD: {archivo.nombre_modificado || "Pendiente"}
                     </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {archivo.archivo_original_disponible && (
+                        <button
+                          type="button"
+                          onClick={() => descargarOriginal(archivo)}
+                          className="border-2 border-blue-600 px-3 py-2 text-[10px] font-black uppercase text-blue-700 hover:bg-blue-600 hover:text-white"
+                        >
+                          Descargar archivo original
+                        </button>
+                      )}
+                      {archivo.nombre_nueva_lectura && (
+                        <button
+                          type="button"
+                          onClick={() => descargarNuevaLectura(archivo)}
+                          className="border-2 border-yellow-600 px-3 py-2 text-[10px] font-black uppercase text-yellow-700 hover:bg-yellow-500 hover:text-black"
+                        >
+                          Descargar nueva lectura
+                        </button>
+                      )}
+                    </div>
                     {archivo.observacion_correccion && (
                       <p className="mt-2 text-xs font-bold text-red-700">
                         Corrección: {archivo.observacion_correccion}
