@@ -120,6 +120,50 @@ const NOTIFICACIONES_RESPONSABLES = {
   },
 };
 
+const ESTADOS_CORRECCION_TECNICA = [
+  "CORRECCION_SOLICITADA",
+  "EN_REVISION_CORRECCION",
+  "MOD_CORRECCION_LISTO",
+  "CORRECCION_APLICADA",
+  "CERRADA",
+];
+
+const PRIORIDADES_CORRECCION = ["BAJA", "MEDIA", "ALTA", "URGENTE"];
+
+const ROLES_NOTIFICACION_CORRECCION = [
+  "OWNER",
+  "ADMIN",
+  "SUPERVISOR",
+  "OPERADOR_ECU",
+  "TUNER",
+];
+
+const normalizarEstadoCorreccion = (valor) => {
+  const estado = limpiarTexto(valor).toUpperCase();
+  return ESTADOS_CORRECCION_TECNICA.includes(estado)
+    ? estado
+    : "CORRECCION_SOLICITADA";
+};
+
+const normalizarPrioridadCorreccion = (valor) => {
+  const prioridad = limpiarTexto(valor || "MEDIA").toUpperCase();
+  return PRIORIDADES_CORRECCION.includes(prioridad) ? prioridad : "MEDIA";
+};
+
+const parseJsonSeguro = (valor, defecto = []) => {
+  if (Array.isArray(valor)) return valor;
+  if (!valor) return defecto;
+
+  if (typeof valor === "object") return defecto;
+
+  try {
+    const parsed = JSON.parse(valor);
+    return parsed || defecto;
+  } catch {
+    return defecto;
+  }
+};
+
 const prepararColumnas = async () => {
   if (columnasPreparadas) return;
 
@@ -185,6 +229,66 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "feedback_at" TIMESTAMP;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_estado" VARCHAR(60);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_prioridad" VARCHAR(30);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_motivo" TEXT;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_descripcion" TEXT;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_dtc" VARCHAR(120);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_sintoma_cliente" TEXT;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_archivo_ecu_id" INTEGER;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_responsable_sugerido" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_comentario_tecnico" TEXT;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_cliente_volvio" BOOLEAN DEFAULT false;
+
+    UPDATE "ordenes_trabajo"
+    SET "correccion_cliente_volvio" = false
+    WHERE "correccion_cliente_volvio" IS NULL;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_creada_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_creada_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_actualizada_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_actualizada_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "correccion_historial" JSONB DEFAULT '[]'::jsonb;
+
+    UPDATE "ordenes_trabajo"
+    SET "correccion_historial" = '[]'::jsonb
+    WHERE "correccion_historial" IS NULL;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "bitacora_operativa" JSONB DEFAULT '[]'::jsonb;
+
+    UPDATE "ordenes_trabajo"
+    SET "bitacora_operativa" = '[]'::jsonb
+    WHERE "bitacora_operativa" IS NULL;
 
     ALTER TABLE "clientes"
     ADD COLUMN IF NOT EXISTS "excluir_estadisticas" BOOLEAN DEFAULT false;
@@ -325,6 +429,23 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     requiere_seguimiento: row.requiere_seguimiento,
     feedback_por: row.feedback_por,
     feedback_at: row.feedback_at,
+
+    correccion_estado: row.correccion_estado,
+    correccion_prioridad: row.correccion_prioridad,
+    correccion_motivo: row.correccion_motivo,
+    correccion_descripcion: row.correccion_descripcion,
+    correccion_dtc: row.correccion_dtc,
+    correccion_sintoma_cliente: row.correccion_sintoma_cliente,
+    correccion_archivo_ecu_id: row.correccion_archivo_ecu_id,
+    correccion_responsable_sugerido: row.correccion_responsable_sugerido,
+    correccion_comentario_tecnico: row.correccion_comentario_tecnico,
+    correccion_cliente_volvio: row.correccion_cliente_volvio,
+    correccion_creada_por: row.correccion_creada_por,
+    correccion_creada_at: row.correccion_creada_at,
+    correccion_actualizada_por: row.correccion_actualizada_por,
+    correccion_actualizada_at: row.correccion_actualizada_at,
+    correccion_historial: parseJsonSeguro(row.correccion_historial, []),
+    bitacora_operativa: parseJsonSeguro(row.bitacora_operativa, []),
 
     recepcionado_por: row.recepcionado_por,
     diagnostico_asignado_a: row.diagnostico_asignado_a,
@@ -757,6 +878,242 @@ const actualizarOrden = async (req, res) => {
   }
 };
 
+const registrarCorreccionTecnica = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    if (orden.archivada) {
+      return res.status(400).json({
+        error: "No puedes registrar postventa en una orden archivada",
+      });
+    }
+
+    const motivo = limpiarTexto(req.body.motivo || req.body.correccion_motivo);
+    const descripcion = limpiarTexto(
+      req.body.descripcion || req.body.correccion_descripcion
+    );
+    const sintomaCliente = limpiarTexto(
+      req.body.sintoma_cliente || req.body.correccion_sintoma_cliente
+    );
+    const comentarioTecnico = limpiarTexto(
+      req.body.comentario_tecnico || req.body.correccion_comentario_tecnico
+    );
+
+    if (!motivo && !descripcion && !sintomaCliente && !comentarioTecnico) {
+      return res.status(400).json({
+        error:
+          "Debes indicar motivo, descripción, síntoma o comentario técnico",
+      });
+    }
+
+    const ahora = new Date();
+    const usuario = usuarioActual(req);
+    const estado = normalizarEstadoCorreccion(
+      req.body.estado || req.body.correccion_estado
+    );
+    const prioridad = normalizarPrioridadCorreccion(
+      req.body.prioridad || req.body.correccion_prioridad
+    );
+    const archivoEcuIdRaw =
+      req.body.archivo_ecu_id ||
+      req.body.archivoECUId ||
+      req.body.correccion_archivo_ecu_id;
+    const archivoEcuId = archivoEcuIdRaw ? Number(archivoEcuIdRaw) : null;
+    const clienteVolvio = normalizarBoolean(
+      req.body.cliente_volvio || req.body.correccion_cliente_volvio
+    );
+    const historialActual = parseJsonSeguro(
+      orden.getDataValue("correccion_historial"),
+      []
+    );
+    const evento = {
+      tipo: "CORRECCION_TECNICA",
+      estado,
+      prioridad,
+      motivo,
+      descripcion,
+      dtc: limpiarTexto(req.body.dtc || req.body.correccion_dtc),
+      sintoma_cliente: sintomaCliente,
+      archivo_ecu_id:
+        archivoEcuId && Number.isFinite(archivoEcuId) ? archivoEcuId : null,
+      responsable_sugerido: limpiarTexto(
+        req.body.responsable_sugerido ||
+          req.body.correccion_responsable_sugerido
+      ),
+      comentario_tecnico: comentarioTecnico,
+      cliente_volvio: clienteVolvio,
+      creado_por: usuario,
+      fecha: ahora.toISOString(),
+    };
+
+    await orden.update({
+      correccion_estado: estado,
+      correccion_prioridad: prioridad,
+      correccion_motivo: motivo,
+      correccion_descripcion: descripcion,
+      correccion_dtc: evento.dtc,
+      correccion_sintoma_cliente: sintomaCliente,
+      correccion_archivo_ecu_id: evento.archivo_ecu_id,
+      correccion_responsable_sugerido: evento.responsable_sugerido,
+      correccion_comentario_tecnico: comentarioTecnico,
+      correccion_cliente_volvio: clienteVolvio,
+      correccion_creada_por: orden.correccion_creada_por || usuario,
+      correccion_creada_at: orden.correccion_creada_at || ahora,
+      correccion_actualizada_por: usuario,
+      correccion_actualizada_at: ahora,
+      correccion_historial: [...historialActual, evento],
+    });
+
+    try {
+      await crearNotificacionesInternas({
+        usuariosDestino: [],
+        rolesDestino: ROLES_NOTIFICACION_CORRECCION,
+        tipo: "CORRECCION_TECNICA_SOLICITADA",
+        titulo: "Corrección técnica solicitada",
+        mensaje:
+          "Cliente volvió por DTC / revisión postventa. Requiere revisión ECU/File Service.",
+        ordenId: orden.id,
+        archivoECUId: evento.archivo_ecu_id,
+      });
+    } catch (errorNotificacion) {
+      console.warn(
+        "No se pudo crear notificación de corrección técnica:",
+        errorNotificacion.message
+      );
+    }
+
+    res.status(201).json({
+      mensaje: "Corrección técnica registrada correctamente",
+      ordenId: orden.id,
+      correccion: evento,
+    });
+  } catch (error) {
+    console.error("ERROR REGISTRANDO CORRECCIÓN TÉCNICA:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const actualizarCorreccionTecnica = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    const ahora = new Date();
+    const usuario = usuarioActual(req);
+    const estado = normalizarEstadoCorreccion(
+      req.body.estado || req.body.correccion_estado
+    );
+    const prioridad = normalizarPrioridadCorreccion(
+      req.body.prioridad || req.body.correccion_prioridad || orden.correccion_prioridad
+    );
+    const historialActual = parseJsonSeguro(
+      orden.getDataValue("correccion_historial"),
+      []
+    );
+    const evento = {
+      tipo: "ACTUALIZACION_CORRECCION_TECNICA",
+      estado,
+      prioridad,
+      comentario_tecnico: limpiarTexto(
+        req.body.comentario_tecnico || req.body.correccion_comentario_tecnico
+      ),
+      actualizado_por: usuario,
+      fecha: ahora.toISOString(),
+    };
+
+    await orden.update({
+      correccion_estado: estado,
+      correccion_prioridad: prioridad,
+      correccion_comentario_tecnico:
+        evento.comentario_tecnico || orden.correccion_comentario_tecnico,
+      correccion_actualizada_por: usuario,
+      correccion_actualizada_at: ahora,
+      correccion_historial: [...historialActual, evento],
+    });
+
+    res.json({
+      mensaje: "Estado de corrección técnica actualizado",
+      ordenId: orden.id,
+      correccion: evento,
+    });
+  } catch (error) {
+    console.error("ERROR ACTUALIZANDO CORRECCIÓN TÉCNICA:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const agregarBitacoraOrden = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    const texto = limpiarTexto(req.body.texto || req.body.observacion);
+
+    if (!texto) {
+      return res.status(400).json({
+        error: "Debes escribir una observación para la bitácora",
+      });
+    }
+
+    const evento = {
+      tipo: limpiarTexto(req.body.tipo || "OTRO").toUpperCase(),
+      texto,
+      prioridad: normalizarPrioridadCorreccion(req.body.prioridad || "MEDIA"),
+      modulo_relacionado: limpiarTexto(req.body.modulo_relacionado),
+      creado_por: usuarioActual(req),
+      fecha: new Date().toISOString(),
+    };
+    const bitacoraActual = parseJsonSeguro(
+      orden.getDataValue("bitacora_operativa"),
+      []
+    );
+
+    await orden.update({
+      bitacora_operativa: [...bitacoraActual, evento],
+    });
+
+    res.status(201).json({
+      mensaje: "Observación agregada a bitácora",
+      ordenId: orden.id,
+      evento,
+    });
+  } catch (error) {
+    console.error("ERROR AGREGANDO BITÁCORA:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
 const actualizarEstado = async (req, res) => {
   try {
     await prepararColumnas();
@@ -913,6 +1270,9 @@ module.exports = {
   obtenerOrdenes,
   obtenerOrdenPorId,
   actualizarOrden,
+  registrarCorreccionTecnica,
+  actualizarCorreccionTecnica,
+  agregarBitacoraOrden,
   actualizarEstado,
   registrarPago,
   cobrarYEntregar,

@@ -47,6 +47,31 @@ const RESPONSABLES_ETAPAS = [
   },
 ];
 
+const ESTADOS_CORRECCION_TECNICA = [
+  "CORRECCION_SOLICITADA",
+  "EN_REVISION_CORRECCION",
+  "MOD_CORRECCION_LISTO",
+  "CORRECCION_APLICADA",
+  "CERRADA",
+];
+
+const PRIORIDADES_CORRECCION = ["BAJA", "MEDIA", "ALTA", "URGENTE"];
+
+const RESPONSABLES_CORRECCION = [
+  { value: "", label: "Sin sugerencia" },
+  { value: "OPERADOR_ECU", label: "Operador ECU" },
+  { value: "TUNER", label: "Tuner / Master" },
+  { value: "SUPERVISOR", label: "Supervisor" },
+];
+
+const TIPOS_BITACORA = [
+  "MEJORA",
+  "ERROR_PROCESO",
+  "CLIENTE_VOLVIO",
+  "RECORDATORIO",
+  "OTRO",
+];
+
 const normalizarCategoriaCliente = (categoria) => {
   const valor = String(categoria || "NORMAL").trim().toUpperCase();
   if (["MAYORISTA", "PROVEEDOR"].includes(valor)) return "TALLER_ALIADO";
@@ -159,6 +184,8 @@ function OrdenesPage() {
   const [vehiculos, setVehiculos] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
   const [feedbackOrdenes, setFeedbackOrdenes] = useState({});
+  const [correccionOrdenes, setCorreccionOrdenes] = useState({});
+  const [bitacoraOrdenes, setBitacoraOrdenes] = useState({});
   const [filtro, setFiltro] = useState("ACTIVAS");
   const [cargando, setCargando] = useState(false);
 
@@ -384,6 +411,106 @@ function OrdenesPage() {
     }
   };
 
+  const correccionActual = (orden) =>
+    correccionOrdenes[orden.id] || {
+      motivo: orden.correccion_motivo || "",
+      descripcion: "",
+      dtc: orden.correccion_dtc || "",
+      sintoma_cliente: "",
+      prioridad: orden.correccion_prioridad || "MEDIA",
+      responsable_sugerido: orden.correccion_responsable_sugerido || "",
+      comentario_tecnico: "",
+      cliente_volvio: orden.correccion_cliente_volvio === true,
+      archivo_ecu_id: orden.correccion_archivo_ecu_id || "",
+    };
+
+  const actualizarCorreccionLocal = (orden, campo, valor) => {
+    setCorreccionOrdenes((prev) => ({
+      ...prev,
+      [orden.id]: {
+        ...correccionActual(orden),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const registrarCorreccionTecnica = async (orden) => {
+    const correccion = correccionActual(orden);
+
+    if (
+      !String(correccion.motivo || "").trim() &&
+      !String(correccion.descripcion || "").trim() &&
+      !String(correccion.sintoma_cliente || "").trim() &&
+      !String(correccion.comentario_tecnico || "").trim()
+    ) {
+      alert("Debes indicar motivo, descripción, síntoma o comentario técnico.");
+      return;
+    }
+
+    try {
+      await api.post(`/ordenes/${orden.id}/correccion-tecnica`, correccion);
+
+      await recargar();
+      setCorreccionOrdenes((prev) => {
+        const siguiente = { ...prev };
+        delete siguiente[orden.id];
+        return siguiente;
+      });
+      alert("Corrección técnica / postventa registrada.");
+    } catch (err) {
+      console.error(
+        "ERROR REGISTRANDO CORRECCION TECNICA:",
+        err.response?.data || err.message
+      );
+      alert(
+        err.response?.data?.error ||
+          "No se pudo registrar la corrección técnica."
+      );
+    }
+  };
+
+  const bitacoraActual = (orden) =>
+    bitacoraOrdenes[orden.id] || {
+      tipo: "CLIENTE_VOLVIO",
+      texto: "",
+      prioridad: "MEDIA",
+      modulo_relacionado: "ORDEN",
+    };
+
+  const actualizarBitacoraLocal = (orden, campo, valor) => {
+    setBitacoraOrdenes((prev) => ({
+      ...prev,
+      [orden.id]: {
+        ...bitacoraActual(orden),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const agregarBitacora = async (orden) => {
+    const bitacora = bitacoraActual(orden);
+
+    if (!String(bitacora.texto || "").trim()) {
+      alert("Debes escribir una observación para la bitácora.");
+      return;
+    }
+
+    try {
+      await api.post(`/ordenes/${orden.id}/bitacora`, bitacora);
+
+      await recargar();
+      setBitacoraOrdenes((prev) => {
+        const siguiente = { ...prev };
+        delete siguiente[orden.id];
+        return siguiente;
+      });
+      alert("Observación agregada a la bitácora.");
+    } catch (err) {
+      console.error("ERROR AGREGANDO BITACORA:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "No se pudo agregar la observación.");
+    }
+  };
+
   const asignarResponsable = async (orden, campo, valor) => {
     try {
       await api.patch(`/ordenes/${orden.id}`, {
@@ -590,6 +717,21 @@ function OrdenesPage() {
             const ordenExcluida = o.excluir_estadisticas === true;
             const noCuentaEstadisticas = clienteExcluido || ordenExcluida;
             const feedback = feedbackActual(o);
+            const correccion = correccionActual(o);
+            const bitacora = bitacoraActual(o);
+            const archivosOrden = Array.isArray(o.ArchivoECUs)
+              ? o.ArchivoECUs
+              : Array.isArray(o.ArchivosECU)
+              ? o.ArchivosECU
+              : [];
+            const historialCorreccion = Array.isArray(o.correccion_historial)
+              ? o.correccion_historial
+              : [];
+            const bitacoraOperativa = Array.isArray(o.bitacora_operativa)
+              ? o.bitacora_operativa
+              : [];
+            const tieneCorreccionTecnica =
+              Boolean(o.correccion_estado) || historialCorreccion.length > 0;
             const pagoConfirmado = o.estado_pago === "PAGADO";
             const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
               textoQR(o)
@@ -810,6 +952,304 @@ function OrdenesPage() {
                             Guardar feedback
                           </button>
                         </div>
+                      </details>
+
+                      <details
+                        className={`mt-4 border-2 p-3 ${
+                          tieneCorreccionTecnica
+                            ? "border-red-700 bg-red-50"
+                            : "border-black bg-slate-50"
+                        }`}
+                      >
+                        <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-700">
+                          Solicitud de corrección / postventa técnica
+                        </summary>
+
+                        {tieneCorreccionTecnica && (
+                          <div className="mt-3 border-2 border-red-700 bg-white p-3 text-[10px] font-bold uppercase text-red-900">
+                            <p>Estado: {o.correccion_estado || "Pendiente"}</p>
+                            <p>
+                              Prioridad: {o.correccion_prioridad || "MEDIA"}
+                            </p>
+                            <p>
+                              Motivo: {o.correccion_motivo || "No registrado"}
+                            </p>
+                            <p>DTC: {o.correccion_dtc || "No registrado"}</p>
+                            <p>
+                              Responsable sugerido:{" "}
+                              {o.correccion_responsable_sugerido ||
+                                "No registrado"}
+                            </p>
+                            <p>
+                              Cliente volvió:{" "}
+                              {o.correccion_cliente_volvio ? "Sí" : "No"}
+                            </p>
+                            <p>
+                              Creada por:{" "}
+                              {o.correccion_creada_por || "No registrado"} ·{" "}
+                              {formatearFecha(o.correccion_creada_at)}
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <input
+                            className="border-2 border-black p-2 text-xs font-bold"
+                            placeholder="Motivo. Ej: DTC postventa"
+                            value={correccion.motivo}
+                            onChange={(event) =>
+                              actualizarCorreccionLocal(
+                                o,
+                                "motivo",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <input
+                            className="border-2 border-black p-2 text-xs font-bold"
+                            placeholder="Código DTC si existe"
+                            value={correccion.dtc}
+                            onChange={(event) =>
+                              actualizarCorreccionLocal(
+                                o,
+                                "dtc",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <textarea
+                            className="md:col-span-2 border-2 border-black p-2 text-xs font-bold"
+                            rows="2"
+                            placeholder="Descripción de la corrección / postventa"
+                            value={correccion.descripcion}
+                            onChange={(event) =>
+                              actualizarCorreccionLocal(
+                                o,
+                                "descripcion",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <textarea
+                            className="md:col-span-2 border-2 border-black p-2 text-xs font-bold"
+                            rows="2"
+                            placeholder="Síntoma reportado por cliente"
+                            value={correccion.sintoma_cliente}
+                            onChange={(event) =>
+                              actualizarCorreccionLocal(
+                                o,
+                                "sintoma_cliente",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <select
+                            className="border-2 border-black p-2 text-xs font-bold uppercase bg-white text-black"
+                            value={correccion.prioridad}
+                            onChange={(event) =>
+                              actualizarCorreccionLocal(
+                                o,
+                                "prioridad",
+                                event.target.value
+                              )
+                            }
+                          >
+                            {PRIORIDADES_CORRECCION.map((prioridad) => (
+                              <option key={prioridad} value={prioridad}>
+                                {prioridad}
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            className="border-2 border-black p-2 text-xs font-bold uppercase bg-white text-black"
+                            value={correccion.responsable_sugerido}
+                            onChange={(event) =>
+                              actualizarCorreccionLocal(
+                                o,
+                                "responsable_sugerido",
+                                event.target.value
+                              )
+                            }
+                          >
+                            {RESPONSABLES_CORRECCION.map((item) => (
+                              <option key={item.value || "sin"} value={item.value}>
+                                {item.label}
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            className="border-2 border-black p-2 text-xs font-bold uppercase bg-white text-black"
+                            value={correccion.archivo_ecu_id}
+                            onChange={(event) =>
+                              actualizarCorreccionLocal(
+                                o,
+                                "archivo_ecu_id",
+                                event.target.value
+                              )
+                            }
+                          >
+                            <option value="">Sin archivo ECU relacionado</option>
+                            {archivosOrden.map((archivo) => (
+                              <option key={archivo.id} value={archivo.id}>
+                                File #{archivo.id} · {archivo.estado || "Sin estado"}
+                              </option>
+                            ))}
+                          </select>
+
+                          <label className="flex items-center gap-2 text-[10px] font-black uppercase text-gray-600">
+                            <input
+                              type="checkbox"
+                              checked={!!correccion.cliente_volvio}
+                              onChange={(event) =>
+                                actualizarCorreccionLocal(
+                                  o,
+                                  "cliente_volvio",
+                                  event.target.checked
+                                )
+                              }
+                            />
+                            Cliente volvió al taller
+                          </label>
+
+                          <textarea
+                            className="md:col-span-2 border-2 border-black p-2 text-xs font-bold"
+                            rows="2"
+                            placeholder="Comentario técnico interno"
+                            value={correccion.comentario_tecnico}
+                            onChange={(event) =>
+                              actualizarCorreccionLocal(
+                                o,
+                                "comentario_tecnico",
+                                event.target.value
+                              )
+                            }
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => registrarCorreccionTecnica(o)}
+                          className="mt-3 bg-red-700 text-white px-4 py-2 font-black uppercase text-[10px]"
+                        >
+                          Registrar postventa técnica
+                        </button>
+
+                        {historialCorreccion.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            <p className="text-[10px] font-black uppercase text-gray-500">
+                              Historial de corrección
+                            </p>
+                            {historialCorreccion.slice(-3).map((evento, index) => (
+                              <div
+                                key={`${evento.fecha || index}-${index}`}
+                                className="border border-gray-300 bg-white p-2 text-[10px] font-bold uppercase text-gray-600"
+                              >
+                                <p>
+                                  {evento.estado || evento.tipo || "Evento"} ·{" "}
+                                  {formatearFecha(evento.fecha)}
+                                </p>
+                                <p>{evento.motivo || evento.comentario_tecnico}</p>
+                                <p>Por: {evento.creado_por || evento.actualizado_por || "-"}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </details>
+
+                      <details className="mt-4 border-2 border-black bg-slate-50 p-3">
+                        <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-700">
+                          Bitácora rápida operativa
+                        </summary>
+
+                        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <select
+                            className="border-2 border-black p-2 text-xs font-bold uppercase bg-white text-black"
+                            value={bitacora.tipo}
+                            onChange={(event) =>
+                              actualizarBitacoraLocal(o, "tipo", event.target.value)
+                            }
+                          >
+                            {TIPOS_BITACORA.map((tipo) => (
+                              <option key={tipo} value={tipo}>
+                                {tipo}
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            className="border-2 border-black p-2 text-xs font-bold uppercase bg-white text-black"
+                            value={bitacora.prioridad}
+                            onChange={(event) =>
+                              actualizarBitacoraLocal(
+                                o,
+                                "prioridad",
+                                event.target.value
+                              )
+                            }
+                          >
+                            {PRIORIDADES_CORRECCION.map((prioridad) => (
+                              <option key={prioridad} value={prioridad}>
+                                {prioridad}
+                              </option>
+                            ))}
+                          </select>
+
+                          <input
+                            className="border-2 border-black p-2 text-xs font-bold"
+                            placeholder="Módulo relacionado"
+                            value={bitacora.modulo_relacionado}
+                            onChange={(event) =>
+                              actualizarBitacoraLocal(
+                                o,
+                                "modulo_relacionado",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <textarea
+                            className="md:col-span-3 border-2 border-black p-2 text-xs font-bold"
+                            rows="2"
+                            placeholder="Anotar observación operativa"
+                            value={bitacora.texto}
+                            onChange={(event) =>
+                              actualizarBitacoraLocal(o, "texto", event.target.value)
+                            }
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => agregarBitacora(o)}
+                          className="mt-3 bg-black text-white px-4 py-2 font-black uppercase text-[10px]"
+                        >
+                          Anotar observación
+                        </button>
+
+                        {bitacoraOperativa.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {bitacoraOperativa.slice(-3).map((evento, index) => (
+                              <div
+                                key={`${evento.fecha || index}-${index}`}
+                                className="border border-gray-300 bg-white p-2 text-[10px] font-bold uppercase text-gray-600"
+                              >
+                                <p>
+                                  {evento.tipo || "OTRO"} ·{" "}
+                                  {evento.prioridad || "MEDIA"} ·{" "}
+                                  {formatearFecha(evento.fecha)}
+                                </p>
+                                <p>{evento.texto}</p>
+                                <p>Por: {evento.creado_por || "-"}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </details>
                     </div>
                   </div>

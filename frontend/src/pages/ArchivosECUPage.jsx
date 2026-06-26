@@ -74,6 +74,15 @@ const RESPONSABLES_FILE_SERVICE = [
   },
 ];
 
+const PRIORIDADES_CORRECCION = ["BAJA", "MEDIA", "ALTA", "URGENTE"];
+
+const RESPONSABLES_CORRECCION = [
+  { value: "", label: "Sin sugerencia" },
+  { value: "OPERADOR_ECU", label: "Operador ECU" },
+  { value: "TUNER", label: "Tuner / Master" },
+  { value: "SUPERVISOR", label: "Supervisor" },
+];
+
 const SERVICIO_PERSONALIZADO = "Otro / personalizado";
 
 const SERVICIOS_FILE_SERVICE = [
@@ -294,6 +303,7 @@ export default function ArchivosECUPage() {
   const [modForms, setModForms] = useState({});
   const [procesamientoForms, setProcesamientoForms] = useState({});
   const [postForms, setPostForms] = useState({});
+  const [correccionForms, setCorreccionForms] = useState({});
   const [archivarForms, setArchivarForms] = useState({});
 
   const obtenerDatos = useCallback(async () => {
@@ -634,6 +644,24 @@ export default function ArchivosECUPage() {
     }));
   };
 
+  const actualizarCorreccionForm = (archivoId, campo, valor) => {
+    setCorreccionForms((prev) => ({
+      ...prev,
+      [archivoId]: {
+        motivo: "Postventa técnica File Service",
+        descripcion: "",
+        dtc: "",
+        sintoma_cliente: "",
+        prioridad: "MEDIA",
+        responsable_sugerido: "OPERADOR_ECU",
+        comentario_tecnico: "",
+        cliente_volvio: false,
+        ...(prev[archivoId] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
   const actualizarArchivarForm = (archivoId, campo, valor) => {
     setArchivarForms((prev) => ({
       ...prev,
@@ -644,6 +672,53 @@ export default function ArchivosECUPage() {
         [campo]: valor,
       },
     }));
+  };
+
+  const registrarCorreccionPostventa = async (archivo) => {
+    limpiarMensajes();
+
+    if (!archivo.ordenId) {
+      setError("Este File Service no tiene orden asociada para postventa.");
+      return;
+    }
+
+    const form = {
+      motivo: "Postventa técnica File Service",
+      descripcion: "",
+      dtc: "",
+      sintoma_cliente: "",
+      prioridad: "MEDIA",
+      responsable_sugerido: "OPERADOR_ECU",
+      comentario_tecnico: "",
+      cliente_volvio: false,
+      ...(correccionForms[archivo.id] || {}),
+    };
+
+    if (
+      !limpiar(form.motivo) &&
+      !limpiar(form.descripcion) &&
+      !limpiar(form.sintoma_cliente) &&
+      !limpiar(form.comentario_tecnico)
+    ) {
+      setError("Debes indicar motivo, descripción, síntoma o comentario técnico.");
+      return;
+    }
+
+    try {
+      await api.post(`/ordenes/${archivo.ordenId}/correccion-tecnica`, {
+        ...form,
+        archivo_ecu_id: archivo.id,
+      });
+
+      setMensaje("Postventa técnica registrada y notificada internamente");
+      setCorreccionForms((prev) => ({
+        ...prev,
+        [archivo.id]: {},
+      }));
+      await cargarDatos();
+    } catch (err) {
+      mostrarError(err, "Error registrando postventa técnica");
+    }
   };
 
   const asignarResponsableFileService = async (archivoId, campo, valor) => {
@@ -1375,6 +1450,18 @@ export default function ArchivosECUPage() {
                 ...(postForms[archivo.id] || {}),
               };
 
+              const correccionForm = {
+                motivo: "Postventa técnica File Service",
+                descripcion: "",
+                dtc: "",
+                sintoma_cliente: "",
+                prioridad: "MEDIA",
+                responsable_sugerido: "OPERADOR_ECU",
+                comentario_tecnico: "",
+                cliente_volvio: false,
+                ...(correccionForms[archivo.id] || {}),
+              };
+
               const archForm = {
                 archivado_motivo: "",
                 archivado_comentario: "",
@@ -1738,6 +1825,149 @@ export default function ArchivosECUPage() {
                       </div>
                     </details>
                   </div>
+
+                  <details className="bg-red-950/30 border border-red-500/30 rounded-2xl p-4">
+                    <summary className="cursor-pointer font-semibold text-red-100">
+                      Solicitar corrección / postventa técnica interna
+                    </summary>
+
+                    <div className="mt-4 space-y-3">
+                      <p className="text-xs text-red-200">
+                        Registra aquí cuando un cliente vuelve por DTC,
+                        revisión postventa o garantía técnica. Esto no cambia
+                        pago ni entrega comercial.
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input
+                          value={correccionForm.motivo}
+                          onChange={(e) =>
+                            actualizarCorreccionForm(
+                              archivo.id,
+                              "motivo",
+                              e.target.value
+                            )
+                          }
+                          placeholder="Motivo"
+                          className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-red-500"
+                        />
+
+                        <input
+                          value={correccionForm.dtc}
+                          onChange={(e) =>
+                            actualizarCorreccionForm(
+                              archivo.id,
+                              "dtc",
+                              e.target.value
+                            )
+                          }
+                          placeholder="DTC si existe"
+                          className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-red-500"
+                        />
+
+                        <textarea
+                          value={correccionForm.descripcion}
+                          onChange={(e) =>
+                            actualizarCorreccionForm(
+                              archivo.id,
+                              "descripcion",
+                              e.target.value
+                            )
+                          }
+                          rows={2}
+                          placeholder="Descripción técnica"
+                          className="md:col-span-2 w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-red-500"
+                        />
+
+                        <textarea
+                          value={correccionForm.sintoma_cliente}
+                          onChange={(e) =>
+                            actualizarCorreccionForm(
+                              archivo.id,
+                              "sintoma_cliente",
+                              e.target.value
+                            )
+                          }
+                          rows={2}
+                          placeholder="Síntoma reportado por cliente"
+                          className="md:col-span-2 w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-red-500"
+                        />
+
+                        <select
+                          value={correccionForm.prioridad}
+                          onChange={(e) =>
+                            actualizarCorreccionForm(
+                              archivo.id,
+                              "prioridad",
+                              e.target.value
+                            )
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-red-500"
+                        >
+                          {PRIORIDADES_CORRECCION.map((prioridad) => (
+                            <option key={prioridad} value={prioridad}>
+                              {prioridad}
+                            </option>
+                          ))}
+                        </select>
+
+                        <select
+                          value={correccionForm.responsable_sugerido}
+                          onChange={(e) =>
+                            actualizarCorreccionForm(
+                              archivo.id,
+                              "responsable_sugerido",
+                              e.target.value
+                            )
+                          }
+                          className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-red-500"
+                        >
+                          {RESPONSABLES_CORRECCION.map((item) => (
+                            <option key={item.value || "sin"} value={item.value}>
+                              {item.label}
+                            </option>
+                          ))}
+                        </select>
+
+                        <label className="flex items-center gap-2 text-sm text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={!!correccionForm.cliente_volvio}
+                            onChange={(e) =>
+                              actualizarCorreccionForm(
+                                archivo.id,
+                                "cliente_volvio",
+                                e.target.checked
+                              )
+                            }
+                          />
+                          Cliente volvió al taller
+                        </label>
+
+                        <textarea
+                          value={correccionForm.comentario_tecnico}
+                          onChange={(e) =>
+                            actualizarCorreccionForm(
+                              archivo.id,
+                              "comentario_tecnico",
+                              e.target.value
+                            )
+                          }
+                          rows={2}
+                          placeholder="Comentario técnico interno"
+                          className="md:col-span-2 w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-red-500"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => registrarCorreccionPostventa(archivo)}
+                        className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 font-semibold"
+                      >
+                        Registrar postventa técnica
+                      </button>
+                    </div>
+                  </details>
 
                   <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
                     <summary className="cursor-pointer font-semibold text-slate-200">

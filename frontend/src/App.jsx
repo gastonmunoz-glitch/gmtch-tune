@@ -171,6 +171,7 @@ const limpiarSesion = () => {
 };
 
 const SOUND_ALERTS_KEY = "gmtch_sound_alerts_enabled";
+const SOUND_ALERTS_MODE_KEY = "gmtch_sound_alerts_mode";
 
 const obtenerIdNotificacion = (notificacion) =>
   String(
@@ -180,28 +181,63 @@ const obtenerIdNotificacion = (notificacion) =>
 
 const esNotificacionNoLeida = (notificacion) => notificacion && !notificacion.leida;
 
-const reproducirSonidoNotificacion = () => {
+const reproducirSonidoNotificacion = async ({ modo = "normal" } = {}) => {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
+    if (!AudioContext) return false;
 
     const contexto = new AudioContext();
-    const oscilador = contexto.createOscillator();
-    const ganancia = contexto.createGain();
 
-    oscilador.type = "sine";
-    oscilador.frequency.setValueAtTime(880, contexto.currentTime);
-    oscilador.frequency.setValueAtTime(660, contexto.currentTime + 0.12);
-    ganancia.gain.setValueAtTime(0.0001, contexto.currentTime);
-    ganancia.gain.exponentialRampToValueAtTime(0.16, contexto.currentTime + 0.02);
-    ganancia.gain.exponentialRampToValueAtTime(0.0001, contexto.currentTime + 0.32);
+    if (contexto.state === "suspended") {
+      await contexto.resume();
+    }
 
-    oscilador.connect(ganancia);
-    ganancia.connect(contexto.destination);
-    oscilador.start();
-    oscilador.stop(contexto.currentTime + 0.34);
+    if (contexto.state !== "running") {
+      return false;
+    }
+
+    const secuencia =
+      modo === "fuerte"
+        ? [
+            { frecuencia: 880, inicio: 0, duracion: 0.18 },
+            { frecuencia: 1040, inicio: 0.3, duracion: 0.18 },
+            { frecuencia: 880, inicio: 0.6, duracion: 0.22 },
+          ]
+        : [{ frecuencia: 880, inicio: 0, duracion: 0.32 }];
+
+    const volumen = modo === "fuerte" ? 0.34 : 0.16;
+    const tipoOnda = modo === "fuerte" ? "square" : "sine";
+    const masterGain = contexto.createGain();
+
+    masterGain.gain.setValueAtTime(0.95, contexto.currentTime);
+    masterGain.connect(contexto.destination);
+
+    secuencia.forEach(({ frecuencia, inicio, duracion }) => {
+      const oscilador = contexto.createOscillator();
+      const ganancia = contexto.createGain();
+      const t0 = contexto.currentTime + inicio;
+      const t1 = t0 + duracion;
+
+      oscilador.type = tipoOnda;
+      oscilador.frequency.setValueAtTime(frecuencia, t0);
+      ganancia.gain.setValueAtTime(0.0001, t0);
+      ganancia.gain.exponentialRampToValueAtTime(volumen, t0 + 0.025);
+      ganancia.gain.exponentialRampToValueAtTime(0.0001, t1);
+
+      oscilador.connect(ganancia);
+      ganancia.connect(masterGain);
+      oscilador.start(t0);
+      oscilador.stop(t1 + 0.03);
+    });
+
+    window.setTimeout(() => {
+      contexto.close().catch(() => {});
+    }, modo === "fuerte" ? 1200 : 600);
+
+    return true;
   } catch {
     // El navegador puede bloquear audio sin gesto del usuario. No debe romper la app.
+    return false;
   }
 };
 
@@ -217,6 +253,10 @@ function App() {
   const [sonidoNotificacionesActivo, setSonidoNotificacionesActivo] = useState(
     () => localStorage.getItem(SOUND_ALERTS_KEY) === "true"
   );
+  const [sonidoNotificacionesModo, setSonidoNotificacionesModo] = useState(() =>
+    localStorage.getItem(SOUND_ALERTS_MODE_KEY) === "fuerte" ? "fuerte" : "normal"
+  );
+  const [sonidoNotificacionesError, setSonidoNotificacionesError] = useState("");
   const [logoOk, setLogoOk] = useState(true);
   const notificacionesInicializadasRef = useRef(false);
   const notificacionesNoLeidasRef = useRef(new Set());
@@ -270,7 +310,15 @@ function App() {
           mostrarAlertaNotificacion(masReciente);
 
           if (sonidoNotificacionesActivo) {
-            reproducirSonidoNotificacion();
+            const audioOk = await reproducirSonidoNotificacion({
+              modo: sonidoNotificacionesModo,
+            });
+
+            if (!audioOk) {
+              setSonidoNotificacionesError(
+                "El navegador bloqueó el audio. Presiona Activar sonido o Probar sonido."
+              );
+            }
           }
         }
       } else {
@@ -374,14 +422,41 @@ function App() {
     }
   };
 
-  const alternarSonidoNotificaciones = () => {
+  const alternarSonidoNotificaciones = async () => {
     const siguiente = !sonidoNotificacionesActivo;
     setSonidoNotificacionesActivo(siguiente);
     localStorage.setItem(SOUND_ALERTS_KEY, String(siguiente));
 
     if (siguiente) {
-      reproducirSonidoNotificacion();
+      const audioOk = await reproducirSonidoNotificacion({
+        modo: sonidoNotificacionesModo,
+      });
+
+      setSonidoNotificacionesError(
+        audioOk
+          ? ""
+          : "El navegador bloqueó el audio. Presiona Activar sonido o Probar sonido."
+      );
+    } else {
+      setSonidoNotificacionesError("");
     }
+  };
+
+  const cambiarModoSonidoNotificaciones = (modo) => {
+    const siguiente = modo === "fuerte" ? "fuerte" : "normal";
+    setSonidoNotificacionesModo(siguiente);
+    localStorage.setItem(SOUND_ALERTS_MODE_KEY, siguiente);
+  };
+
+  const probarSonidoNotificaciones = async (modo = sonidoNotificacionesModo) => {
+    const modoSeguro = modo === "fuerte" ? "fuerte" : "normal";
+    const audioOk = await reproducirSonidoNotificacion({ modo: modoSeguro });
+
+    setSonidoNotificacionesError(
+      audioOk
+        ? ""
+        : "El navegador bloqueó el audio. Presiona Activar sonido o Probar sonido."
+    );
   };
 
   useEffect(() => {
@@ -391,7 +466,13 @@ function App() {
 
     const intervaloNotificaciones = window.setInterval(cargarNotificaciones, 30000);
     return () => window.clearInterval(intervaloNotificaciones);
-  }, [auth, usuario?.rol, usuario?.username, sonidoNotificacionesActivo]);
+  }, [
+    auth,
+    usuario?.rol,
+    usuario?.username,
+    sonidoNotificacionesActivo,
+    sonidoNotificacionesModo,
+  ]);
 
   useEffect(
     () => () => {
@@ -609,11 +690,14 @@ function App() {
                 noLeidas={notificacionesNoLeidas}
                 error={notificacionesError}
                 sonidoActivo={sonidoNotificacionesActivo}
+                sonidoModo={sonidoNotificacionesModo}
+                sonidoError={sonidoNotificacionesError}
                 onActualizar={cargarNotificaciones}
                 onMarcarLeida={marcarNotificacionLeida}
                 onMarcarTodas={marcarTodasNotificacionesLeidas}
                 onAlternarSonido={alternarSonidoNotificaciones}
-                onProbarSonido={reproducirSonidoNotificacion}
+                onCambiarModoSonido={cambiarModoSonidoNotificaciones}
+                onProbarSonido={probarSonidoNotificaciones}
               />
 
               <AlertaNotificacionFlotante
@@ -799,10 +883,13 @@ const NotificacionesInternas = ({
   noLeidas,
   error,
   sonidoActivo,
+  sonidoModo,
+  sonidoError,
   onActualizar,
   onMarcarLeida,
   onMarcarTodas,
   onAlternarSonido,
+  onCambiarModoSonido,
   onProbarSonido,
 }) => {
   const ultimas = notificaciones.slice(0, 5);
@@ -833,10 +920,18 @@ const NotificacionesInternas = ({
 
           <button
             type="button"
-            onClick={onProbarSonido}
+            onClick={() => onProbarSonido("normal")}
             className="border-2 border-black bg-white px-3 py-2 rounded-lg text-[10px] font-black uppercase text-black hover:bg-gray-100 transition"
           >
             Probar sonido
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onProbarSonido("fuerte")}
+            className="border-2 border-red-700 bg-red-600 px-3 py-2 rounded-lg text-[10px] font-black uppercase text-white hover:bg-red-700 transition"
+          >
+            Probar sonido fuerte
           </button>
 
           <button
@@ -853,9 +948,28 @@ const NotificacionesInternas = ({
           </button>
         </div>
 
-        <p className="mt-2 text-right text-[10px] font-black uppercase text-gray-500">
-          Activa las alertas sonoras para no perder tareas asignadas.
-        </p>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+          <label className="flex items-center justify-end gap-2 text-[10px] font-black uppercase text-gray-500">
+            Modo sonido
+            <select
+              value={sonidoModo}
+              onChange={(event) => onCambiarModoSonido(event.target.value)}
+              className="border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase text-black"
+            >
+              <option value="normal">Normal</option>
+              <option value="fuerte">Fuerte</option>
+            </select>
+          </label>
+          <p className="text-right text-[10px] font-black uppercase text-gray-500">
+            Activa sonido fuerte para puestos de recepción o taller.
+          </p>
+        </div>
+
+        {sonidoError && (
+          <div className="mt-2 border-2 border-yellow-500 bg-yellow-50 px-3 py-2 text-[10px] font-black uppercase text-yellow-800">
+            {sonidoError}
+          </div>
+        )}
 
         {abiertas && (
           <div className="absolute right-0 mt-3 z-30 w-full bg-white border-4 border-black rounded-2xl shadow-[10px_10px_0px_0px_rgba(0,0,0,1)] overflow-hidden">
@@ -1035,6 +1149,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     fileServiceActivos: 0,
     fileServicePostPendiente: 0,
     fileServiceCorrecciones: 0,
+    correccionesTecnicasPendientes: 0,
     alertasOperativas: [],
     checklistOperativo: [],
     clientes: puedeVerBase ? 0 : "Sin acceso",
@@ -1304,6 +1419,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         String(archivo.estado || "").toUpperCase() === "REQUIERE_CORRECCION"
     ).length;
 
+    const correccionesTecnicasPendientes = ordenesReales.filter((orden) => {
+      const estadoCorreccion = String(orden.correccion_estado || "").toUpperCase();
+      return (
+        estadoCorreccion &&
+        !["CORRECCION_APLICADA", "CERRADA"].includes(estadoCorreccion)
+      );
+    }).length;
+
     const listasEntrega = ordenesReales.filter(
       (orden) =>
         String(orden.estado || "").toUpperCase() === "LISTO_PARA_ENTREGA"
@@ -1324,6 +1447,23 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           orden?.cliente_categoria_cliente ||
           ""
       ).toUpperCase();
+      const estadoCorreccion = String(orden.correccion_estado || "").toUpperCase();
+
+      if (
+        estadoCorreccion &&
+        !["CORRECCION_APLICADA", "CERRADA"].includes(estadoCorreccion)
+      ) {
+        agregarAlerta({
+          id: `orden-${orden.id}-correccion-tecnica`,
+          severidad:
+            estadoCorreccion === "CORRECCION_SOLICITADA" ? "critica" : "atencion",
+          tipo: "Corrección técnica pendiente",
+          referencia: `Orden #${orden.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: estadoCorreccion,
+          horas,
+        });
+      }
 
       if (
         estado !== "ENTREGADO" &&
@@ -1474,12 +1614,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           archivo.correccion_pendiente === true ||
           String(archivo.estado || "").toUpperCase() === "REQUIERE_CORRECCION"
       ).length,
+      correccionesTecnicasPendientes,
       alertasOperativas: alertasOrdenadas,
       checklistOperativo: [
         crearItemChecklist("Órdenes sin diagnóstico", ordenesSinDiagnostico),
         crearItemChecklist("File Service sin post escritura OK", fileServiceSinPostOk),
         crearItemChecklist("File Service con corrección pendiente", correccionesPendientes),
         crearItemChecklist("Órdenes listas para entrega", listasEntrega),
+        crearItemChecklist("Correcciones técnicas pendientes", correccionesTecnicasPendientes),
         crearItemChecklist("Pagos pendientes", pagosPendientes),
         crearItemChecklist("Entregadas hoy", entregadasHoy),
       ],
@@ -1599,6 +1741,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           <StatCard label="Listas para entrega" val={stats.listasEntrega} color="border-emerald-500" />
           <StatCard label="Pendientes de pago" val={stats.pendientesPago} color="border-red-500" />
           <StatCard label="Entregadas hoy" val={stats.entregadasHoy} color="border-blue-500" />
+          <StatCard label="Correcciones pendientes" val={stats.correccionesTecnicasPendientes} color="border-red-500" />
         </DashboardSection>
       )}
 

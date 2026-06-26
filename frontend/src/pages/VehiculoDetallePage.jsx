@@ -277,6 +277,12 @@ function VehiculoDetallePage() {
             const diagnosticos = normalizarLista(orden.Diagnosticos, orden.Diagnostico);
             const fotos = normalizarLista(orden.FotoVehiculos, orden.FotosVehiculo);
             const archivos = normalizarLista(orden.ArchivoECUs, orden.ArchivosECU);
+            const historialCorreccion = Array.isArray(orden.correccion_historial)
+              ? orden.correccion_historial
+              : [];
+            const bitacoraOperativa = Array.isArray(orden.bitacora_operativa)
+              ? orden.bitacora_operativa
+              : [];
             const tieneFeedback =
               Boolean(String(orden.feedback_operario || "").trim()) ||
               Boolean(String(orden.detalle_pendiente || "").trim()) ||
@@ -284,6 +290,8 @@ function VehiculoDetallePage() {
               orden.requiere_seguimiento === true ||
               Boolean(orden.feedback_por) ||
               Boolean(orden.feedback_at);
+            const tieneCorreccion =
+              Boolean(orden.correccion_estado) || historialCorreccion.length > 0;
 
             return (
               <article key={orden.id} className="p-6 space-y-5">
@@ -383,6 +391,89 @@ function VehiculoDetallePage() {
                     />
                     <Info label="Feedback por" value={orden.feedback_por} />
                     <Info label="Fecha feedback" value={formatearFecha(orden.feedback_at)} />
+                  </Panel>
+                )}
+
+                {tieneCorreccion && (
+                  <Panel title="Correccion / postventa tecnica">
+                    <Info label="Estado" value={orden.correccion_estado} />
+                    <Info label="Prioridad" value={orden.correccion_prioridad} />
+                    <Info label="Motivo" value={orden.correccion_motivo} />
+                    <Info label="Descripcion" value={orden.correccion_descripcion} />
+                    <Info label="DTC" value={orden.correccion_dtc} />
+                    <Info
+                      label="Sintoma cliente"
+                      value={orden.correccion_sintoma_cliente}
+                    />
+                    <Info
+                      label="Archivo ECU relacionado"
+                      value={
+                        orden.correccion_archivo_ecu_id
+                          ? `File #${orden.correccion_archivo_ecu_id}`
+                          : "No registrado"
+                      }
+                    />
+                    <Info
+                      label="Responsable sugerido"
+                      value={orden.correccion_responsable_sugerido}
+                    />
+                    <Info
+                      label="Cliente volvio"
+                      value={orden.correccion_cliente_volvio ? "Si" : "No"}
+                    />
+                    <Info label="Creada por" value={orden.correccion_creada_por} />
+                    <Info
+                      label="Fecha creacion"
+                      value={formatearFecha(orden.correccion_creada_at)}
+                    />
+
+                    {historialCorreccion.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-[10px] font-black uppercase text-gray-500">
+                          Historial correccion
+                        </p>
+                        {historialCorreccion.slice(-5).map((evento, index) => (
+                          <div
+                            key={`${evento.fecha || index}-${index}`}
+                            className="border-2 border-black bg-white p-3 text-xs font-bold uppercase"
+                          >
+                            <p>
+                              {evento.estado || evento.tipo || "Evento"} |{" "}
+                              {formatearFecha(evento.fecha)}
+                            </p>
+                            <p>{evento.motivo || evento.comentario_tecnico}</p>
+                            <p>
+                              Por:{" "}
+                              {evento.creado_por ||
+                                evento.actualizado_por ||
+                                "No registrado"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {bitacoraOperativa.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-[10px] font-black uppercase text-gray-500">
+                          Bitacora operativa
+                        </p>
+                        {bitacoraOperativa.slice(-5).map((evento, index) => (
+                          <div
+                            key={`${evento.fecha || index}-${index}`}
+                            className="border-2 border-black bg-white p-3 text-xs font-bold uppercase"
+                          >
+                            <p>
+                              {evento.tipo || "OTRO"} |{" "}
+                              {evento.prioridad || "MEDIA"} |{" "}
+                              {formatearFecha(evento.fecha)}
+                            </p>
+                            <p>{evento.texto}</p>
+                            <p>Por: {evento.creado_por || "No registrado"}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </Panel>
                 )}
 

@@ -5,6 +5,9 @@ const {
   obtenerOrdenes,
   obtenerOrdenPorId,
   actualizarOrden,
+  registrarCorreccionTecnica,
+  actualizarCorreccionTecnica,
+  agregarBitacoraOrden,
   actualizarEstado,
   registrarPago,
   cobrarYEntregar,
@@ -16,6 +19,11 @@ router.post("/", crearOrden);
 
 router.get("/", obtenerOrdenes);
 router.get("/:id", obtenerOrdenPorId);
+
+// Correccion tecnica / postventa interna
+router.post("/:id/correccion-tecnica", registrarCorreccionTecnica);
+router.patch("/:id/correccion-tecnica", actualizarCorreccionTecnica);
+router.post("/:id/bitacora", agregarBitacoraOrden);
 
 // Ruta que tu frontend actual está usando
 router.patch("/:id", actualizarOrden);

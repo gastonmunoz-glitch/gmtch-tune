@@ -106,7 +106,38 @@ flowchart TD
   E --> I["Auditoria registra nueva lectura"]
 ```
 
-## 7. Flujo Notificaciones
+## 7. Flujo Correccion Postventa Tecnica Interna
+
+```mermaid
+flowchart TD
+  A["Cliente vuelve por DTC / sintoma postventa"] --> B["Recepcion u operador ubica orden, vehiculo o File Service"]
+  B --> C["Registrar postventa tecnica"]
+  C --> D["Guardar motivo, descripcion, DTC, sintoma, prioridad y responsable sugerido"]
+  D --> E["Estado CORRECCION_SOLICITADA"]
+  E --> F["Backend registra usuario, fecha, orden, vehiculo, cliente y archivo ECU si aplica"]
+  F --> G["Crear notificacion interna"]
+  G --> H["OWNER / ADMIN / SUPERVISOR / OPERADOR_ECU / TUNER revisan"]
+  H --> I["EN_REVISION_CORRECCION"]
+  I --> J{"Resultado tecnico"}
+  J -->|MOD listo| K["MOD_CORRECCION_LISTO"]
+  J -->|Aplicada| L["CORRECCION_APLICADA"]
+  L --> M["CERRADA"]
+```
+
+Regla: una correccion tecnica no marca pago, entrega ni cierre comercial. Es flujo tecnico/auditivo.
+
+## 8. Flujo Bitacora Rapida Operativa
+
+```mermaid
+flowchart TD
+  A["Operador detecta observacion"] --> B["Anotar observacion en orden"]
+  B --> C["Tipo: Mejora / Error proceso / Cliente volvio / Recordatorio / Otro"]
+  C --> D["Prioridad y modulo relacionado"]
+  D --> E["Guardar en bitacora_operativa"]
+  E --> F["Ficha vehiculo muestra historial"]
+```
+
+## 9. Flujo Notificaciones
 
 ```mermaid
 flowchart TD
@@ -121,7 +152,7 @@ flowchart TD
   D -->|No| C
 ```
 
-## 8. Flujo Dominios
+## 10. Flujo Dominios
 
 ```mermaid
 flowchart LR
@@ -133,7 +164,6 @@ flowchart LR
   API --> BE
 ```
 
-## 9. Regla de Mantenimiento
+## 11. Regla de Mantenimiento
 
 Este documento debe actualizarse cada vez que se cambie un flujo operativo, ruta critica, rol, portal, dominio, integracion, estado de File Service, pago, notificacion o arquitectura.
-

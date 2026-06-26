@@ -111,6 +111,89 @@ const OrdenTrabajo = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+
+    correccion_estado: {
+      type: DataTypes.STRING(60),
+      allowNull: true,
+    },
+
+    correccion_prioridad: {
+      type: DataTypes.STRING(30),
+      allowNull: true,
+    },
+
+    correccion_motivo: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    correccion_descripcion: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    correccion_dtc: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+    },
+
+    correccion_sintoma_cliente: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    correccion_archivo_ecu_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    correccion_responsable_sugerido: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    correccion_comentario_tecnico: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    correccion_cliente_volvio: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    correccion_creada_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    correccion_creada_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    correccion_actualizada_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    correccion_actualizada_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    correccion_historial: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
+
+    bitacora_operativa: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
   },
   {
     tableName: "ordenes_trabajo",
