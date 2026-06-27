@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation } from "react-router-dom";
 import api from "../services/api";
 
 const prioridadClase = (prioridad) => {
@@ -60,6 +60,7 @@ const texto = (valor, fallback = "No registrado") => {
 
 function VehiculoDetallePage() {
   const { id } = useParams();
+  const location = useLocation();
 
   const [vehiculo, setVehiculo] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -87,6 +88,20 @@ function VehiculoDetallePage() {
       activo = false;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (cargando || !location.hash) return;
+
+    const objetivo = document.querySelector(location.hash);
+    if (objetivo) {
+      window.setTimeout(() => {
+        objetivo.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 120);
+    }
+  }, [cargando, location.hash]);
 
   const ordenes = useMemo(() => {
     if (!vehiculo?.OrdenTrabajos) return [];
@@ -255,14 +270,17 @@ function VehiculoDetallePage() {
           Acciones rapidas
         </p>
         <div className="flex flex-wrap gap-3">
-          <QuickLink to="/ordenes" label="Nueva orden" />
-          <QuickLink to="/diagnosticos" label="Ver / ir a diagnostico" />
-          <QuickLink to="/archivos-ecu" label="Ver / ir a File Service" />
-          <QuickLink to="/fotos" label="Subir fotos" />
+          <QuickLink to={`/ordenes?vehiculoId=${id}`} label="Nueva orden" />
+          <QuickLink to={`/diagnosticos?vehiculoId=${id}`} label="Ver / ir a diagnostico" />
+          <QuickLink to={`/archivos-ecu?vehiculoId=${id}`} label="Ver / ir a File Service" />
+          <QuickLink to={`/fotos?vehiculoId=${id}`} label="Subir fotos" />
         </div>
       </section>
 
-      <section className="bg-white border-4 border-black shadow-[12px_12px_0px_0px_rgba(0,0,0,1)]">
+      <section
+        id="historial"
+        className="scroll-mt-24 bg-white border-4 border-black shadow-[12px_12px_0px_0px_rgba(0,0,0,1)]"
+      >
         <div className="bg-slate-100 border-b-4 border-black p-5">
           <h2 className="text-2xl font-black uppercase">
             Historial 360 del vehiculo
@@ -304,7 +322,11 @@ function VehiculoDetallePage() {
               orden.intervencion_listo_programacion === true;
 
             return (
-              <article key={orden.id} className="p-6 space-y-5">
+              <article
+                id={`orden-${orden.id}`}
+                key={orden.id}
+                className="scroll-mt-24 p-6 space-y-5"
+              >
                 <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
                   <div>
                     <div className="flex flex-wrap gap-2 mb-3">
@@ -359,7 +381,7 @@ function VehiculoDetallePage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div id="ordenes" className="scroll-mt-24 grid grid-cols-1 md:grid-cols-3 gap-4">
                   <MiniBox title="Diagnosticos" value={`${diagnosticos.length} registro(s)`} />
                   <MiniBox title="Fotos" value={`${fotos.length} archivo(s)`} />
                   <MiniBox title="Archivos ECU" value={`${archivos.length} archivo(s)`} />
@@ -534,7 +556,7 @@ function VehiculoDetallePage() {
                 )}
 
                 {diagnosticos.length > 0 && (
-                  <Panel title="Diagnosticos asociados">
+                  <Panel id="diagnosticos" title="Diagnosticos asociados">
                     <div className="space-y-3">
                       {diagnosticos.map((diagnostico, index) => {
                         const scanner = fileUrl(
@@ -573,7 +595,7 @@ function VehiculoDetallePage() {
                 )}
 
                 {fotos.length > 0 && (
-                  <Panel title="Fotos del vehiculo">
+                  <Panel id="fotos" title="Fotos del vehiculo">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {fotos.map((foto, index) => {
                         const url = fileUrl(foto.url_foto || foto.url || foto.path);
@@ -604,7 +626,7 @@ function VehiculoDetallePage() {
                 )}
 
                 {archivos.length > 0 && (
-                  <Panel title="File Service / archivos ECU">
+                  <Panel id="archivos" title="File Service / archivos ECU">
                     <div className="space-y-3">
                       {archivos.map((archivo, index) => {
                         const original = fileUrl(archivo.archivo_original);
@@ -684,8 +706,8 @@ const MiniBox = ({ title, value }) => (
   </div>
 );
 
-const Panel = ({ title, children }) => (
-  <section className="border-2 border-black p-4 bg-slate-50">
+const Panel = ({ id, title, children }) => (
+  <section id={id} className="scroll-mt-24 border-2 border-black p-4 bg-slate-50">
     <h4 className="text-sm font-black uppercase mb-3">{title}</h4>
     <div className="space-y-2">{children}</div>
   </section>

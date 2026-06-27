@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import api from "../services/api";
 
 const DATOS_CUENTA = {
@@ -218,6 +219,9 @@ const ordenarEntregadas = (a, b) => {
 };
 
 function OrdenesPage() {
+  const [searchParams] = useSearchParams();
+  const ordenIdQuery = searchParams.get("ordenId");
+  const vehiculoIdQuery = searchParams.get("vehiculoId");
   const [ordenes, setOrdenes] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
@@ -274,6 +278,22 @@ function OrdenesPage() {
       activo = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!ordenIdQuery) return;
+
+    setFiltro("TODAS");
+
+    window.setTimeout(() => {
+      const destino = document.getElementById(`orden-${ordenIdQuery}`);
+      if (destino) {
+        destino.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }
+    }, 180);
+  }, [ordenIdQuery, ordenes.length]);
 
   const recargar = async () => {
     try {
@@ -358,6 +378,13 @@ function OrdenesPage() {
       [campo]: valor,
     }));
   };
+
+  useEffect(() => {
+    if (!vehiculoIdQuery || vehiculos.length === 0) return;
+    if (String(formData.vehiculoId) === String(vehiculoIdQuery)) return;
+
+    actualizarForm("vehiculoId", vehiculoIdQuery);
+  }, [vehiculoIdQuery, vehiculos.length]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -816,20 +843,27 @@ function OrdenesPage() {
 
             return (
               <div
+                id={`orden-${o.id}`}
                 key={o.id}
-                className={`bg-white border-4 border-black shadow-[10px_10px_0px_0px_rgba(0,0,0,0.15)] overflow-hidden ${
+                className={`scroll-mt-24 bg-white border-4 border-black shadow-[10px_10px_0px_0px_rgba(0,0,0,0.15)] overflow-hidden ${
                   o.prioridad === "URGENTE" ? "ring-4 ring-red-600" : ""
                 }`}
               >
                 <div className="p-5 flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
                   <div className="flex gap-5">
-                    <button
-                      type="button"
-                      onClick={() => (window.location.href = `/vehiculos/${o.vehiculoId}`)}
-                      className="text-4xl font-black font-mono text-black bg-gray-100 p-5 border-4 border-black min-w-[170px] text-center"
-                    >
-                      {o.Vehiculo?.patente || "S/P"}
-                    </button>
+                    {o.vehiculoId ? (
+                      <Link
+                        to={`/vehiculos/${o.vehiculoId}#historial`}
+                        className="text-4xl font-black font-mono text-black bg-gray-100 p-5 border-4 border-black min-w-[170px] text-center hover:bg-blue-50 transition"
+                        title="Abrir ficha 360 del vehículo"
+                      >
+                        {o.Vehiculo?.patente || "S/P"}
+                      </Link>
+                    ) : (
+                      <div className="text-4xl font-black font-mono text-gray-400 bg-gray-100 p-5 border-4 border-gray-300 min-w-[170px] text-center">
+                        S/P
+                      </div>
+                    )}
 
                     <div>
                       <div className="flex flex-wrap gap-2 mb-3">
@@ -879,6 +913,29 @@ function OrdenesPage() {
                         Entrada: {new Date(o.createdAt).toLocaleString("es-CL")} · KM:{" "}
                         {o.kilometraje || "—"}
                       </p>
+
+                      <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase">
+                        {o.vehiculoId ? (
+                          <>
+                            <Link
+                              to={`/vehiculos/${o.vehiculoId}#historial`}
+                              className="border-2 border-black px-3 py-2 hover:bg-black hover:text-white transition"
+                            >
+                              Historial vehiculo
+                            </Link>
+                            <Link
+                              to={`/vehiculos/${o.vehiculoId}#archivos`}
+                              className="border-2 border-black px-3 py-2 hover:bg-black hover:text-white transition"
+                            >
+                              Archivos ECU
+                            </Link>
+                          </>
+                        ) : (
+                          <span className="border-2 border-gray-300 text-gray-400 px-3 py-2">
+                            Sin vinculo disponible
+                          </span>
+                        )}
+                      </div>
 
                       <div className="mt-4 border-2 border-black bg-white p-3">
                         <p className="text-[10px] font-black uppercase text-gray-500 mb-2">

@@ -128,7 +128,42 @@ flowchart TD
 
 Regla: la mecanica asociada a DPF/FAP, EGR, SCR/AdBlue/DEF, linea de escape o desmontaje/montaje necesario forma parte del servicio tecnico ECU/File Service y no debe gestionarse como mantencion independiente. Servicio sujeto a evaluacion tecnica, normativa aplicable y uso autorizado segun corresponda.
 
-## 5. Flujo Portal Masters / File Service
+## 5. Flujo File Service Interno
+
+```mermaid
+flowchart TD
+  A["Operador entra a /archivos-ecu"] --> B["Lista compacta de solicitudes"]
+  B --> C{"Selecciona archivo u orden"}
+  C -->|No| D["Mensaje: selecciona una orden o archivo para ver detalle tecnico"]
+  C -->|Si| E["Panel detalle tecnico"]
+  E --> F["Cliente / vehiculo / orden"]
+  E --> G["Estado, servicio y responsable"]
+  E --> H["Archivo original y MOD"]
+  E --> I["Historial MOD"]
+  E --> J["Post escritura"]
+  E --> K["Correcciones / nueva lectura si aplica"]
+  E --> L["Links precisos a ficha vehiculo, historial, archivos, orden y cliente"]
+```
+
+Regla: File Service interno debe evitar desplegar masivamente todas las fichas tecnicas. La lista muestra resumen operativo y el panel detalle muestra solo el archivo seleccionado.
+
+## 6. Flujo Navegacion Precisa
+
+```mermaid
+flowchart TD
+  A["Usuario hace clic en cliente, vehiculo, garage, ficha, historial u orden"] --> B{"Existe ID especifico"}
+  B -->|Si vehiculo| C["/vehiculos/:id#historial"]
+  B -->|Si archivos| D["/vehiculos/:id#archivos o /archivos-ecu?archivoId=:id"]
+  B -->|Si orden| E["/ordenes?ordenId=:id"]
+  B -->|Si cliente| F["/clientes?clienteId=:id"]
+  B -->|No| G["Mostrar sin vinculo disponible"]
+  C --> H["Ficha vehiculo hace scroll suave al anchor"]
+  D --> H
+  E --> I["OrdenesPage muestra TODAS y hace scroll a la orden"]
+  F --> J["ClientesPage abre ficha CRM exacta"]
+```
+
+## 7. Flujo Portal Masters / File Service
 
 ```mermaid
 flowchart TD
@@ -145,7 +180,7 @@ flowchart TD
   I --> J
 ```
 
-## 6. Flujo Nueva Lectura Requerida
+## 8. Flujo Nueva Lectura Requerida
 
 ```mermaid
 flowchart TD
@@ -159,7 +194,7 @@ flowchart TD
   E --> I["Auditoria registra nueva lectura"]
 ```
 
-## 7. Flujo Correccion Postventa Tecnica Interna
+## 9. Flujo Correccion Postventa Tecnica Interna
 
 ```mermaid
 flowchart TD
@@ -179,7 +214,7 @@ flowchart TD
 
 Regla: una correccion tecnica no marca pago, entrega ni cierre comercial. Es flujo tecnico/auditivo.
 
-## 8. Flujo Bitacora Operativa Global
+## 10. Flujo Bitacora Operativa Global
 
 ```mermaid
 flowchart TD
@@ -200,22 +235,27 @@ flowchart TD
 
 Regla: la bitacora operativa global sirve para no perder observaciones del dia. No reemplaza la postventa tecnica cuando existe una orden o un DTC claro; permite anotar rapido aunque todavia no se conozca la orden, vehiculo o archivo relacionado.
 
-## 9. Flujo Notificaciones
+## 11. Flujo Notificaciones
 
 ```mermaid
 flowchart TD
-  A["Backend crea notificacion"] --> B["Frontend consulta cada 30 segundos"]
+  A["Backend crea notificacion"] --> B["Frontend consulta cada 10 segundos si la app esta activa"]
+  B --> B2["Si la pestaña esta en segundo plano baja a 30 segundos"]
   B --> C["Campana muestra contador"]
   C --> D{"Nueva no leida"}
-  D -->|Si| E["Alerta flotante aparece"]
+  D -->|Si| E["Alerta flotante critica aparece"]
   E --> F{"Sonido activado por usuario"}
-  F -->|Si| G["Sonido corto Web Audio"]
-  F -->|No| H["Solo alerta visual"]
-  E --> I["Usuario marca leido o ver detalle"]
+  F -->|Normal| G["Beep corto Web Audio"]
+  F -->|Fuerte| H["Tres beeps cortos"]
+  F -->|Tsunami| I["Secuencia 4 a 6 beeps / sirena breve menor a 3s"]
+  F -->|No| J["Solo alerta visual"]
+  E --> K["Usuario marca leido o ver detalle"]
   D -->|No| C
 ```
 
-## 10. Flujo Dominios
+Regla: el modo tsunami es opcional y se usa solo en recepcion/taller cuando se requiere maxima atencion. No debe sonar infinitamente ni repetirse por notificaciones antiguas.
+
+## 12. Flujo Dominios
 
 ```mermaid
 flowchart LR
@@ -227,6 +267,6 @@ flowchart LR
   API --> BE
 ```
 
-## 11. Regla de Mantenimiento
+## 13. Regla de Mantenimiento
 
 Este documento debe actualizarse cada vez que se cambie un flujo operativo, ruta critica, rol, portal, dominio, integracion, estado de File Service, pago, notificacion o arquitectura.

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import api from "../services/api";
 
 const ESTADOS = {
@@ -268,6 +269,10 @@ const obtenerClienteVehiculo = (archivo) => {
 };
 
 export default function ArchivosECUPage() {
+  const [searchParams] = useSearchParams();
+  const archivoIdQuery = searchParams.get("archivoId");
+  const ordenIdQuery = searchParams.get("ordenId");
+  const vehiculoIdQuery = searchParams.get("vehiculoId");
   const [archivos, setArchivos] = useState([]);
   const [ordenes, setOrdenes] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
@@ -281,6 +286,7 @@ export default function ArchivosECUPage() {
 
   const [filtro, setFiltro] = useState("PENDIENTES");
   const [busqueda, setBusqueda] = useState("");
+  const [archivoSeleccionadoId, setArchivoSeleccionadoId] = useState("");
 
   const [nuevo, setNuevo] = useState({
     ordenId: "",
@@ -488,6 +494,36 @@ export default function ArchivosECUPage() {
       return true;
     });
   }, [archivos, filtro, busqueda]);
+
+  const archivoSeleccionado = useMemo(
+    () =>
+      archivosFiltrados.find(
+        (archivo) => String(archivo.id) === String(archivoSeleccionadoId)
+      ) || null,
+    [archivosFiltrados, archivoSeleccionadoId]
+  );
+
+  useEffect(() => {
+    if (archivoIdQuery || ordenIdQuery || vehiculoIdQuery) {
+      setFiltro("TODOS");
+    }
+
+    const encontrado = archivosFiltrados.find((archivo) => {
+      const vehiculo = archivo?.OrdenTrabajo?.Vehiculo;
+
+      return (
+        (archivoIdQuery && String(archivo.id) === String(archivoIdQuery)) ||
+        (ordenIdQuery && String(archivo.ordenId) === String(ordenIdQuery)) ||
+        (vehiculoIdQuery &&
+          vehiculo?.id &&
+          String(vehiculo.id) === String(vehiculoIdQuery))
+      );
+    });
+
+    if (encontrado) {
+      setArchivoSeleccionadoId(String(encontrado.id));
+    }
+  }, [archivosFiltrados, archivoIdQuery, ordenIdQuery, vehiculoIdQuery]);
 
   const usuariosPorRoles = useCallback(
     (roles) =>
@@ -1418,9 +1454,74 @@ export default function ArchivosECUPage() {
             </div>
           )}
 
-          <div className="space-y-5">
-            {archivosFiltrados.map((archivo) => {
-              const { textoCliente, textoVehiculo } =
+          <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-5">
+            <div className="space-y-3 xl:max-h-[calc(100vh-180px)] xl:overflow-auto pr-1">
+              {archivosFiltrados.map((archivo) => {
+                const { textoCliente, textoVehiculo } =
+                  obtenerClienteVehiculo(archivo);
+                const seleccionado =
+                  String(archivo.id) === String(archivoSeleccionadoId);
+
+                return (
+                  <button
+                    key={archivo.id}
+                    type="button"
+                    onClick={() => setArchivoSeleccionadoId(String(archivo.id))}
+                    className={`w-full text-left rounded-2xl border p-4 transition ${
+                      seleccionado
+                        ? "border-blue-400 bg-blue-950/60 shadow-[0_0_0_2px_rgba(59,130,246,0.35)]"
+                        : "border-slate-800 bg-slate-950/70 hover:border-blue-500"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-white">
+                          File #{archivo.id}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          Orden #{archivo.ordenId || "Sin orden"}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase text-slate-200">
+                        {archivo.estado || "Sin estado"}
+                      </span>
+                    </div>
+
+                    <p className="mt-3 text-sm font-semibold text-slate-200">
+                      {textoCliente}
+                    </p>
+                    <p className="text-xs text-slate-400">{textoVehiculo}</p>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="rounded-full bg-slate-900 px-2 py-1 text-[10px] uppercase text-slate-300">
+                        {archivo.tipo_servicio || "Servicio no informado"}
+                      </span>
+                      <span className="rounded-full bg-blue-950 px-2 py-1 text-[10px] uppercase text-blue-200">
+                        {obtenerProximaAccion(archivo)}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div>
+              {!archivoSeleccionado ? (
+                <div className="min-h-[360px] rounded-3xl border border-dashed border-slate-700 bg-slate-950/60 p-8 flex items-center justify-center text-center">
+                  <div>
+                    <p className="text-xl font-semibold text-slate-200">
+                      Selecciona una orden o archivo para ver el detalle técnico.
+                    </p>
+                    <p className="mt-3 text-sm text-slate-500">
+                      La lista compacta mantiene filtros y búsqueda sin cargar toda
+                      la ficha técnica de cada File Service.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                (() => {
+                  const archivo = archivoSeleccionado;
+              const { orden, vehiculo, cliente, textoCliente, textoVehiculo } =
                 obtenerClienteVehiculo(archivo);
 
               const versiones = Array.isArray(archivo.versiones_modificadas)
@@ -1505,6 +1606,51 @@ export default function ArchivosECUPage() {
                         Orden #{archivo.ordenId} · Servicio:{" "}
                         {archivo.tipo_servicio || "-"}
                       </p>
+
+                      <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold uppercase">
+                        {vehiculo?.id ? (
+                          <>
+                            <Link
+                              to={`/vehiculos/${vehiculo.id}#historial`}
+                              className="rounded-xl border border-slate-600 px-3 py-2 text-slate-200 hover:border-blue-400 hover:text-blue-200"
+                            >
+                              Ficha vehículo
+                            </Link>
+                            <Link
+                              to={`/vehiculos/${vehiculo.id}#archivos`}
+                              className="rounded-xl border border-slate-600 px-3 py-2 text-slate-200 hover:border-blue-400 hover:text-blue-200"
+                            >
+                              Historial archivos
+                            </Link>
+                          </>
+                        ) : (
+                          <span className="rounded-xl border border-slate-700 px-3 py-2 text-slate-500">
+                            Sin vínculo vehículo
+                          </span>
+                        )}
+
+                        {archivo.ordenId ? (
+                          <Link
+                            to={`/ordenes?ordenId=${archivo.ordenId}`}
+                            className="rounded-xl border border-slate-600 px-3 py-2 text-slate-200 hover:border-blue-400 hover:text-blue-200"
+                          >
+                            Orden #{archivo.ordenId}
+                          </Link>
+                        ) : (
+                          <span className="rounded-xl border border-slate-700 px-3 py-2 text-slate-500">
+                            Sin vínculo orden
+                          </span>
+                        )}
+
+                        {cliente?.id ? (
+                          <Link
+                            to={`/clientes?clienteId=${cliente.id}`}
+                            className="rounded-xl border border-slate-600 px-3 py-2 text-slate-200 hover:border-blue-400 hover:text-blue-200"
+                          >
+                            Cliente
+                          </Link>
+                        ) : null}
+                      </div>
 
                       <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
                         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-3">
@@ -2386,7 +2532,9 @@ export default function ArchivosECUPage() {
                   </details>
                 </article>
               );
-            })}
+                })()
+              )}
+            </div>
           </div>
         </section>
       </div>

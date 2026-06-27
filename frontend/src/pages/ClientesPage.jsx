@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../services/api";
 
 const CATEGORIAS = [
@@ -114,6 +114,8 @@ const calcularMetricas = (cliente) => {
 
 function ClientesPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const clienteIdQuery = searchParams.get("clienteId");
   const [clientes, setClientes] = useState([]);
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -149,6 +151,12 @@ function ClientesPage() {
       setCargandoFicha(false);
     }
   };
+
+  useEffect(() => {
+    if (clienteIdQuery) {
+      cargarFicha(clienteIdQuery);
+    }
+  }, [clienteIdQuery]);
 
   const limpiarFormulario = () => {
     setEditingId(null);

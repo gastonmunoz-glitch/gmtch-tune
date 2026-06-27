@@ -197,7 +197,16 @@ const reproducirSonidoNotificacion = async ({ modo = "normal" } = {}) => {
     }
 
     const secuencia =
-      modo === "fuerte"
+      modo === "tsunami"
+        ? [
+            { frecuencia: 740, inicio: 0, duracion: 0.16 },
+            { frecuencia: 1120, inicio: 0.22, duracion: 0.16 },
+            { frecuencia: 860, inicio: 0.44, duracion: 0.16 },
+            { frecuencia: 1280, inicio: 0.66, duracion: 0.16 },
+            { frecuencia: 920, inicio: 0.92, duracion: 0.2 },
+            { frecuencia: 1180, inicio: 1.22, duracion: 0.28 },
+          ]
+        : modo === "fuerte"
         ? [
             { frecuencia: 880, inicio: 0, duracion: 0.18 },
             { frecuencia: 1040, inicio: 0.3, duracion: 0.18 },
@@ -205,8 +214,8 @@ const reproducirSonidoNotificacion = async ({ modo = "normal" } = {}) => {
           ]
         : [{ frecuencia: 880, inicio: 0, duracion: 0.32 }];
 
-    const volumen = modo === "fuerte" ? 0.34 : 0.16;
-    const tipoOnda = modo === "fuerte" ? "square" : "sine";
+    const volumen = modo === "tsunami" ? 0.52 : modo === "fuerte" ? 0.34 : 0.16;
+    const tipoOnda = modo === "normal" ? "sine" : "square";
     const masterGain = contexto.createGain();
 
     masterGain.gain.setValueAtTime(0.95, contexto.currentTime);
@@ -232,7 +241,7 @@ const reproducirSonidoNotificacion = async ({ modo = "normal" } = {}) => {
 
     window.setTimeout(() => {
       contexto.close().catch(() => {});
-    }, modo === "fuerte" ? 1200 : 600);
+    }, modo === "tsunami" ? 2200 : modo === "fuerte" ? 1200 : 600);
 
     return true;
   } catch {
@@ -253,9 +262,10 @@ function App() {
   const [sonidoNotificacionesActivo, setSonidoNotificacionesActivo] = useState(
     () => localStorage.getItem(SOUND_ALERTS_KEY) === "true"
   );
-  const [sonidoNotificacionesModo, setSonidoNotificacionesModo] = useState(() =>
-    localStorage.getItem(SOUND_ALERTS_MODE_KEY) === "fuerte" ? "fuerte" : "normal"
-  );
+  const [sonidoNotificacionesModo, setSonidoNotificacionesModo] = useState(() => {
+    const guardado = localStorage.getItem(SOUND_ALERTS_MODE_KEY);
+    return ["normal", "fuerte", "tsunami"].includes(guardado) ? guardado : "normal";
+  });
   const [sonidoNotificacionesError, setSonidoNotificacionesError] = useState("");
   const [logoOk, setLogoOk] = useState(true);
   const notificacionesInicializadasRef = useRef(false);
@@ -316,7 +326,7 @@ function App() {
 
             if (!audioOk) {
               setSonidoNotificacionesError(
-                "El navegador bloqueó el audio. Presiona Activar sonido o Probar sonido."
+                "El navegador bloqueó el audio. Presiona Activar sonido o Probar alerta."
               );
             }
           }
@@ -435,7 +445,7 @@ function App() {
       setSonidoNotificacionesError(
         audioOk
           ? ""
-          : "El navegador bloqueó el audio. Presiona Activar sonido o Probar sonido."
+          : "El navegador bloqueó el audio. Presiona Activar sonido o Probar alerta."
       );
     } else {
       setSonidoNotificacionesError("");
@@ -443,29 +453,60 @@ function App() {
   };
 
   const cambiarModoSonidoNotificaciones = (modo) => {
-    const siguiente = modo === "fuerte" ? "fuerte" : "normal";
+    const siguiente = ["normal", "fuerte", "tsunami"].includes(modo)
+      ? modo
+      : "normal";
     setSonidoNotificacionesModo(siguiente);
     localStorage.setItem(SOUND_ALERTS_MODE_KEY, siguiente);
   };
 
   const probarSonidoNotificaciones = async (modo = sonidoNotificacionesModo) => {
-    const modoSeguro = modo === "fuerte" ? "fuerte" : "normal";
+    const modoSeguro = ["normal", "fuerte", "tsunami"].includes(modo)
+      ? modo
+      : "normal";
     const audioOk = await reproducirSonidoNotificacion({ modo: modoSeguro });
 
     setSonidoNotificacionesError(
       audioOk
         ? ""
-        : "El navegador bloqueó el audio. Presiona Activar sonido o Probar sonido."
+        : "El navegador bloqueó el audio. Presiona Activar sonido o Probar alerta."
     );
   };
 
   useEffect(() => {
     if (!auth) return undefined;
 
-    cargarNotificaciones();
+    let cancelado = false;
+    let timeoutId = null;
 
-    const intervaloNotificaciones = window.setInterval(cargarNotificaciones, 30000);
-    return () => window.clearInterval(intervaloNotificaciones);
+    const programarSiguienteCarga = () => {
+      if (cancelado) return;
+      const demora = document.hidden ? 30000 : 10000;
+      timeoutId = window.setTimeout(async () => {
+        await cargarNotificaciones();
+        programarSiguienteCarga();
+      }, demora);
+    };
+
+    cargarNotificaciones();
+    programarSiguienteCarga();
+
+    const alCambiarVisibilidad = () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+      programarSiguienteCarga();
+    };
+
+    document.addEventListener("visibilitychange", alCambiarVisibilidad);
+
+    return () => {
+      cancelado = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+      document.removeEventListener("visibilitychange", alCambiarVisibilidad);
+    };
   }, [
     auth,
     usuario?.rol,
@@ -936,6 +977,14 @@ const NotificacionesInternas = ({
 
           <button
             type="button"
+            onClick={() => onProbarSonido("tsunami")}
+            className="border-2 border-red-900 bg-red-800 px-3 py-2 rounded-lg text-[10px] font-black uppercase text-white hover:bg-red-950 transition shadow-[0_0_18px_rgba(220,38,38,0.45)]"
+          >
+            Probar alerta tsunami
+          </button>
+
+          <button
+            type="button"
             onClick={() => setAbiertas((actual) => !actual)}
             className="relative bg-black text-white border-2 border-black px-4 py-2 rounded-lg font-black uppercase text-xs hover:bg-blue-700 transition"
           >
@@ -958,10 +1007,11 @@ const NotificacionesInternas = ({
             >
               <option value="normal">Normal</option>
               <option value="fuerte">Fuerte</option>
+              <option value="tsunami">Critico / Tsunami</option>
             </select>
           </label>
           <p className="text-right text-[10px] font-black uppercase text-gray-500">
-            Activa sonido fuerte para puestos de recepción o taller.
+            Usar modo tsunami solo en recepción/taller cuando se necesite máxima atención.
           </p>
         </div>
 
@@ -1070,14 +1120,14 @@ const AlertaNotificacionFlotante = ({
   if (!notificacion) return null;
 
   return (
-    <div className="fixed bottom-5 right-5 z-[60] w-[calc(100%-2.5rem)] max-w-md border-4 border-red-700 bg-white rounded-2xl shadow-[10px_10px_0px_0px_rgba(127,29,29,0.85)] overflow-hidden">
-      <div className="bg-red-700 px-4 py-3 text-white">
+    <div className="fixed bottom-5 right-5 z-[60] w-[calc(100%-2.5rem)] max-w-lg border-4 border-red-900 bg-white rounded-2xl shadow-[0_0_0_6px_rgba(239,68,68,0.28),12px_12px_0px_0px_rgba(127,29,29,0.9)] overflow-hidden animate-pulse">
+      <div className="bg-red-800 px-4 py-3 text-white">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-100">
               Centro de atención
             </p>
-            <h2 className="text-lg font-black uppercase leading-tight">
+            <h2 className="text-xl font-black uppercase leading-tight">
               Nueva alerta operativa
             </h2>
           </div>
@@ -1085,7 +1135,7 @@ const AlertaNotificacionFlotante = ({
           <button
             type="button"
             onClick={onCerrar}
-            className="rounded-full border-2 border-white px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white hover:text-red-700 transition"
+            className="rounded-full border-2 border-white px-2 py-1 text-[10px] font-black uppercase text-white hover:bg-white hover:text-red-800 transition"
           >
             Cerrar
           </button>
@@ -1096,7 +1146,7 @@ const AlertaNotificacionFlotante = ({
         <p className="text-[10px] font-black uppercase text-blue-700">
           {notificacion.tipo || "GENERAL"}
         </p>
-        <h3 className="mt-1 text-sm font-black uppercase text-black">
+        <h3 className="mt-1 text-base font-black uppercase text-black">
           {notificacion.titulo || "Notificación interna"}
         </h3>
         <p className="mt-2 text-sm font-bold leading-relaxed text-gray-700">
@@ -1110,7 +1160,7 @@ const AlertaNotificacionFlotante = ({
           <button
             type="button"
             onClick={onVer}
-            className="flex-1 bg-black px-4 py-3 text-xs font-black uppercase text-white rounded-lg hover:bg-blue-700 transition"
+            className="flex-1 bg-red-800 px-4 py-3 text-xs font-black uppercase text-white rounded-lg hover:bg-red-900 transition"
           >
             Ver
           </button>
