@@ -56,6 +56,53 @@ flowchart TD
   B --> K["Usuarios / roles"]
 ```
 
+## 3.1 Centro de Mando Operativo V2
+
+```mermaid
+flowchart TD
+  A["Dashboard interno"] --> B["Atencion inmediata"]
+  A --> C["Semaforo operativo"]
+  A --> D["Cola de trabajo del dia"]
+  A --> E["File Service"]
+  A --> F["Postventa tecnica / correcciones"]
+  A --> G["Intervencion fisica"]
+  A --> H["Acciones rapidas"]
+
+  B --> B1["Correcciones tecnicas pendientes"]
+  B --> B2["Archivos ECU pendientes"]
+  B --> B3["Post escritura pendiente"]
+  B --> B4["Nueva lectura requerida"]
+  B --> B5["MOD listo"]
+  B --> B6["Vehiculos listos para entrega"]
+  B --> B7["Pagos pendientes antes de entrega"]
+
+  C --> C1{"Estado general"}
+  C1 -->|Verde| C2["Operacion normal"]
+  C1 -->|Ambar| C3["Atencion requerida"]
+  C1 -->|Rojo| C4["Bloqueo operativo"]
+
+  D --> D1["Orden, cliente, vehiculo, estado y prioridad"]
+  D1 --> D2["Responsable actual"]
+  D2 --> D3["Proxima accion"]
+
+  E --> E1["Pendiente revision"]
+  E --> E2["En proceso"]
+  E --> E3["MOD listo"]
+  E --> E4["Correccion pendiente"]
+  E --> E5["Nueva lectura requerida"]
+  E --> E6["Post escritura pendiente"]
+
+  F --> F1["Cliente volvio por DTC"]
+  F --> F2["Responsable sugerido"]
+  F --> F3["Estado de correccion"]
+  F3 --> I["Notificacion interna, campana, alerta visual y sonido si aplica"]
+
+  G --> G1["Mecanica asociada al servicio tecnico"]
+  G --> G2["Mecanica independiente / mantencion"]
+```
+
+Regla: el Centro de Mando V2 prioriza bloqueos operativos, postventa tecnica, File Service, post escritura, pagos pendientes antes de entrega e intervencion fisica sin exponer caja a roles no autorizados.
+
 ## 4. Flujo Orden de Trabajo
 
 ```mermaid

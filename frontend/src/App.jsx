@@ -1152,6 +1152,15 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     fileServicePostPendiente: 0,
     fileServiceCorrecciones: 0,
     correccionesTecnicasPendientes: 0,
+    atencionInmediata: [],
+    semaforoOperativo: {
+      estado: "Operacion normal",
+      color: "verde",
+      detalle: "Sin bloqueos operativos relevantes",
+    },
+    colaTrabajo: [],
+    fileServiceResumen: [],
+    postventaPendientesDetalle: [],
     alertasOperativas: [],
     checklistOperativo: [],
     clientes: puedeVerBase ? 0 : "Sin acceso",
@@ -1248,6 +1257,63 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     contador,
     estado: contador > 0 ? "Atención" : "OK",
   });
+
+  const textoClienteVehiculoOrden = (orden) => {
+    const cliente =
+      orden?.Vehiculo?.Cliente?.nombre ||
+      orden?.Cliente?.nombre ||
+      orden?.cliente_nombre ||
+      "Cliente no registrado";
+    const vehiculo = [
+      orden?.Vehiculo?.patente || orden?.vehiculo_patente,
+      orden?.Vehiculo?.marca || orden?.vehiculo_marca,
+      orden?.Vehiculo?.modelo || orden?.vehiculo_modelo,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return `${cliente} - ${vehiculo || "Vehiculo no registrado"}`;
+  };
+
+  const responsablePrincipalOrden = (orden) =>
+    orden?.diagnostico_asignado_a ||
+    orden?.operador_ecu_asignado_a ||
+    orden?.mecanico_asignado_a ||
+    orden?.supervisor_asignado_a ||
+    orden?.recepcionado_por ||
+    "Sin asignar";
+
+  const proximaAccionOrden = (orden) => {
+    const estado = String(orden?.estado || "").toUpperCase();
+    const estadoPago = String(orden?.estado_pago || "").toUpperCase();
+    const correccion = String(orden?.correccion_estado || "").toUpperCase();
+    const intervencion = String(orden?.intervencion_fisica_tipo || "").toUpperCase();
+
+    if (correccion && !["CORRECCION_APLICADA", "CERRADA"].includes(correccion)) {
+      return "Revisar postventa tecnica";
+    }
+    if (estado === "RECEPCIONADO") return "Enviar a diagnostico";
+    if (estado === "PARA_DIAGNOSTICO") return "Realizar diagnostico";
+    if (estado === "EN_PROGRAMACION") return "Continuar ECU/File Service";
+    if (intervencion === "ASOCIADA_SERVICIO_TECNICO") {
+      return "Completar intervencion fisica asociada";
+    }
+    if (["PARA_MECANICA", "EN_MECANICA"].includes(estado)) {
+      return "Resolver mecanica independiente";
+    }
+    if (estado === "LISTO_PARA_ENTREGA" && estadoPago !== "PAGADO") {
+      return "Confirmar pago antes de entrega";
+    }
+    if (estado === "LISTO_PARA_ENTREGA") return "Entregar";
+    return "Mantener seguimiento";
+  };
+
+  const colorAtencion = (nivel) => {
+    if (nivel === "rojo") return "border-red-600 bg-red-50 text-red-950";
+    if (nivel === "ambar") return "border-yellow-500 bg-yellow-50 text-yellow-950";
+    if (nivel === "azul") return "border-blue-500 bg-blue-50 text-blue-950";
+    return "border-green-500 bg-green-50 text-green-950";
+  };
 
   const cerrarToast = (id) => {
     setToasts((actuales) => actuales.filter((toast) => toast.id !== id));
@@ -1463,6 +1529,222 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       );
     }).length;
 
+    const postventaPendientesDetalle = ordenesReales
+      .filter((orden) => {
+        const estadoCorreccion = String(orden.correccion_estado || "").toUpperCase();
+        return (
+          estadoCorreccion &&
+          !["CORRECCION_APLICADA", "CERRADA"].includes(estadoCorreccion)
+        );
+      })
+      .slice(0, 6)
+      .map((orden) => ({
+        id: orden.id,
+        clienteVehiculo: textoClienteVehiculoOrden(orden),
+        dtc: orden.correccion_dtc || "Sin DTC registrado",
+        clienteVolvio: orden.correccion_cliente_volvio === true,
+        responsable: orden.correccion_responsable_sugerido || responsablePrincipalOrden(orden),
+        estado: orden.correccion_estado || "CORRECCION_SOLICITADA",
+        prioridad: orden.correccion_prioridad || "MEDIA",
+      }));
+
+    const archivosPendienteRevision = archivos.filter((archivo) =>
+      ["ORIGINAL_CARGADO", "NOTIFICADO_MASTER"].includes(
+        String(archivo.estado || "").toUpperCase()
+      )
+    ).length;
+    const archivosModListo = archivos.filter((archivo) =>
+      ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE"].includes(
+        String(archivo.estado || "").toUpperCase()
+      )
+    ).length;
+    const archivosNuevaLectura = archivos.filter((archivo) => {
+      const estado = String(archivo.estado || "").toUpperCase();
+      return (
+        estado === "REQUIERE_NUEVA_LECTURA" ||
+        archivo.requiere_nueva_lectura === true ||
+        archivo.nueva_lectura_requerida === true
+      );
+    }).length;
+    const archivosEnProceso = archivos.filter((archivo) => {
+      const estado = String(archivo.estado || "").toUpperCase();
+      return (
+        archivoActivo(archivo) &&
+        ![
+          "ORIGINAL_CARGADO",
+          "NOTIFICADO_MASTER",
+          "MODIFICADO_LISTO",
+          "NOTIFICADO_SLAVE",
+          "POST_ESCRITURA_PENDIENTE",
+          "REQUIERE_CORRECCION",
+          "REQUIERE_NUEVA_LECTURA",
+        ].includes(estado)
+      );
+    }).length;
+    const pagosBloqueandoEntrega = ordenesReales.filter((orden) => {
+      const estado = String(orden.estado || "").toUpperCase();
+      const estadoPago = String(orden.estado_pago || "").toUpperCase();
+      return estado === "LISTO_PARA_ENTREGA" && estadoPago !== "PAGADO";
+    }).length;
+    const clientesVolvieronPostventa = ordenesReales.filter((orden) => {
+      const estadoCorreccion = String(orden.correccion_estado || "").toUpperCase();
+      return (
+        orden.correccion_cliente_volvio === true &&
+        estadoCorreccion &&
+        !["CORRECCION_APLICADA", "CERRADA"].includes(estadoCorreccion)
+      );
+    }).length;
+    const correccionesUrgentes = ordenesReales.filter((orden) => {
+      const estadoCorreccion = String(orden.correccion_estado || "").toUpperCase();
+      return (
+        estadoCorreccion &&
+        !["CORRECCION_APLICADA", "CERRADA"].includes(estadoCorreccion) &&
+        String(orden.correccion_prioridad || "").toUpperCase() === "URGENTE"
+      );
+    }).length;
+
+    const semaforoOperativo =
+      correccionesUrgentes > 0 ||
+      clientesVolvieronPostventa > 0 ||
+      pagosBloqueandoEntrega > 0
+        ? {
+            estado: "Bloqueo operativo",
+            color: "rojo",
+            detalle:
+              "Hay postventa urgente, cliente que volvio o pago bloqueando entrega.",
+          }
+        : archivosPendienteRevision > 0 ||
+          archivosNuevaLectura > 0 ||
+          fileServiceSinPostOk > 0 ||
+          mecanicaAsociadaCurso > 0 ||
+          mecanicaIndependiente > 0
+        ? {
+            estado: "Atencion requerida",
+            color: "ambar",
+            detalle: "Hay trabajos acumulados o etapas pendientes de cierre tecnico.",
+          }
+        : {
+            estado: "Operacion normal",
+            color: "verde",
+            detalle: "Sin bloqueos operativos relevantes.",
+          };
+
+    const atencionInmediata = [
+      {
+        label: "Correcciones tecnicas pendientes",
+        valor: correccionesTecnicasPendientes,
+        nivel: correccionesUrgentes > 0 ? "rojo" : "ambar",
+        to: "/ordenes",
+        detalle: "Postventa tecnica activa",
+      },
+      {
+        label: "Clientes que volvieron por DTC/postventa",
+        valor: clientesVolvieronPostventa,
+        nivel: clientesVolvieronPostventa > 0 ? "rojo" : "verde",
+        to: "/ordenes",
+        detalle: "Debe quedar trazado",
+      },
+      {
+        label: "Archivos ECU pendientes",
+        valor: archivosPendienteRevision,
+        nivel: archivosPendienteRevision > 0 ? "ambar" : "verde",
+        to: "/archivos-ecu",
+        detalle: "Originales por revisar",
+      },
+      {
+        label: "Post escritura pendiente",
+        valor: fileServiceSinPostOk,
+        nivel: fileServiceSinPostOk > 0 ? "rojo" : "verde",
+        to: "/archivos-ecu",
+        detalle: "Trabajo tecnico inconcluso",
+      },
+      {
+        label: "Nueva lectura requerida",
+        valor: archivosNuevaLectura,
+        nivel: archivosNuevaLectura > 0 ? "rojo" : "verde",
+        to: "/archivos-ecu",
+        detalle: "Lectura debe repetirse",
+      },
+      {
+        label: "MOD listo",
+        valor: archivosModListo,
+        nivel: archivosModListo > 0 ? "azul" : "verde",
+        to: "/archivos-ecu",
+        detalle: "Esperando escritura/notificacion",
+      },
+      {
+        label: "Vehiculos listos para entrega",
+        valor: listasEntrega,
+        nivel: listasEntrega > 0 ? "azul" : "verde",
+        to: "/ordenes",
+        detalle: "Cerrar comercialmente",
+      },
+      {
+        label: "Pagos pendientes antes de entrega",
+        valor: pagosBloqueandoEntrega,
+        nivel: pagosBloqueandoEntrega > 0 ? "rojo" : "verde",
+        to: "/ordenes",
+        detalle: "Bloquea entrega",
+      },
+      {
+        label: "Mecanica asociada al servicio en curso",
+        valor: mecanicaAsociadaCurso,
+        nivel: mecanicaAsociadaCurso > 0 ? "ambar" : "verde",
+        to: "/ordenes",
+        detalle: "No separa flujo ECU/File Service",
+      },
+      {
+        label: "Mecanica independiente / mantencion",
+        valor: mecanicaIndependiente,
+        nivel: mecanicaIndependiente > 0 ? "azul" : "verde",
+        to: "/ordenes",
+        detalle: "Rama mecanica separada",
+      },
+    ];
+
+    const fileServiceResumen = [
+      { label: "Pendiente revision", valor: archivosPendienteRevision, nivel: "ambar" },
+      { label: "En proceso", valor: archivosEnProceso, nivel: "azul" },
+      { label: "MOD listo", valor: archivosModListo, nivel: "azul" },
+      { label: "Correccion pendiente", valor: correccionesPendientes, nivel: "rojo" },
+      { label: "Nueva lectura requerida", valor: archivosNuevaLectura, nivel: "rojo" },
+      { label: "Post escritura pendiente", valor: fileServiceSinPostOk, nivel: "ambar" },
+    ];
+
+    const pesoPrioridad = {
+      URGENTE: 1,
+      ALTA: 2,
+      MEDIA: 3,
+      BAJA: 4,
+    };
+    const colaTrabajo = ordenesReales
+      .filter((orden) => String(orden.estado || "").toUpperCase() !== "ENTREGADO")
+      .sort((a, b) => {
+        const pa = pesoPrioridad[String(a.prioridad || "").toUpperCase()] || 9;
+        const pb = pesoPrioridad[String(b.prioridad || "").toUpperCase()] || 9;
+        if (pa !== pb) return pa - pb;
+        return (
+          (parseFecha(a.createdAt)?.getTime() || 0) -
+          (parseFecha(b.createdAt)?.getTime() || 0)
+        );
+      })
+      .slice(0, 8)
+      .map((orden) => ({
+        id: orden.id,
+        clienteVehiculo: textoClienteVehiculoOrden(orden),
+        estado: orden.estado || "PENDIENTE",
+        prioridad: orden.prioridad || "MEDIA",
+        responsable: responsablePrincipalOrden(orden),
+        proximaAccion: proximaAccionOrden(orden),
+        intervencion:
+          orden.intervencion_fisica_tipo === "ASOCIADA_SERVICIO_TECNICO"
+            ? "Mecanica asociada"
+            : orden.intervencion_fisica_tipo === "MECANICA_INDEPENDIENTE"
+            ? "Mecanica independiente"
+            : "Sin intervencion fisica",
+        correccion: orden.correccion_estado || "",
+      }));
+
     ordenesReales.forEach((orden) => {
       const estado = String(orden.estado || "").toUpperCase();
       const estadoPago = String(orden.estado_pago || "").toUpperCase();
@@ -1644,6 +1926,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           String(archivo.estado || "").toUpperCase() === "REQUIERE_CORRECCION"
       ).length,
       correccionesTecnicasPendientes,
+      atencionInmediata,
+      semaforoOperativo,
+      colaTrabajo,
+      fileServiceResumen,
+      postventaPendientesDetalle,
       alertasOperativas: alertasOrdenadas,
       checklistOperativo: [
         crearItemChecklist("Órdenes sin diagnóstico", ordenesSinDiagnostico),
@@ -1751,6 +2038,26 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
       <ReglaOperativaGMTCH />
 
+      <SemaforoOperativo semaforo={stats.semaforoOperativo} />
+
+      <AtencionInmediataSection items={stats.atencionInmediata} />
+
+      <ColaTrabajoDiaSection items={stats.colaTrabajo} />
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {puedeVerFileService && (
+          <FileServiceCentroMandoSection items={stats.fileServiceResumen} />
+        )}
+        <PostventaCentroMandoSection items={stats.postventaPendientesDetalle} />
+      </div>
+
+      <IntervencionFisicaCentroMando
+        asociada={stats.mecanicaAsociadaCurso}
+        independiente={stats.mecanicaIndependiente}
+      />
+
+      <AccionesRapidasCentroMando usuario={usuario} />
+
       {mostrarComercial ? (
         <DashboardSection title="Comercial">
           <StatCard label="Caja hoy" val={formatoCLP(stats.cajaHoy)} color="border-black bg-black text-white" />
@@ -1798,46 +2105,275 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         </DashboardSection>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {tieneRol(usuario, PERMISOS_RUTAS["/flujo"]) && (
-          <QuickLink
-            to="/flujo"
-            title="Nueva Recepcion"
-            text="Ingreso de cliente, vehiculo, sintomas y fotos."
-            icon="Recepcion"
-          />
-        )}
-
-        {tieneRol(usuario, PERMISOS_RUTAS["/ordenes"]) && (
-          <QuickLink
-            to="/ordenes"
-            title="Cola de Trabajo"
-            text="Ver ordenes activas y estados del proceso."
-            icon="Ordenes"
-          />
-        )}
-
-        {tieneRol(usuario, PERMISOS_RUTAS["/archivos-ecu"]) && (
-          <QuickLink
-            to="/archivos-ecu"
-            title="File Service"
-            text="Archivos ECU originales y modificados por tuner."
-            icon="ECU"
-          />
-        )}
-
-        {tieneRol(usuario, PERMISOS_RUTAS["/usuarios"]) && (
-          <QuickLink
-            to="/usuarios"
-            title="Usuarios / Roles"
-            text="Crear usuarios y administrar permisos."
-            icon="Roles"
-          />
-        )}
-      </div>
     </div>
   );
 }
+
+const nivelClassCentro = (nivel) => {
+  if (nivel === "rojo") return "border-red-600 bg-red-50 text-red-950";
+  if (nivel === "ambar") return "border-yellow-500 bg-yellow-50 text-yellow-950";
+  if (nivel === "azul") return "border-blue-500 bg-blue-50 text-blue-950";
+  return "border-green-500 bg-green-50 text-green-950";
+};
+
+const semaforoClass = (color) => {
+  if (color === "rojo") return "border-red-700 bg-red-700 text-white";
+  if (color === "ambar") return "border-yellow-500 bg-yellow-400 text-black";
+  return "border-green-600 bg-green-600 text-white";
+};
+
+const SemaforoOperativo = ({ semaforo }) => (
+  <section
+    className={`border-4 rounded-3xl p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] ${semaforoClass(
+      semaforo?.color
+    )}`}
+  >
+    <p className="text-[11px] font-black uppercase tracking-[0.18em] opacity-80">
+      Semaforo operativo
+    </p>
+    <div className="mt-2 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <h2 className="text-3xl font-black uppercase tracking-tight">
+          {semaforo?.estado || "Operacion normal"}
+        </h2>
+        <p className="mt-2 text-sm font-bold uppercase opacity-90">
+          {semaforo?.detalle || "Sin bloqueos operativos relevantes"}
+        </p>
+      </div>
+      <span className="inline-block border-2 border-current px-4 py-2 text-xs font-black uppercase">
+        Centro de Mando V2
+      </span>
+    </div>
+  </section>
+);
+
+const AtencionInmediataSection = ({ items = [] }) => (
+  <section className="space-y-4">
+    <div>
+      <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+        Atencion inmediata
+      </h2>
+      <p className="mt-1 text-[11px] font-bold uppercase text-gray-400">
+        Tarjetas accionables para abrir el dia y destrabar operacion
+      </p>
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+      {items.map((item) => {
+        const contenido = (
+          <div
+            className={`h-full border-4 rounded-2xl p-4 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] transition hover:-translate-y-0.5 ${nivelClassCentro(
+              item.nivel
+            )}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-[10px] font-black uppercase leading-tight">
+                {item.label}
+              </p>
+              <span className="text-4xl font-black leading-none">
+                {item.valor}
+              </span>
+            </div>
+            <p className="mt-3 text-[10px] font-bold uppercase opacity-75">
+              {item.detalle}
+            </p>
+          </div>
+        );
+
+        return item.to ? (
+          <Link key={item.label} to={item.to} className="block">
+            {contenido}
+          </Link>
+        ) : (
+          <div key={item.label}>{contenido}</div>
+        );
+      })}
+    </div>
+  </section>
+);
+
+const ColaTrabajoDiaSection = ({ items = [] }) => (
+  <section className="space-y-4">
+    <div>
+      <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+        Cola de trabajo del dia
+      </h2>
+      <p className="mt-1 text-[11px] font-bold uppercase text-gray-400">
+        Orden, cliente/vehiculo, estado, responsable y proxima accion
+      </p>
+    </div>
+
+    <div className="overflow-hidden rounded-2xl border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      {items.length === 0 ? (
+        <div className="p-5 text-sm font-black uppercase text-gray-400">
+          Sin ordenes activas en cola
+        </div>
+      ) : (
+        <div className="divide-y-4 divide-black">
+          {items.map((orden) => (
+            <Link
+              key={orden.id}
+              to="/ordenes"
+              className="grid grid-cols-1 gap-3 p-4 text-sm transition hover:bg-blue-50 md:grid-cols-12 md:items-center"
+            >
+              <div className="md:col-span-1 font-black uppercase">#{orden.id}</div>
+              <div className="md:col-span-3">
+                <p className="font-black uppercase text-black">{orden.clienteVehiculo}</p>
+                <p className="text-[10px] font-bold uppercase text-gray-500">
+                  {orden.intervencion}
+                </p>
+              </div>
+              <div className="md:col-span-2 text-xs font-black uppercase">
+                {orden.estado}
+              </div>
+              <div className="md:col-span-1 text-xs font-black uppercase text-blue-700">
+                {orden.prioridad}
+              </div>
+              <div className="md:col-span-2 text-xs font-bold uppercase text-gray-600">
+                {orden.responsable}
+              </div>
+              <div className="md:col-span-3 text-xs font-black uppercase text-black">
+                {orden.proximaAccion}
+                {orden.correccion && (
+                  <span className="ml-2 inline-block rounded-full bg-red-100 px-2 py-1 text-[9px] text-red-800">
+                    {orden.correccion}
+                  </span>
+                )}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  </section>
+);
+
+const FileServiceCentroMandoSection = ({ items = [] }) => (
+  <section className="space-y-4">
+    <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+      File Service
+    </h2>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {items.map((item) => (
+        <Link
+          key={item.label}
+          to="/archivos-ecu"
+          className={`border-4 rounded-2xl p-4 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] ${nivelClassCentro(
+            item.nivel
+          )}`}
+        >
+          <p className="text-[10px] font-black uppercase">{item.label}</p>
+          <p className="mt-2 text-3xl font-black">{item.valor}</p>
+        </Link>
+      ))}
+    </div>
+  </section>
+);
+
+const PostventaCentroMandoSection = ({ items = [] }) => (
+  <section className="space-y-4">
+    <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+      Postventa / Correcciones
+    </h2>
+    <div className="rounded-2xl border-4 border-black bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      {items.length === 0 ? (
+        <div className="p-5 text-xs font-black uppercase text-gray-400">
+          Sin postventa tecnica pendiente
+        </div>
+      ) : (
+        <div className="divide-y-4 divide-black">
+          {items.map((item) => (
+            <Link key={item.id} to="/ordenes" className="block p-4 hover:bg-red-50">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black uppercase">Orden #{item.id}</p>
+                  <p className="text-xs font-bold uppercase text-gray-500">
+                    {item.clienteVehiculo}
+                  </p>
+                </div>
+                <span className="rounded-full bg-red-100 px-3 py-1 text-[10px] font-black uppercase text-red-800">
+                  {item.prioridad}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-2 text-[10px] font-bold uppercase text-gray-600 sm:grid-cols-2">
+                <p>DTC: {item.dtc}</p>
+                <p>Cliente volvio: {item.clienteVolvio ? "Si" : "No"}</p>
+                <p>Responsable: {item.responsable}</p>
+                <p>Estado: {item.estado}</p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  </section>
+);
+
+const IntervencionFisicaCentroMando = ({ asociada = 0, independiente = 0 }) => (
+  <section className="rounded-2xl border-4 border-black bg-orange-50 p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-orange-800">
+          Intervencion fisica
+        </p>
+        <h2 className="mt-2 text-2xl font-black uppercase text-black">
+          Mecanica asociada vs mecanica independiente
+        </h2>
+        <p className="mt-2 text-xs font-bold uppercase text-orange-900">
+          La intervencion fisica asociada al servicio tecnico no separa la orden
+          del flujo ECU/File Service.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Link to="/ordenes" className="border-2 border-black bg-white p-4 text-center">
+          <p className="text-[10px] font-black uppercase text-gray-500">Asociada</p>
+          <p className="text-3xl font-black text-black">{asociada}</p>
+        </Link>
+        <Link to="/ordenes" className="border-2 border-black bg-white p-4 text-center">
+          <p className="text-[10px] font-black uppercase text-gray-500">Independiente</p>
+          <p className="text-3xl font-black text-black">{independiente}</p>
+        </Link>
+      </div>
+    </div>
+  </section>
+);
+
+const AccionesRapidasCentroMando = ({ usuario }) => (
+  <section className="space-y-4">
+    <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+      Acciones rapidas
+    </h2>
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      {tieneRol(usuario, PERMISOS_RUTAS["/flujo"]) && (
+        <QuickAction to="/flujo" label="Nueva recepcion" />
+      )}
+      {tieneRol(usuario, PERMISOS_RUTAS["/ordenes"]) && (
+        <QuickAction to="/ordenes" label="Ver ordenes" />
+      )}
+      {tieneRol(usuario, PERMISOS_RUTAS["/archivos-ecu"]) && (
+        <QuickAction to="/archivos-ecu" label="Ver File Service" />
+      )}
+      {tieneRol(usuario, PERMISOS_RUTAS["/portal-admin"]) && (
+        <QuickAction to="/portal-admin" label="Portal admin" />
+      )}
+      {tieneRol(usuario, PERMISOS_RUTAS["/usuarios"]) && (
+        <QuickAction to="/usuarios" label="Usuarios / responsables" />
+      )}
+      {tieneRol(usuario, PERMISOS_RUTAS["/ordenes"]) && (
+        <QuickAction to="/ordenes" label="Correcciones pendientes" />
+      )}
+    </div>
+  </section>
+);
+
+const QuickAction = ({ to, label }) => (
+  <Link
+    to={to}
+    className="rounded-2xl border-4 border-black bg-white px-4 py-3 text-center text-[10px] font-black uppercase text-black shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] transition hover:-translate-y-0.5 hover:bg-blue-50"
+  >
+    {label}
+  </Link>
+);
 
 const ToastStack = ({ toasts = [], onCerrar }) => {
   if (!toasts.length) return null;
@@ -2049,11 +2585,11 @@ const ChecklistOperativoSection = ({ items = [] }) => (
 
 const ReglaOperativaGMTCH = () => {
   const frases = [
-    "La plataforma es la fuente oficial. Lo que no se registra, no se puede controlar.",
-    "WhatsApp puede recibir información, pero Gmtch Tune OS ordena el trabajo.",
-    "Sin orden no hay trabajo. Sin evidencia no hay respaldo. Sin cierre no hay entrega.",
-    "La pelota siempre debe tener responsable.",
-    "Cierre técnico no es cierre comercial.",
+    "Si no esta registrado, no existe.",
+    "Cliente que vuelve por DTC debe quedar como postventa tecnica.",
+    "Un archivo sin post escritura registrada es un trabajo inconcluso.",
+    "La mecanica asociada al servicio se traza, no se separa como mantencion.",
+    "Todo archivo recibido fuera del portal debe registrarse.",
   ];
 
   return (
@@ -2061,8 +2597,8 @@ const ReglaOperativaGMTCH = () => {
       <p className="text-[11px] font-black uppercase tracking-[0.18em] text-yellow-700">
         Regla operativa GMTCH
       </p>
-      <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
-        {frases.slice(0, 3).map((frase) => (
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+        {frases.map((frase) => (
           <div
             key={frase}
             className="border-2 border-black bg-white p-3 text-xs font-black uppercase leading-relaxed text-black"
