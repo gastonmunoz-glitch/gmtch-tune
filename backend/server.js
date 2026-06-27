@@ -132,6 +132,7 @@ const archivoECURoutes = require("./src/routes/archivoECURoutes");
 const fotoVehiculoRoutes = require("./src/routes/fotoVehiculoRoutes");
 const notificacionRoutes = require("./src/routes/notificacionRoutes");
 const bitacoraOperativaRoutes = require("./src/routes/bitacoraOperativaRoutes");
+const finanzasRoutes = require("./src/routes/finanzasRoutes");
 const portalAuthRoutes = require("./src/routes/portalAuthRoutes");
 const portalFileRoutes = require("./src/routes/portalFileRoutes");
 const portalAdminRoutes = require("./src/routes/portalAdminRoutes");
@@ -1195,6 +1196,33 @@ app.use(
     PATCH: ["OWNER", "ADMIN", "SUPERVISOR"],
   }),
   bitacoraOperativaRoutes
+);
+
+app.use(
+  "/api/finanzas",
+  autenticar,
+  permitirPorMetodo({
+    GET: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "RECEPCION",
+      "OPERADOR_ECU",
+      "MECANICO",
+      "TUNER",
+    ],
+    POST: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "RECEPCION",
+      "OPERADOR_ECU",
+      "MECANICO",
+      "TUNER",
+    ],
+    PATCH: ["OWNER", "ADMIN", "SUPERVISOR"],
+  }),
+  finanzasRoutes
 );
 
 // ====================== RUTAS OPCIONALES ======================

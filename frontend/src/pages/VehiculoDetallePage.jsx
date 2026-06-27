@@ -63,6 +63,8 @@ function VehiculoDetallePage() {
   const location = useLocation();
 
   const [vehiculo, setVehiculo] = useState(null);
+  const [materialesRecuperados, setMaterialesRecuperados] = useState([]);
+  const [materialesError, setMaterialesError] = useState("");
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -70,11 +72,34 @@ function VehiculoDetallePage() {
 
     const cargar = async () => {
       try {
-        const res = await api.get(`/vehiculos/${id}`);
+        const [vehiculoRes, materialesRes] = await Promise.allSettled([
+          api.get(`/vehiculos/${id}`),
+          api.get("/finanzas/material-recuperado", {
+            params: {
+              vehiculoId: id,
+              limit: 80,
+            },
+          }),
+        ]);
 
         if (!activo) return;
 
-        setVehiculo(res.data);
+        if (vehiculoRes.status === "fulfilled") {
+          setVehiculo(vehiculoRes.value.data);
+        } else {
+          throw vehiculoRes.reason;
+        }
+
+        if (materialesRes.status === "fulfilled") {
+          setMaterialesRecuperados(
+            Array.isArray(materialesRes.value.data?.registros)
+              ? materialesRes.value.data.registros
+              : []
+          );
+          setMaterialesError("");
+        } else {
+          setMaterialesError("No se pudo cargar material recuperado");
+        }
       } catch (err) {
         console.error("ERROR HISTORIAL VEHICULO:", err.response?.data || err.message);
       } finally {
@@ -274,6 +299,85 @@ function VehiculoDetallePage() {
           <QuickLink to={`/diagnosticos?vehiculoId=${id}`} label="Ver / ir a diagnostico" />
           <QuickLink to={`/archivos-ecu?vehiculoId=${id}`} label="Ver / ir a File Service" />
           <QuickLink to={`/fotos?vehiculoId=${id}`} label="Subir fotos" />
+          <QuickLink to={`/finanzas?vehiculoId=${id}`} label="Material recuperado" />
+        </div>
+      </section>
+
+      <section
+        id="material-recuperado"
+        className="scroll-mt-24 bg-white border-4 border-black p-5 shadow-[10px_10px_0px_0px_rgba(0,0,0,1)]"
+      >
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase text-gray-500">
+              Finanzas / Control operativo
+            </p>
+            <h2 className="text-2xl font-black uppercase">
+              Historial material recuperado
+            </h2>
+          </div>
+          <Link
+            to={`/finanzas?vehiculoId=${id}`}
+            className="bg-black text-white px-4 py-3 font-black uppercase text-xs hover:bg-blue-600 transition"
+          >
+            Registrar / ver en Finanzas
+          </Link>
+        </div>
+
+        {materialesError && (
+          <div className="mt-4 border-2 border-yellow-500 bg-yellow-50 p-3 text-xs font-black uppercase text-yellow-800">
+            {materialesError}
+          </div>
+        )}
+
+        <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+          {materialesRecuperados.map((item) => (
+            <div key={item.id} className="border-2 border-black bg-slate-50 p-4">
+              <div className="flex flex-wrap gap-2">
+                <span className="bg-black px-2 py-1 text-[10px] font-black uppercase text-white">
+                  Material #{item.id}
+                </span>
+                <span className="border-2 border-black px-2 py-1 text-[10px] font-black uppercase">
+                  {item.estado || "ACUMULADO"}
+                </span>
+                <span className="border-2 border-black px-2 py-1 text-[10px] font-black uppercase">
+                  {item.alerta_rango || "OK"}
+                </span>
+              </div>
+              <p className="mt-2 text-sm font-black uppercase">
+                {item.tipo_material || "LOZA_DPF"} / {item.kilos || 0} kg
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-2 text-xs font-bold uppercase md:grid-cols-2">
+                <Info label="Fecha" value={formatearFecha(item.fecha)} />
+                <Info label="Lote" value={item.lote_mes} />
+                <Info
+                  label="Promedio historico"
+                  value={
+                    item.promedio_historico_kg
+                      ? `${item.promedio_historico_kg} kg`
+                      : "Sin historico"
+                  }
+                />
+                <Info
+                  label="Diferencia"
+                  value={
+                    item.diferencia_porcentaje !== null &&
+                    item.diferencia_porcentaje !== undefined
+                      ? `${item.diferencia_porcentaje}%`
+                      : "Sin comparacion"
+                  }
+                />
+                <Info label="Confianza" value={item.confianza_estadistica} />
+                <Info label="Observacion" value={item.observacion} />
+              </div>
+            </div>
+          ))}
+
+          {materialesRecuperados.length === 0 && (
+            <div className="border-2 border-black bg-slate-50 p-5 text-sm font-black uppercase text-gray-500">
+              Sin registros de material recuperado para este vehiculo.
+            </div>
+          )}
         </div>
       </section>
 

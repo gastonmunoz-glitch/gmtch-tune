@@ -7,6 +7,7 @@ const FotoVehiculo = require("./FotoVehiculo");
 const Usuario = require("./Usuario");
 const Notificacion = require("./Notificacion");
 const BitacoraOperativa = require("./BitacoraOperativa");
+const MaterialRecuperado = require("./MaterialRecuperado");
 const PortalCuenta = require("./PortalCuenta");
 const PortalUsuario = require("./PortalUsuario");
 const PortalFileService = require("./PortalFileService");
@@ -80,6 +81,37 @@ OrdenTrabajo.hasMany(FotoVehiculo, {
 
 FotoVehiculo.belongsTo(OrdenTrabajo, {
   foreignKey: "ordenTrabajoId",
+  constraints: false,
+});
+
+// Material recuperado / control financiero operativo
+OrdenTrabajo.hasMany(MaterialRecuperado, {
+  foreignKey: "ordenId",
+  constraints: false,
+});
+
+MaterialRecuperado.belongsTo(OrdenTrabajo, {
+  foreignKey: "ordenId",
+  constraints: false,
+});
+
+Vehiculo.hasMany(MaterialRecuperado, {
+  foreignKey: "vehiculoId",
+  constraints: false,
+});
+
+MaterialRecuperado.belongsTo(Vehiculo, {
+  foreignKey: "vehiculoId",
+  constraints: false,
+});
+
+Cliente.hasMany(MaterialRecuperado, {
+  foreignKey: "clienteId",
+  constraints: false,
+});
+
+MaterialRecuperado.belongsTo(Cliente, {
+  foreignKey: "clienteId",
   constraints: false,
 });
 
@@ -167,6 +199,7 @@ module.exports = {
   Usuario,
   Notificacion,
   BitacoraOperativa,
+  MaterialRecuperado,
   PortalCuenta,
   PortalUsuario,
   PortalFileService,

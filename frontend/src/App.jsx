@@ -12,6 +12,7 @@ import DiagnosticoPage from "./pages/DiagnosticoPage";
 import RecepcionRapidaPage from "./pages/RecepcionRapidaPage";
 import LoginPage from "./pages/LoginPage";
 import UsuariosPage from "./pages/UsuariosPage";
+import FinanzasPage from "./pages/FinanzasPage";
 import LandingPage from "./pages/LandingPage";
 import PortalLoginPage from "./pages/PortalLoginPage";
 import PortalDashboardPage from "./pages/PortalDashboardPage";
@@ -72,6 +73,15 @@ const PERMISOS_RUTAS = {
   ],
   "/usuarios": ["OWNER"],
   "/portal-admin": ["OWNER"],
+  "/finanzas": [
+    "OWNER",
+    "ADMIN",
+    "SUPERVISOR",
+    "RECEPCION",
+    "OPERADOR_ECU",
+    "MECANICO",
+    "TUNER",
+  ],
 };
 
 const MENU = [
@@ -120,6 +130,11 @@ const MENU = [
     to: "/usuarios",
     label: "Usuarios / Roles",
     roles: PERMISOS_RUTAS["/usuarios"],
+  },
+  {
+    to: "/finanzas",
+    label: "Finanzas / Material",
+    roles: PERMISOS_RUTAS["/finanzas"],
   },
   {
     to: "/portal-admin",
@@ -894,6 +909,15 @@ function App() {
                   element={
                     <Protegido usuario={usuario} roles={PERMISOS_RUTAS["/usuarios"]}>
                       <UsuariosPage />
+                    </Protegido>
+                  }
+                />
+
+                <Route
+                  path="/finanzas"
+                  element={
+                    <Protegido usuario={usuario} roles={PERMISOS_RUTAS["/finanzas"]}>
+                      <FinanzasPage />
                     </Protegido>
                   }
                 />

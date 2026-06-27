@@ -218,6 +218,24 @@ const ordenarEntregadas = (a, b) => {
   return obtenerTiempo(fechaB) - obtenerTiempo(fechaA);
 };
 
+const esOrdenConMaterialRecuperable = (orden, archivos = []) => {
+  const textoOrden = [
+    orden?.motivo_ingreso,
+    orden?.intervencion_fisica_descripcion,
+    orden?.intervencion_fisica_tipo,
+    ...archivos.map((archivo) => archivo?.tipo_servicio),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toUpperCase();
+
+  return (
+    orden?.intervencion_fisica_tipo === "ASOCIADA_SERVICIO_TECNICO" ||
+    textoOrden.includes("DPF") ||
+    textoOrden.includes("FAP")
+  );
+};
+
 function OrdenesPage() {
   const [searchParams] = useSearchParams();
   const ordenIdQuery = searchParams.get("ordenId");
@@ -836,6 +854,10 @@ function OrdenesPage() {
               tipoIntervencionFisica === "ASOCIADA_SERVICIO_TECNICO";
             const mecanicaIndependiente =
               tipoIntervencionFisica === "MECANICA_INDEPENDIENTE";
+            const materialRecuperable = esOrdenConMaterialRecuperable(
+              o,
+              archivosOrden
+            );
             const pagoConfirmado = o.estado_pago === "PAGADO";
             const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
               textoQR(o)
@@ -929,6 +951,14 @@ function OrdenesPage() {
                             >
                               Archivos ECU
                             </Link>
+                            {materialRecuperable && (
+                              <Link
+                                to={`/finanzas?ordenId=${o.id}`}
+                                className="border-2 border-blue-700 bg-blue-50 px-3 py-2 text-blue-800 hover:bg-blue-700 hover:text-white transition"
+                              >
+                                Registrar material recuperado
+                              </Link>
+                            )}
                           </>
                         ) : (
                           <span className="border-2 border-gray-300 text-gray-400 px-3 py-2">

@@ -235,7 +235,30 @@ flowchart TD
 
 Regla: la bitacora operativa global sirve para no perder observaciones del dia. No reemplaza la postventa tecnica cuando existe una orden o un DTC claro; permite anotar rapido aunque todavia no se conozca la orden, vehiculo o archivo relacionado.
 
-## 11. Flujo Notificaciones
+## 11. Flujo Finanzas / Material Recuperado
+
+```mermaid
+flowchart TD
+  A["Orden DPF/FAP autorizada o intervencion fisica asociada"] --> B["Registrar material recuperado en Finanzas"]
+  B --> C["Autocompletar orden, cliente, vehiculo, patente, marca y modelo si existen"]
+  C --> D["Ingresar fecha, tipo de material, kg, lote mensual y observacion administrativa"]
+  D --> E["Backend calcula clave estadistica por marca + modelo + motor opcional"]
+  E --> F["Comparar kg registrados contra promedio historico del modelo"]
+  F --> G{"Diferencia vs promedio"}
+  G -->|Hasta 10%| H["OK"]
+  G -->|10% a 20%| I["REVISAR"]
+  G -->|Mas de 20%| J["ALERTA"]
+  J --> K["Notificacion interna OWNER / ADMIN con accion a Finanzas"]
+  D --> L["Lote mensual"]
+  L --> M["Comparar kg esperados vs kg reales"]
+  M --> N["Marcar venta con comprador y precio real kg"]
+  N --> O["Valor real vendido"]
+  M --> P["Cerrar lote mensual"]
+```
+
+Regla: este flujo es administrativo/contable. No entrega instrucciones tecnicas de extraccion, desmontaje o intervencion. No modifica pagos, cierre comercial ni entrega de orden.
+
+## 12. Flujo Notificaciones
 
 ```mermaid
 flowchart TD
@@ -255,7 +278,7 @@ flowchart TD
 
 Regla: el modo tsunami es opcional y se usa solo en recepcion/taller cuando se requiere maxima atencion. No debe sonar infinitamente ni repetirse por notificaciones antiguas.
 
-## 11.1 Flujo Notificaciones Accionables
+## 12.1 Flujo Notificaciones Accionables
 
 ```mermaid
 flowchart TD
@@ -281,7 +304,7 @@ flowchart TD
 
 Regla: toda notificacion nueva debe incluir una accion directa cuando conozca la orden, archivo ECU, solicitud portal, cliente, vehiculo, bitacora o postventa relacionada. Las notificaciones antiguas usan fallback por `ordenId`, `archivoECUId` o metadata disponible.
 
-## 12. Flujo Dominios
+## 13. Flujo Dominios
 
 ```mermaid
 flowchart LR
@@ -293,6 +316,6 @@ flowchart LR
   API --> BE
 ```
 
-## 13. Regla de Mantenimiento
+## 14. Regla de Mantenimiento
 
 Este documento debe actualizarse cada vez que se cambie un flujo operativo, ruta critica, rol, portal, dominio, integracion, estado de File Service, pago, notificacion o arquitectura.

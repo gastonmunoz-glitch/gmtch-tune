@@ -63,7 +63,23 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Confirmar que RECEPCION, OPERADOR_ECU, MECANICO y TUNER pueden crear/ver.
 - Confirmar que roles no autorizados no pueden resolver.
 
-## 7. QA File Service Interno
+## 7. QA Finanzas / Material Recuperado
+
+- Entrar a `/finanzas` con OWNER o ADMIN y confirmar que se ven valores.
+- Entrar con RECEPCION/OPERADOR_ECU/MECANICO y confirmar que kg se ven, pero valores financieros aparecen ocultos.
+- Registrar material recuperado desde una orden DPF/FAP o intervencion fisica asociada.
+- Confirmar autocompletado de patente, marca, modelo y ano al seleccionar orden.
+- Registrar kg mayores a 0 y confirmar lote automatico `YYYY-MM`.
+- Confirmar que se calcula alerta OK/REVISAR/ALERTA segun promedio historico.
+- Crear caso fuera de rango mayor a 20% y confirmar notificacion a OWNER/ADMIN.
+- Revisar ranking por modelo, promedio kg, minimo, maximo y confianza estadistica.
+- Revisar cierre mensual: kg esperados, kg reales, diferencia y valor estimado.
+- Marcar venta solo con OWNER/ADMIN: comprador, precio real kg y valor real.
+- Cerrar lote mensual solo con OWNER/ADMIN.
+- Confirmar que ficha vehiculo muestra historial de material recuperado.
+- Confirmar que no se modifican pagos, entrega ni cierre comercial de la orden.
+
+## 8. QA File Service Interno
 
 - Crear File Service desde orden valida.
 - Subir archivo original.
@@ -75,7 +91,7 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Solicitar correccion si aplica.
 - Finalizar tecnico sin cerrar pago ni entrega comercial.
 
-## 8. QA Portal Masters
+## 9. QA Portal Masters
 
 - Login externo con Email de login portal.
 - Crear cuenta/usuario portal desde portal admin si aplica.
@@ -90,18 +106,19 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Confirmar credito descontado una sola vez.
 - Confirmar redescarga sin doble descuento.
 
-## 9. QA Notificaciones
+## 10. QA Notificaciones
 
 - Nueva solicitud portal crea alerta.
 - Nueva lectura crea alerta.
 - Correccion portal crea alerta.
 - Postventa interna crea alerta.
 - Bitacora urgente crea alerta.
+- Material recuperado fuera de rango crea alerta accionable hacia Finanzas.
 - Sonido activado suena una vez por evento nuevo.
 - Alerta visual aparece sin tapar toda la pantalla.
 - Contador de campana aumenta y baja al marcar leidas.
 
-## 10. QA Web Publica
+## 11. QA Web Publica
 
 - `/web` carga en desktop y celular.
 - WhatsApp apunta a `+56 9 6226 7642`.
@@ -111,7 +128,7 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Formulario/CTA WhatsApp funciona.
 - No hay textos tipo placeholder, rellenar o instrucciones internas.
 
-## 11. QA Seguridad Basica
+## 12. QA Seguridad Basica
 
 - Portal externo no accede a rutas internas.
 - Usuario interno no usa ni mezcla `portalToken`.
@@ -120,8 +137,9 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Errores no muestran secretos.
 - No hay tokens impresos en consola.
 - Portal admin no visible para usuarios externos.
+- Roles operativos no ven valores financieros de material recuperado.
 
-## 12. Tabla de Resultado
+## 13. Tabla de Resultado
 
 | Prueba | Resultado OK/Falla | Evidencia | Responsable | Observacion |
 | --- | --- | --- | --- | --- |
@@ -132,6 +150,7 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 | Ordenes |  |  |  |  |
 | Postventa tecnica |  |  |  |  |
 | Intervencion fisica |  |  |  |  |
+| Finanzas / Material recuperado |  |  |  |  |
 | File Service interno |  |  |  |  |
 | Portal Masters |  |  |  |  |
 | Notificaciones |  |  |  |  |
