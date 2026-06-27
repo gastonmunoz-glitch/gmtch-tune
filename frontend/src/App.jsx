@@ -1169,6 +1169,19 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     ultimaActualizacion: null,
   });
   const [cargandoDashboard, setCargandoDashboard] = useState(false);
+  const [bitacoraOperativa, setBitacoraOperativa] = useState({
+    items: [],
+    puedeResolver: false,
+    error: "",
+  });
+  const [bitacoraForm, setBitacoraForm] = useState({
+    tipo: "OPERACION",
+    prioridad: "MEDIA",
+    titulo: "",
+    descripcion: "",
+    modulo_relacionado: "",
+  });
+  const [guardandoBitacora, setGuardandoBitacora] = useState(false);
   const [toasts, setToasts] = useState([]);
   const toastKeysRef = useRef(new Set());
 
@@ -1179,6 +1192,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     if (Array.isArray(data?.clientes)) return data.clientes;
     if (Array.isArray(data?.vehiculos)) return data.vehiculos;
     if (Array.isArray(data?.archivos)) return data.archivos;
+    if (Array.isArray(data?.items)) return data.items;
     return [];
   };
 
@@ -1964,9 +1978,16 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         puedeVerFileService
           ? api.get("/archivos-ecu")
           : Promise.resolve({ data: [] }),
+        api.get("/bitacora-operativa", {
+          params: {
+            resuelto: false,
+            limit: 20,
+          },
+        }),
       ]);
 
-      const [ordenesRes, clientesRes, vehiculosRes, archivosRes] = respuestas;
+      const [ordenesRes, clientesRes, vehiculosRes, archivosRes, bitacoraRes] =
+        respuestas;
 
       const ordenes =
         ordenesRes.status === "fulfilled" ? normalizarArray(ordenesRes.value) : [];
@@ -1976,6 +1997,20 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         vehiculosRes.status === "fulfilled" ? normalizarArray(vehiculosRes.value) : [];
       const archivos =
         archivosRes.status === "fulfilled" ? normalizarArray(archivosRes.value) : [];
+      const bitacoraItems =
+        bitacoraRes.status === "fulfilled" ? normalizarArray(bitacoraRes.value) : [];
+
+      setBitacoraOperativa({
+        items: bitacoraItems,
+        puedeResolver:
+          bitacoraRes.status === "fulfilled"
+            ? Boolean(bitacoraRes.value?.data?.puedeResolver)
+            : false,
+        error:
+          bitacoraRes.status === "fulfilled"
+            ? ""
+            : "No se pudo cargar la bitacora operativa",
+      });
 
       const dashboardCalculado = calcularDashboard(
         ordenes,
@@ -1993,6 +2028,73 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       console.error("Error cargando estadisticas:", err.response?.data || err.message);
     } finally {
       setCargandoDashboard(false);
+    }
+  };
+
+  const actualizarCampoBitacora = (campo, valor) => {
+    setBitacoraForm((actual) => ({
+      ...actual,
+      [campo]: valor,
+    }));
+  };
+
+  const crearObservacionBitacora = async (event) => {
+    event.preventDefault();
+
+    const titulo = bitacoraForm.titulo.trim();
+    if (!titulo) {
+      setBitacoraOperativa((actual) => ({
+        ...actual,
+        error: "Debes ingresar un titulo para la observacion.",
+      }));
+      return;
+    }
+
+    try {
+      setGuardandoBitacora(true);
+      await api.post("/bitacora-operativa", {
+        tipo: bitacoraForm.tipo,
+        prioridad: bitacoraForm.prioridad,
+        titulo,
+        descripcion: bitacoraForm.descripcion.trim(),
+        modulo_relacionado: bitacoraForm.modulo_relacionado.trim(),
+      });
+
+      setBitacoraForm({
+        tipo: "OPERACION",
+        prioridad: "MEDIA",
+        titulo: "",
+        descripcion: "",
+        modulo_relacionado: "",
+      });
+      setBitacoraOperativa((actual) => ({ ...actual, error: "" }));
+      await fetchStats();
+      if (actualizarNotificaciones) {
+        await actualizarNotificaciones();
+      }
+    } catch (error) {
+      setBitacoraOperativa((actual) => ({
+        ...actual,
+        error:
+          error.response?.data?.error ||
+          "No se pudo guardar la observacion operativa.",
+      }));
+    } finally {
+      setGuardandoBitacora(false);
+    }
+  };
+
+  const resolverObservacionBitacora = async (id) => {
+    try {
+      await api.patch(`/bitacora-operativa/${id}/resolver`);
+      await fetchStats();
+    } catch (error) {
+      setBitacoraOperativa((actual) => ({
+        ...actual,
+        error:
+          error.response?.data?.error ||
+          "No se pudo resolver la observacion operativa.",
+      }));
     }
   };
 
@@ -2054,6 +2156,17 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       <IntervencionFisicaCentroMando
         asociada={stats.mecanicaAsociadaCurso}
         independiente={stats.mecanicaIndependiente}
+      />
+
+      <BitacoraRapidaSection
+        form={bitacoraForm}
+        items={bitacoraOperativa.items}
+        puedeResolver={bitacoraOperativa.puedeResolver}
+        error={bitacoraOperativa.error}
+        guardando={guardandoBitacora}
+        onChange={actualizarCampoBitacora}
+        onSubmit={crearObservacionBitacora}
+        onResolver={resolverObservacionBitacora}
       />
 
       <AccionesRapidasCentroMando usuario={usuario} />
@@ -2334,6 +2447,204 @@ const IntervencionFisicaCentroMando = ({ asociada = 0, independiente = 0 }) => (
           <p className="text-3xl font-black text-black">{independiente}</p>
         </Link>
       </div>
+    </div>
+  </section>
+);
+
+const tiposBitacora = [
+  ["MEJORA", "Mejora"],
+  ["ERROR_PROCESO", "Error de proceso"],
+  ["CLIENTE_VOLVIO", "Cliente volvio"],
+  ["RECORDATORIO", "Recordatorio"],
+  ["OPERACION", "Operacion"],
+  ["OTRO", "Otro"],
+];
+
+const prioridadesBitacora = [
+  ["BAJA", "Baja"],
+  ["MEDIA", "Media"],
+  ["ALTA", "Alta"],
+  ["URGENTE", "Urgente"],
+];
+
+const prioridadBitacoraClass = (prioridad) => {
+  if (prioridad === "URGENTE") return "bg-red-700 text-white";
+  if (prioridad === "ALTA") return "bg-red-100 text-red-800";
+  if (prioridad === "MEDIA") return "bg-yellow-100 text-yellow-900";
+  return "bg-blue-100 text-blue-800";
+};
+
+const formatoFechaCorta = (valor) => {
+  if (!valor) return "Pendiente";
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return "Pendiente";
+  return fecha.toLocaleString("es-CL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+};
+
+const BitacoraRapidaSection = ({
+  form,
+  items = [],
+  puedeResolver,
+  error,
+  guardando,
+  onChange,
+  onSubmit,
+  onResolver,
+}) => (
+  <section className="rounded-2xl border-4 border-black bg-slate-950 p-5 text-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+      <div className="max-w-2xl">
+        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-300">
+          Bitacora rapida
+        </p>
+        <h2 className="mt-2 text-2xl font-black uppercase">
+          Anotar observacion
+        </h2>
+        <p className="mt-2 text-xs font-bold uppercase text-slate-300">
+          Si lo viste en operacion, dejalo registrado. Lo que no se anota, se pierde.
+        </p>
+        <p className="mt-2 text-[11px] font-bold uppercase text-yellow-200">
+          Si es cliente volvio por DTC y ya tienes orden, usa postventa tecnica cuando corresponda.
+        </p>
+      </div>
+      <div className="rounded-full border-2 border-blue-400 px-4 py-2 text-[10px] font-black uppercase text-blue-200">
+        Observaciones abiertas: {items.length}
+      </div>
+    </div>
+
+    <form onSubmit={onSubmit} className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-12">
+      <label className="lg:col-span-2 text-[10px] font-black uppercase text-slate-300">
+        Tipo
+        <select
+          value={form.tipo}
+          onChange={(event) => onChange("tipo", event.target.value)}
+          className="mt-1 w-full rounded-lg border-2 border-slate-600 bg-slate-900 px-3 py-2 text-xs font-bold text-white"
+        >
+          {tiposBitacora.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="lg:col-span-2 text-[10px] font-black uppercase text-slate-300">
+        Prioridad
+        <select
+          value={form.prioridad}
+          onChange={(event) => onChange("prioridad", event.target.value)}
+          className="mt-1 w-full rounded-lg border-2 border-slate-600 bg-slate-900 px-3 py-2 text-xs font-bold text-white"
+        >
+          {prioridadesBitacora.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="lg:col-span-3 text-[10px] font-black uppercase text-slate-300">
+        Modulo
+        <input
+          value={form.modulo_relacionado}
+          onChange={(event) => onChange("modulo_relacionado", event.target.value)}
+          placeholder="Ordenes, File Service, recepcion..."
+          className="mt-1 w-full rounded-lg border-2 border-slate-600 bg-slate-900 px-3 py-2 text-xs font-bold text-white placeholder:text-slate-500"
+        />
+      </label>
+
+      <label className="lg:col-span-5 text-[10px] font-black uppercase text-slate-300">
+        Titulo
+        <input
+          value={form.titulo}
+          onChange={(event) => onChange("titulo", event.target.value)}
+          placeholder="Ej: revisar flujo de entrega"
+          className="mt-1 w-full rounded-lg border-2 border-slate-600 bg-slate-900 px-3 py-2 text-xs font-bold text-white placeholder:text-slate-500"
+        />
+      </label>
+
+      <label className="lg:col-span-9 text-[10px] font-black uppercase text-slate-300">
+        Descripcion
+        <textarea
+          value={form.descripcion}
+          onChange={(event) => onChange("descripcion", event.target.value)}
+          rows={3}
+          placeholder="Detalle breve de lo que paso, que mejorar o que recordar."
+          className="mt-1 w-full rounded-lg border-2 border-slate-600 bg-slate-900 px-3 py-2 text-xs font-bold text-white placeholder:text-slate-500"
+        />
+      </label>
+
+      <div className="lg:col-span-3 flex items-end">
+        <button
+          type="submit"
+          disabled={guardando}
+          className="w-full rounded-lg bg-blue-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-blue-400 disabled:opacity-50"
+        >
+          {guardando ? "Guardando..." : "Anotar observacion"}
+        </button>
+      </div>
+    </form>
+
+    {error && (
+      <div className="mt-4 rounded-lg border-2 border-red-500 bg-red-950 px-4 py-3 text-xs font-black uppercase text-red-100">
+        {error}
+      </div>
+    )}
+
+    <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-2">
+      {items.length === 0 ? (
+        <div className="rounded-xl border-2 border-slate-700 bg-slate-900 p-4 text-xs font-black uppercase text-slate-400">
+          Sin observaciones operativas abiertas
+        </div>
+      ) : (
+        items.slice(0, 6).map((item) => (
+          <div
+            key={item.id}
+            className="rounded-xl border-2 border-slate-700 bg-slate-900 p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-black uppercase text-white">
+                  {item.titulo}
+                </p>
+                <p className="mt-1 text-[10px] font-bold uppercase text-slate-400">
+                  {item.tipo} - {item.modulo_relacionado || "Sin modulo"} - Por{" "}
+                  {item.creado_por || "sistema"}
+                </p>
+              </div>
+              <span
+                className={`rounded-full px-3 py-1 text-[10px] font-black uppercase ${prioridadBitacoraClass(
+                  item.prioridad
+                )}`}
+              >
+                {item.prioridad}
+              </span>
+            </div>
+
+            {item.descripcion && (
+              <p className="mt-3 text-xs font-semibold leading-relaxed text-slate-200">
+                {item.descripcion}
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-col gap-2 text-[10px] font-bold uppercase text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+              <span>{formatoFechaCorta(item.createdAt)}</span>
+              {puedeResolver && (
+                <button
+                  type="button"
+                  onClick={() => onResolver(item.id)}
+                  className="rounded-lg border-2 border-emerald-400 px-3 py-2 text-emerald-200 transition hover:bg-emerald-500 hover:text-white"
+                >
+                  Marcar resuelta
+                </button>
+              )}
+            </div>
+          </div>
+        ))
+      )}
     </div>
   </section>
 );

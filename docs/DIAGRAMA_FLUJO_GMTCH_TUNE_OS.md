@@ -179,16 +179,26 @@ flowchart TD
 
 Regla: una correccion tecnica no marca pago, entrega ni cierre comercial. Es flujo tecnico/auditivo.
 
-## 8. Flujo Bitacora Rapida Operativa
+## 8. Flujo Bitacora Operativa Global
 
 ```mermaid
 flowchart TD
-  A["Operador detecta observacion"] --> B["Anotar observacion en orden"]
-  B --> C["Tipo: Mejora / Error proceso / Cliente volvio / Recordatorio / Otro"]
-  C --> D["Prioridad y modulo relacionado"]
-  D --> E["Guardar en bitacora_operativa"]
-  E --> F["Ficha vehiculo muestra historial"]
+  A["Operacion detecta detalle, mejora, error o recordatorio"] --> B["Dashboard / Centro de Mando"]
+  B --> C["Anotar observacion en Bitacora rapida"]
+  C --> D["Tipo: MEJORA, ERROR_PROCESO, CLIENTE_VOLVIO, RECORDATORIO, OPERACION u OTRO"]
+  D --> E["Prioridad: BAJA, MEDIA, ALTA o URGENTE"]
+  E --> F["Relacion opcional: orden, vehiculo, archivo ECU o modulo"]
+  F --> G["Guardar en bitacora_operativa"]
+  G --> H{"Prioridad alta o urgente"}
+  H -->|Si| I["Crear notificacion interna a OWNER / ADMIN / SUPERVISOR"]
+  H -->|No| J["Queda visible en ultimas abiertas"]
+  I --> J
+  J --> K["Supervisor / OWNER revisa"]
+  K --> L["Marcar como resuelta"]
+  L --> M["Guardar resuelto_por y resuelto_at"]
 ```
+
+Regla: la bitacora operativa global sirve para no perder observaciones del dia. No reemplaza la postventa tecnica cuando existe una orden o un DTC claro; permite anotar rapido aunque todavia no se conozca la orden, vehiculo o archivo relacionado.
 
 ## 9. Flujo Notificaciones
 

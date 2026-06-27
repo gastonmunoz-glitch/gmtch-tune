@@ -6,6 +6,7 @@ const ArchivoECU = require("./ArchivoECU");
 const FotoVehiculo = require("./FotoVehiculo");
 const Usuario = require("./Usuario");
 const Notificacion = require("./Notificacion");
+const BitacoraOperativa = require("./BitacoraOperativa");
 const PortalCuenta = require("./PortalCuenta");
 const PortalUsuario = require("./PortalUsuario");
 const PortalFileService = require("./PortalFileService");
@@ -165,6 +166,7 @@ module.exports = {
   FotoVehiculo,
   Usuario,
   Notificacion,
+  BitacoraOperativa,
   PortalCuenta,
   PortalUsuario,
   PortalFileService,
