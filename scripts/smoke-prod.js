@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const DEFAULT_API_BASE = "https://gmtch-tune-production.up.railway.app/api";
+const DEFAULT_API_BASE = "https://api.gmtchtune.com/api";
 
 const rawApiBase = process.env.API_BASE || DEFAULT_API_BASE;
 const API_BASE = rawApiBase.replace(/\/+$/, "");
@@ -11,16 +11,17 @@ const withoutApiSuffix = (base) => base.replace(/\/api\/?$/i, "");
 const printTokenHelp = () => {
   console.log("Falta TOKEN para probar endpoints protegidos.\n");
   console.log("Como obtenerlo:");
-  console.log("1. Entra a la app en el navegador.");
-  console.log("2. Abre la consola del navegador.");
-  console.log('3. Ejecuta: localStorage.getItem("token")');
-  console.log("4. Copia el token sin compartirlo.");
+  console.log("1. Entra a https://gmtchtune.com/login");
+  console.log("2. Inicia sesion con un usuario valido.");
+  console.log("3. Abre la consola del navegador.");
+  console.log('4. Ejecuta: localStorage.getItem("token")');
+  console.log("5. Copia el token sin compartirlo.");
   console.log("\nEjecuta en CMD:");
   console.log("cd /d C:\\gmtch-tune-app");
   console.log("set TOKEN=PEGAR_TOKEN_AQUI");
   console.log("node scripts/smoke-prod.js");
   console.log("\nOpcional:");
-  console.log("set API_BASE=https://gmtch-tune-production.up.railway.app/api");
+  console.log("set API_BASE=https://api.gmtchtune.com/api");
 };
 
 const redact = (value = "") => {
@@ -32,7 +33,7 @@ const redact = (value = "") => {
 const readBodySnippet = async (response) => {
   try {
     const text = await response.text();
-    return text.slice(0, 220).replace(/\s+/g, " ").trim();
+    return text.slice(0, 260).replace(/\s+/g, " ").trim();
   } catch {
     return "";
   }
@@ -74,6 +75,26 @@ const request = async ({ name, url, protectedEndpoint = true }) => {
   }
 };
 
+const requestWithFallback = async ({ name, urls, protectedEndpoint = true }) => {
+  const attempts = [];
+
+  for (const url of urls) {
+    const result = await request({ name, url, protectedEndpoint });
+    attempts.push(result);
+    if (result.ok) {
+      return {
+        ...result,
+        attempts,
+      };
+    }
+  }
+
+  return {
+    ...attempts[attempts.length - 1],
+    attempts,
+  };
+};
+
 const printResult = (result) => {
   const estado = result.ok ? "OK" : "FALLA";
   const status = String(result.status).padEnd(3, " ");
@@ -86,7 +107,7 @@ const printResult = (result) => {
 };
 
 const main = async () => {
-  console.log("GMTCH Tune OS - Smoke test produccion");
+  console.log("GMTCH Tune OS - Smoke test produccion V2");
   console.log(`API_BASE: ${API_BASE}`);
 
   if (TOKEN) {
@@ -104,31 +125,35 @@ const main = async () => {
   const tests = [
     {
       name: "Health backend",
-      url: `${appBase}/api/health`,
+      urls: [`${API_BASE}/health`, `${appBase}/api/health`, `${appBase}/health`],
       protectedEndpoint: false,
     },
     {
       name: "Usuarios responsables",
-      url: `${API_BASE}/usuarios/responsables`,
+      urls: [`${API_BASE}/usuarios/responsables`],
     },
     {
       name: "Ordenes",
-      url: `${API_BASE}/ordenes`,
+      urls: [`${API_BASE}/ordenes`],
     },
     {
       name: "Archivos ECU",
-      url: `${API_BASE}/archivos-ecu`,
+      urls: [`${API_BASE}/archivos-ecu`],
     },
     {
       name: "Notificaciones",
-      url: `${API_BASE}/notificaciones`,
+      urls: [`${API_BASE}/notificaciones`],
+    },
+    {
+      name: "Bitacora operativa",
+      urls: [`${API_BASE}/bitacora-operativa?resuelto=false&limit=5`],
     },
   ];
 
   const results = [];
 
   for (const test of tests) {
-    const result = await request(test);
+    const result = await requestWithFallback(test);
     results.push(result);
     printResult(result);
   }
@@ -141,6 +166,10 @@ const main = async () => {
   console.log(`Total pruebas: ${total}`);
   console.log(`Pasadas: ${passed}`);
   console.log(`Fallidas: ${failed}`);
+
+  if (failed > 0) {
+    console.log("\nHay fallas. Revisar token, permisos, deploy backend y logs de Railway.");
+  }
 
   process.exitCode = failed > 0 ? 1 : 0;
 };
