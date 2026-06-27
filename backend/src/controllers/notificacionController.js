@@ -1,4 +1,5 @@
 const { Op } = require("sequelize");
+const sequelize = require("../config/database");
 const { Notificacion } = require("../models");
 
 let tablaPreparada = false;
@@ -7,7 +8,142 @@ const prepararTablaNotificaciones = async () => {
   if (tablaPreparada) return;
 
   await Notificacion.sync();
+  await sequelize.query(`
+    ALTER TABLE notificaciones
+      ADD COLUMN IF NOT EXISTS accion_url TEXT,
+      ADD COLUMN IF NOT EXISTS accion_tipo VARCHAR(80),
+      ADD COLUMN IF NOT EXISTS entidad_tipo VARCHAR(80),
+      ADD COLUMN IF NOT EXISTS entidad_id VARCHAR(80),
+      ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb
+  `);
+  await sequelize.query(`
+    UPDATE notificaciones
+    SET metadata = '{}'::jsonb
+    WHERE metadata IS NULL
+  `);
   tablaPreparada = true;
+};
+
+const limpiarTexto = (valor) => {
+  if (valor === null || valor === undefined) return "";
+  return String(valor).trim();
+};
+
+const normalizarMetadata = (valor) => {
+  if (!valor) return {};
+  if (typeof valor === "object" && !Array.isArray(valor)) return valor;
+
+  if (typeof valor === "string" && valor.trim()) {
+    try {
+      const parsed = JSON.parse(valor);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+};
+
+const accionPortalPorTipo = (tipo, portalFileId) => {
+  if (!portalFileId) return null;
+
+  if (tipo === "PORTAL_FILE_NUEVA_LECTURA") {
+    return `/portal-admin?fileId=${portalFileId}#nueva-lectura`;
+  }
+
+  if (tipo === "PORTAL_FILE_CORRECCION") {
+    return `/portal-admin?fileId=${portalFileId}#correccion`;
+  }
+
+  return `/portal-admin?fileId=${portalFileId}`;
+};
+
+const inferirAccionNotificacion = ({
+  tipo,
+  ordenId,
+  archivoECUId,
+  accion_url,
+  accion_tipo,
+  entidad_tipo,
+  entidad_id,
+  metadata,
+}) => {
+  const tipoSeguro = limpiarTexto(tipo).toUpperCase();
+  const metadataSegura = normalizarMetadata(metadata);
+  const portalFileId =
+    metadataSegura.portalFileId ||
+    metadataSegura.fileId ||
+    (limpiarTexto(entidad_tipo).toUpperCase() === "PORTAL_FILE"
+      ? entidad_id
+      : null);
+
+  let url = limpiarTexto(accion_url) || null;
+  let accionTipoFinal = limpiarTexto(accion_tipo) || null;
+  let entidadTipoFinal = limpiarTexto(entidad_tipo) || null;
+  let entidadIdFinal = limpiarTexto(entidad_id) || null;
+
+  if (!url && tipoSeguro.startsWith("PORTAL_FILE_")) {
+    url = accionPortalPorTipo(tipoSeguro, portalFileId);
+    accionTipoFinal = accionTipoFinal || "ABRIR_PORTAL_ADMIN_FILE";
+    entidadTipoFinal = entidadTipoFinal || "PORTAL_FILE";
+    entidadIdFinal = entidadIdFinal || (portalFileId ? String(portalFileId) : null);
+  }
+
+  if (!url && tipoSeguro === "CORRECCION_TECNICA_SOLICITADA" && ordenId) {
+    url = `/ordenes?ordenId=${ordenId}#postventa`;
+    accionTipoFinal = accionTipoFinal || "ABRIR_POSTVENTA_TECNICA";
+    entidadTipoFinal = entidadTipoFinal || "ORDEN_TRABAJO";
+    entidadIdFinal = entidadIdFinal || String(ordenId);
+  }
+
+  if (!url && tipoSeguro === "BITACORA_OPERATIVA_PRIORITARIA") {
+    url = "/#bitacora";
+    accionTipoFinal = accionTipoFinal || "ABRIR_BITACORA";
+    entidadTipoFinal = entidadTipoFinal || "BITACORA_OPERATIVA";
+    entidadIdFinal =
+      entidadIdFinal || (metadataSegura.bitacoraId ? String(metadataSegura.bitacoraId) : null);
+  }
+
+  if (!url && tipoSeguro.startsWith("ORDEN_ASIGNADA_") && ordenId) {
+    url = `/ordenes?ordenId=${ordenId}`;
+    accionTipoFinal = accionTipoFinal || "ABRIR_ORDEN";
+    entidadTipoFinal = entidadTipoFinal || "ORDEN_TRABAJO";
+    entidadIdFinal = entidadIdFinal || String(ordenId);
+  }
+
+  if (!url && tipoSeguro === "ORDEN_LISTA_ENTREGA" && ordenId) {
+    url = `/ordenes?ordenId=${ordenId}#entrega`;
+    accionTipoFinal = accionTipoFinal || "ABRIR_ENTREGA";
+    entidadTipoFinal = entidadTipoFinal || "ORDEN_TRABAJO";
+    entidadIdFinal = entidadIdFinal || String(ordenId);
+  }
+
+  if (!url && archivoECUId) {
+    const hash =
+      tipoSeguro === "POST_ESCRITURA_PENDIENTE" ? "#post-escritura" : "";
+    url = `/archivos-ecu?archivoId=${archivoECUId}${hash}`;
+    accionTipoFinal = accionTipoFinal || "ABRIR_ARCHIVO_ECU";
+    entidadTipoFinal = entidadTipoFinal || "ARCHIVO_ECU";
+    entidadIdFinal = entidadIdFinal || String(archivoECUId);
+  }
+
+  if (!url && ordenId) {
+    url = `/ordenes?ordenId=${ordenId}`;
+    accionTipoFinal = accionTipoFinal || "ABRIR_ORDEN";
+    entidadTipoFinal = entidadTipoFinal || "ORDEN_TRABAJO";
+    entidadIdFinal = entidadIdFinal || String(ordenId);
+  }
+
+  return {
+    accion_url: url,
+    accion_tipo: accionTipoFinal,
+    entidad_tipo: entidadTipoFinal,
+    entidad_id: entidadIdFinal,
+    metadata: metadataSegura,
+  };
 };
 
 const datosUsuarioActual = (req) => {
@@ -42,9 +178,25 @@ const crearNotificacionesInternas = async ({
   mensaje,
   ordenId = null,
   archivoECUId = null,
+  accion_url = null,
+  accion_tipo = null,
+  entidad_tipo = null,
+  entidad_id = null,
+  metadata = {},
 }) => {
   try {
     await prepararTablaNotificaciones();
+
+    const accion = inferirAccionNotificacion({
+      tipo,
+      ordenId,
+      archivoECUId,
+      accion_url,
+      accion_tipo,
+      entidad_tipo,
+      entidad_id,
+      metadata,
+    });
 
     const destinosUsuario = usuariosDestino
       .filter(Boolean)
@@ -56,6 +208,7 @@ const crearNotificacionesInternas = async ({
         mensaje,
         ordenId,
         archivoECUId,
+        ...accion,
       }));
 
     const destinosRol = rolesDestino
@@ -68,6 +221,7 @@ const crearNotificacionesInternas = async ({
         mensaje,
         ordenId,
         archivoECUId,
+        ...accion,
       }));
 
     const payload = [...destinosUsuario, ...destinosRol];

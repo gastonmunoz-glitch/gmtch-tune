@@ -136,6 +136,16 @@ const crearBitacoraOperativa = async (req, res) => {
           mensaje: `${prioridad}: ${titulo}`,
           ordenId: item.ordenId,
           archivoECUId: item.archivoEcuId,
+          accion_url: "/#bitacora",
+          accion_tipo: "ABRIR_BITACORA",
+          entidad_tipo: "BITACORA_OPERATIVA",
+          entidad_id: String(item.id),
+          metadata: {
+            bitacoraId: item.id,
+            tipo: item.tipo,
+            prioridad,
+            modulo_relacionado: item.modulo_relacionado,
+          },
         });
       } catch (error) {
         console.warn("No se pudo notificar bitacora prioritaria:", error.message);

@@ -45,6 +45,32 @@ const Notificacion = sequelize.define(
       allowNull: true,
     },
 
+    accion_url: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    accion_tipo: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    entidad_tipo: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    entidad_id: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    metadata: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: {},
+    },
+
     leida: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

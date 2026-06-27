@@ -255,6 +255,32 @@ flowchart TD
 
 Regla: el modo tsunami es opcional y se usa solo en recepcion/taller cuando se requiere maxima atencion. No debe sonar infinitamente ni repetirse por notificaciones antiguas.
 
+## 11.1 Flujo Notificaciones Accionables
+
+```mermaid
+flowchart TD
+  A["Evento operativo crea notificacion"] --> B["Backend agrega accion_url, accion_tipo, entidad_tipo y entidad_id"]
+  B --> C{"Tipo de entidad"}
+  C -->|Orden| D["/ordenes?ordenId=:id"]
+  C -->|Postventa tecnica| E["/ordenes?ordenId=:id#postventa"]
+  C -->|Archivo ECU interno| F["/archivos-ecu?archivoId=:id"]
+  C -->|Portal File Service| G["/portal-admin?fileId=:id"]
+  C -->|Nueva lectura portal| H["/portal-admin?fileId=:id#nueva-lectura"]
+  C -->|Bitacora| I["/#bitacora"]
+  C -->|Sin datos suficientes| J["Fallback por ordenId o archivoECUId"]
+  D --> K["Usuario hace clic en campana o alerta flotante"]
+  E --> K
+  F --> K
+  G --> K
+  H --> K
+  I --> K
+  J --> K
+  K --> L["Frontend marca leida si corresponde"]
+  L --> M["Navega a la accion exacta sin abrir ventana nueva"]
+```
+
+Regla: toda notificacion nueva debe incluir una accion directa cuando conozca la orden, archivo ECU, solicitud portal, cliente, vehiculo, bitacora o postventa relacionada. Las notificaciones antiguas usan fallback por `ordenId`, `archivoECUId` o metadata disponible.
+
 ## 12. Flujo Dominios
 
 ```mermaid

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   portalAdminCargarCreditos,
   portalAdminCrearCuenta,
@@ -39,6 +40,7 @@ const mensajeError = (err, fallback) =>
   err.response?.data?.error || err.message || fallback;
 
 function PortalAdminPage() {
+  const [searchParams] = useSearchParams();
   const [cuentas, setCuentas] = useState([]);
   const [archivos, setArchivos] = useState([]);
   const [movimientos, setMovimientos] = useState([]);
@@ -71,6 +73,7 @@ function PortalAdminPage() {
     referencia: "",
     observacion: "",
   });
+  const archivoDestacadoId = searchParams.get("fileId");
 
   const cargar = async () => {
     try {
@@ -96,6 +99,18 @@ function PortalAdminPage() {
   useEffect(() => {
     cargar();
   }, []);
+
+  useEffect(() => {
+    if (!archivoDestacadoId || !archivos.length) return;
+
+    const timeout = window.setTimeout(() => {
+      document
+        .getElementById(`portal-file-${archivoDestacadoId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+
+    return () => window.clearTimeout(timeout);
+  }, [archivoDestacadoId, archivos.length]);
 
   const actualizarNuevaCuenta = (campo, valor) => {
     setNuevaCuenta((actual) => ({ ...actual, [campo]: valor }));
@@ -904,8 +919,18 @@ function PortalAdminPage() {
         <div className="mt-4 space-y-4">
           {archivos.map((archivo) => {
             const edit = ediciones[archivo.id] || {};
+            const destacado = String(archivo.id) === String(archivoDestacadoId);
+            const hashActual = window.location.hash;
             return (
-              <article key={archivo.id} className="border-2 border-black p-4">
+              <article
+                key={archivo.id}
+                id={`portal-file-${archivo.id}`}
+                className={`border-2 p-4 ${
+                  destacado
+                    ? "border-blue-600 bg-blue-50 shadow-[0_0_0_4px_rgba(37,99,235,0.22)]"
+                    : "border-black"
+                }`}
+              >
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
                   <div>
                     <p className="text-sm font-black uppercase">File #{archivo.id} - {archivo.tipo_servicio}</p>
@@ -980,7 +1005,10 @@ function PortalAdminPage() {
                       </button>
                     </div>
                     <textarea className={`${inputClass} min-h-[80px]`} placeholder="Observaciones internas" value={edit.observaciones_internas ?? archivo.observaciones_internas ?? ""} onChange={(e) => editarFile(archivo.id, "observaciones_internas", e.target.value)} />
-                    <details className="border-2 border-yellow-500 bg-yellow-50 p-3">
+                    <details
+                      open={destacado && hashActual === "#nueva-lectura"}
+                      className="border-2 border-yellow-500 bg-yellow-50 p-3"
+                    >
                       <summary className="cursor-pointer text-[10px] font-black uppercase text-yellow-900">
                         Solicitar nueva lectura
                       </summary>

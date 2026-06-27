@@ -37,6 +37,15 @@ const crearNotificacionPortalInterna = async ({
   archivo,
 }) => {
   try {
+    const portalFileId = archivo?.id || null;
+    const accionUrl = portalFileId
+      ? tipo === "PORTAL_FILE_NUEVA_LECTURA"
+        ? `/portal-admin?fileId=${portalFileId}#nueva-lectura`
+        : tipo === "PORTAL_FILE_CORRECCION"
+          ? `/portal-admin?fileId=${portalFileId}#correccion`
+          : `/portal-admin?fileId=${portalFileId}`
+      : null;
+
     await crearNotificacionesInternas({
       rolesDestino: ROLES_NOTIFICACION_PORTAL,
       tipo,
@@ -44,6 +53,15 @@ const crearNotificacionPortalInterna = async ({
       mensaje,
       archivoECUId: null,
       ordenId: null,
+      accion_url: accionUrl,
+      accion_tipo: "ABRIR_PORTAL_ADMIN_FILE",
+      entidad_tipo: "PORTAL_FILE",
+      entidad_id: portalFileId ? String(portalFileId) : null,
+      metadata: {
+        portalFileId,
+        cuentaId: archivo?.cuentaId || null,
+        usuarioId: archivo?.usuarioId || null,
+      },
     });
   } catch (error) {
     console.warn(

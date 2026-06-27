@@ -1086,6 +1086,17 @@ const registrarCorreccionTecnica = async (req, res) => {
           "Cliente volvió por DTC / revisión postventa. Requiere revisión ECU/File Service.",
         ordenId: orden.id,
         archivoECUId: evento.archivo_ecu_id,
+        accion_url: `/ordenes?ordenId=${orden.id}#postventa`,
+        accion_tipo: "ABRIR_POSTVENTA_TECNICA",
+        entidad_tipo: "ORDEN_TRABAJO",
+        entidad_id: String(orden.id),
+        metadata: {
+          correccion_estado: estado,
+          correccion_prioridad: prioridad,
+          archivo_ecu_id: evento.archivo_ecu_id,
+          cliente_volvio: clienteVolvio,
+          dtc: evento.dtc,
+        },
       });
     } catch (errorNotificacion) {
       console.warn(

@@ -432,6 +432,61 @@ function App() {
     }
   };
 
+  const navegarAAccionInterna = (url) => {
+    const destino = String(url || "").trim();
+    if (!destino) return false;
+
+    if (/^https?:\/\//i.test(destino)) {
+      window.location.assign(destino);
+      return true;
+    }
+
+    const destinoInterno = destino.startsWith("/") ? destino : `/${destino}`;
+    window.history.pushState({}, "", destinoInterno);
+    const evento =
+      typeof PopStateEvent === "function"
+        ? new PopStateEvent("popstate")
+        : new Event("popstate");
+    window.dispatchEvent(evento);
+    setSidebarOpen(false);
+    return true;
+  };
+
+  const abrirAccionNotificacion = async (notificacion) => {
+    const url = obtenerUrlAccionNotificacion(notificacion);
+
+    if (!url) {
+      setNotificacionesError("Sin accion directa disponible");
+      setNotificacionesOpen(true);
+      return;
+    }
+
+    if (notificacion?.id && esNotificacionNoLeida(notificacion)) {
+      try {
+        await api.patch(`/notificaciones/${notificacion.id}/leida`);
+        setNotificaciones((actuales) =>
+          actuales.map((item) =>
+            String(item.id) === String(notificacion.id)
+              ? { ...item, leida: true, leida_at: new Date().toISOString() }
+              : item
+          )
+        );
+        setNotificacionesNoLeidas((actual) => Math.max(0, Number(actual) - 1));
+        notificacionesNoLeidasRef.current.delete(obtenerIdNotificacion(notificacion));
+      } catch (err) {
+        console.error("Error marcando notificacion:", err.response?.data || err.message);
+        setNotificacionesError("No se pudo marcar la notificacion");
+      }
+    }
+
+    if (String(alertaNotificacion?.id) === String(notificacion?.id)) {
+      setAlertaNotificacion(null);
+    }
+
+    setNotificacionesOpen(false);
+    navegarAAccionInterna(url);
+  };
+
   const alternarSonidoNotificaciones = async () => {
     const siguiente = !sonidoNotificacionesActivo;
     setSonidoNotificacionesActivo(siguiente);
@@ -736,6 +791,7 @@ function App() {
                 onActualizar={cargarNotificaciones}
                 onMarcarLeida={marcarNotificacionLeida}
                 onMarcarTodas={marcarTodasNotificacionesLeidas}
+                onAbrirAccion={abrirAccionNotificacion}
                 onAlternarSonido={alternarSonidoNotificaciones}
                 onCambiarModoSonido={cambiarModoSonidoNotificaciones}
                 onProbarSonido={probarSonidoNotificaciones}
@@ -744,10 +800,7 @@ function App() {
               <AlertaNotificacionFlotante
                 notificacion={alertaNotificacion}
                 onCerrar={() => setAlertaNotificacion(null)}
-                onVer={() => {
-                  setNotificacionesOpen(true);
-                  setAlertaNotificacion(null);
-                }}
+                onVer={() => abrirAccionNotificacion(alertaNotificacion)}
                 onMarcarLeida={marcarNotificacionLeida}
               />
 
@@ -917,6 +970,77 @@ const formatearFechaNotificacion = (valor) => {
   });
 };
 
+const leerMetadataNotificacion = (notificacion) => {
+  const metadata = notificacion?.metadata;
+
+  if (!metadata) return {};
+  if (typeof metadata === "object" && !Array.isArray(metadata)) return metadata;
+
+  if (typeof metadata === "string" && metadata.trim()) {
+    try {
+      const parsed = JSON.parse(metadata);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+};
+
+const obtenerUrlAccionNotificacion = (notificacion) => {
+  if (!notificacion) return "";
+
+  const accionUrl = String(notificacion.accion_url || "").trim();
+  if (accionUrl) return accionUrl;
+
+  const tipo = String(notificacion.tipo || "").toUpperCase();
+  const metadata = leerMetadataNotificacion(notificacion);
+  const portalFileId =
+    metadata.portalFileId ||
+    metadata.fileId ||
+    (String(notificacion.entidad_tipo || "").toUpperCase() === "PORTAL_FILE"
+      ? notificacion.entidad_id
+      : null);
+
+  if (tipo.startsWith("PORTAL_FILE_") && portalFileId) {
+    if (tipo === "PORTAL_FILE_NUEVA_LECTURA") {
+      return `/portal-admin?fileId=${portalFileId}#nueva-lectura`;
+    }
+
+    if (tipo === "PORTAL_FILE_CORRECCION") {
+      return `/portal-admin?fileId=${portalFileId}#correccion`;
+    }
+
+    return `/portal-admin?fileId=${portalFileId}`;
+  }
+
+  if (tipo === "BITACORA_OPERATIVA_PRIORITARIA") {
+    return "/#bitacora";
+  }
+
+  if (notificacion.ordenId) {
+    if (tipo === "CORRECCION_TECNICA_SOLICITADA") {
+      return `/ordenes?ordenId=${notificacion.ordenId}#postventa`;
+    }
+
+    if (tipo === "ORDEN_LISTA_ENTREGA") {
+      return `/ordenes?ordenId=${notificacion.ordenId}#entrega`;
+    }
+
+    return `/ordenes?ordenId=${notificacion.ordenId}`;
+  }
+
+  if (notificacion.archivoECUId) {
+    const hash = tipo === "POST_ESCRITURA_PENDIENTE" ? "#post-escritura" : "";
+    return `/archivos-ecu?archivoId=${notificacion.archivoECUId}${hash}`;
+  }
+
+  return "";
+};
+
 const NotificacionesInternas = ({
   abiertas,
   setAbiertas,
@@ -929,6 +1053,7 @@ const NotificacionesInternas = ({
   onActualizar,
   onMarcarLeida,
   onMarcarTodas,
+  onAbrirAccion,
   onAlternarSonido,
   onCambiarModoSonido,
   onProbarSonido,
@@ -1055,11 +1180,25 @@ const NotificacionesInternas = ({
               </div>
             ) : (
               <div className="max-h-[420px] overflow-auto divide-y-2 divide-black">
-                {ultimas.map((notificacion) => (
-                  <div
-                    key={notificacion.id}
-                    className={`p-4 ${notificacion.leida ? "bg-white" : "bg-blue-50"}`}
-                  >
+                {ultimas.map((notificacion) => {
+                  const urlAccion = obtenerUrlAccionNotificacion(notificacion);
+
+                  return (
+                    <div
+                      key={notificacion.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onAbrirAccion(notificacion)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onAbrirAccion(notificacion);
+                        }
+                      }}
+                      className={`p-4 text-left transition hover:bg-blue-100 focus:outline-none focus:ring-4 focus:ring-blue-300 ${
+                        notificacion.leida ? "bg-white" : "bg-blue-50"
+                      }`}
+                    >
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-[10px] font-black uppercase text-blue-700">
@@ -1085,23 +1224,52 @@ const NotificacionesInternas = ({
                       {notificacion.mensaje || "Sin mensaje"}
                     </p>
 
+                    <p
+                      className={`mt-2 text-[10px] font-black uppercase ${
+                        urlAccion ? "text-blue-700" : "text-gray-400"
+                      }`}
+                    >
+                      {urlAccion
+                        ? "Click para ir a la accion exacta"
+                        : "Sin accion directa disponible"}
+                    </p>
+
                     <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <p className="text-[10px] font-black uppercase text-gray-400">
                         {formatearFechaNotificacion(notificacion.createdAt)}
                       </p>
 
-                      {!notificacion.leida && (
+                      <div className="flex flex-wrap gap-2">
+                        {urlAccion && (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onAbrirAccion(notificacion);
+                            }}
+                            className="bg-blue-700 text-white px-3 py-2 rounded text-[10px] font-black uppercase hover:bg-black transition"
+                          >
+                            Ver accion
+                          </button>
+                        )}
+
+                        {!notificacion.leida && (
                         <button
                           type="button"
-                          onClick={() => onMarcarLeida(notificacion.id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onMarcarLeida(notificacion.id);
+                          }}
                           className="bg-black text-white px-3 py-2 rounded text-[10px] font-black uppercase hover:bg-blue-700 transition"
                         >
                           Marcar como leida
                         </button>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2544,7 +2712,10 @@ const BitacoraRapidaSection = ({
   onSubmit,
   onResolver,
 }) => (
-  <section className="rounded-2xl border-4 border-black bg-slate-950 p-5 text-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+  <section
+    id="bitacora"
+    className="rounded-2xl border-4 border-black bg-slate-950 p-5 text-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]"
+  >
     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
       <div className="max-w-2xl">
         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-300">
