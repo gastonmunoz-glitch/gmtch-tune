@@ -67,6 +67,19 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 
 - Entrar a `/finanzas` con OWNER o ADMIN y confirmar que se ven valores.
 - Entrar con RECEPCION/OPERADOR_ECU/MECANICO y confirmar que kg se ven, pero valores financieros aparecen ocultos.
+- Confirmar que el acceso de menu Finanzas solo aparece para OWNER/ADMIN.
+- Subir comprobante de transferencia desde una orden y confirmar estado `PENDIENTE_REVISION`.
+- Confirmar que subir comprobante no marca la orden como pagada ni entregada.
+- Validar y rechazar comprobantes con OWNER/ADMIN.
+- Descargar comprobante protegido con sesion activa.
+- Registrar ingreso tipo `SERVICIO`, `FILE_SERVICE`, `VENTA_MATERIAL` u `OTRO`.
+- Registrar gasto operativo con categoria, monto, fecha, proveedor y descripcion.
+- Registrar sueldo/pago trabajador como egreso categoria `SUELDO`.
+- Confirmar que sueldos y utilidad no son visibles para roles operativos.
+- Registrar movimiento de fondo de reserva: aporte, retiro y ajuste.
+- Previsualizar cierre semanal con ingresos, egresos, sueldos, aporte reserva y utilidad distribuible.
+- Cerrar semana y confirmar reparto en 3 para Gaston, Felipe y Alejandro.
+- Confirmar advertencia si la utilidad distribuible es negativa.
 - Registrar material recuperado desde una orden DPF/FAP o intervencion fisica asociada.
 - Confirmar autocompletado de patente, marca, modelo y ano al seleccionar orden.
 - Registrar kg mayores a 0 y confirmar lote automatico `YYYY-MM`.
@@ -75,8 +88,11 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Revisar ranking por modelo, promedio kg, minimo, maximo y confianza estadistica.
 - Revisar cierre mensual: kg esperados, kg reales, diferencia y valor estimado.
 - Marcar venta solo con OWNER/ADMIN: comprador, precio real kg y valor real.
+- Desde material vendido, registrar ingreso financiero tipo `VENTA_MATERIAL`.
 - Cerrar lote mensual solo con OWNER/ADMIN.
 - Confirmar que ficha vehiculo muestra historial de material recuperado.
+- Confirmar que ficha vehiculo muestra comprobantes asociados.
+- Confirmar que Centro de Mando muestra solo para OWNER/ADMIN: pagos por revisar, utilidad semanal estimada, fondo reserva y material del mes.
 - Confirmar que no se modifican pagos, entrega ni cierre comercial de la orden.
 
 ## 8. QA File Service Interno

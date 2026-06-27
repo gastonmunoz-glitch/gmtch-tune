@@ -148,6 +148,10 @@ const main = async () => {
       name: "Bitacora operativa",
       urls: [`${API_BASE}/bitacora-operativa?resuelto=false&limit=5`],
     },
+    {
+      name: "Finanzas resumen",
+      urls: [`${API_BASE}/finanzas/resumen`],
+    },
   ];
 
   const results = [];

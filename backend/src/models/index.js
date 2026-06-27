@@ -8,6 +8,10 @@ const Usuario = require("./Usuario");
 const Notificacion = require("./Notificacion");
 const BitacoraOperativa = require("./BitacoraOperativa");
 const MaterialRecuperado = require("./MaterialRecuperado");
+const MovimientoFinanciero = require("./MovimientoFinanciero");
+const FondoReservaMovimiento = require("./FondoReservaMovimiento");
+const CierreSemanal = require("./CierreSemanal");
+const ComprobantePago = require("./ComprobantePago");
 const PortalCuenta = require("./PortalCuenta");
 const PortalUsuario = require("./PortalUsuario");
 const PortalFileService = require("./PortalFileService");
@@ -115,6 +119,56 @@ MaterialRecuperado.belongsTo(Cliente, {
   constraints: false,
 });
 
+OrdenTrabajo.hasMany(MovimientoFinanciero, {
+  foreignKey: "ordenId",
+  constraints: false,
+});
+
+MovimientoFinanciero.belongsTo(OrdenTrabajo, {
+  foreignKey: "ordenId",
+  constraints: false,
+});
+
+Cliente.hasMany(MovimientoFinanciero, {
+  foreignKey: "clienteId",
+  constraints: false,
+});
+
+MovimientoFinanciero.belongsTo(Cliente, {
+  foreignKey: "clienteId",
+  constraints: false,
+});
+
+OrdenTrabajo.hasMany(ComprobantePago, {
+  foreignKey: "ordenId",
+  constraints: false,
+});
+
+ComprobantePago.belongsTo(OrdenTrabajo, {
+  foreignKey: "ordenId",
+  constraints: false,
+});
+
+Cliente.hasMany(ComprobantePago, {
+  foreignKey: "clienteId",
+  constraints: false,
+});
+
+ComprobantePago.belongsTo(Cliente, {
+  foreignKey: "clienteId",
+  constraints: false,
+});
+
+MovimientoFinanciero.hasMany(ComprobantePago, {
+  foreignKey: "movimientoFinancieroId",
+  constraints: false,
+});
+
+ComprobantePago.belongsTo(MovimientoFinanciero, {
+  foreignKey: "movimientoFinancieroId",
+  constraints: false,
+});
+
 // FileService opcional
 if (FileService) {
   OrdenTrabajo.hasMany(FileService, {
@@ -200,6 +254,10 @@ module.exports = {
   Notificacion,
   BitacoraOperativa,
   MaterialRecuperado,
+  MovimientoFinanciero,
+  FondoReservaMovimiento,
+  CierreSemanal,
+  ComprobantePago,
   PortalCuenta,
   PortalUsuario,
   PortalFileService,

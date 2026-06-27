@@ -134,7 +134,7 @@ const MENU = [
   {
     to: "/finanzas",
     label: "Finanzas / Material",
-    roles: PERMISOS_RUTAS["/finanzas"],
+    roles: ["OWNER", "ADMIN"],
   },
   {
     to: "/portal-admin",
@@ -1405,6 +1405,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     postventaPendientesDetalle: [],
     alertasOperativas: [],
     checklistOperativo: [],
+    finanzas: null,
     clientes: puedeVerBase ? 0 : "Sin acceso",
     vehiculos: puedeVerBase ? 0 : "Sin acceso",
     ordenes: 0,
@@ -1620,7 +1621,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     });
   };
 
-  const calcularDashboard = (ordenes, clientes, vehiculos, archivos) => {
+  const calcularDashboard = (ordenes, clientes, vehiculos, archivos, finanzas = null) => {
     const hoy = new Date();
     const desdeSemana = inicioSemana(hoy);
     const pagadasMes = [];
@@ -2199,6 +2200,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         crearItemChecklist("Pagos pendientes", pagosPendientes),
         crearItemChecklist("Entregadas hoy", entregadasHoy),
       ],
+      finanzas,
       clientes: puedeVerBase ? clientesReales.length : "Sin acceso",
       vehiculos: puedeVerBase ? vehiculosReales.length : "Sin acceso",
       ordenes: ordenesReales.length,
@@ -2226,9 +2228,19 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
             limit: 20,
           },
         }),
+        mostrarComercial
+          ? api.get("/finanzas/resumen")
+          : Promise.resolve({ data: null }),
       ]);
 
-      const [ordenesRes, clientesRes, vehiculosRes, archivosRes, bitacoraRes] =
+      const [
+        ordenesRes,
+        clientesRes,
+        vehiculosRes,
+        archivosRes,
+        bitacoraRes,
+        finanzasRes,
+      ] =
         respuestas;
 
       const ordenes =
@@ -2241,6 +2253,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         archivosRes.status === "fulfilled" ? normalizarArray(archivosRes.value) : [];
       const bitacoraItems =
         bitacoraRes.status === "fulfilled" ? normalizarArray(bitacoraRes.value) : [];
+      const finanzasResumen =
+        finanzasRes.status === "fulfilled" ? finanzasRes.value?.data || null : null;
 
       setBitacoraOperativa({
         items: bitacoraItems,
@@ -2258,7 +2272,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         ordenes,
         clientes,
         vehiculos,
-        archivos
+        archivos,
+        finanzasResumen
       );
 
       setStats(dashboardCalculado);
@@ -2421,6 +2436,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           <StatCard label="Trabajos ingresados hoy" val={formatoCLP(stats.trabajosIngresadosHoy)} color="border-yellow-500" />
           <StatCard label="Total pagado mes" val={formatoCLP(stats.totalPagadoMes)} color="border-green-500" />
           <StatCard label="Ticket promedio mes" val={formatoCLP(stats.ticketPromedioMes)} color="border-green-500" />
+          <StatCard label="Pagos por revisar" val={stats.finanzas?.pagos_pendientes ?? 0} color="border-red-500" />
+          <StatCard label="Utilidad semana estimada" val={formatoCLP(stats.finanzas?.utilidad_distribuible)} color="border-emerald-500" />
+          <StatCard label="Fondo reserva" val={formatoCLP(stats.finanzas?.fondo_reserva_saldo)} color="border-blue-500" />
+          <StatCard
+            label="Material mes"
+            val={`${Number(stats.finanzas?.material_mes?.kg_reales || 0).toLocaleString("es-CL")} kg / ${formatoCLP(stats.finanzas?.material_mes?.valor_estimado)}`}
+            color="border-slate-500"
+          />
         </DashboardSection>
       ) : (
         <section className="border-4 border-black bg-white p-4 rounded-2xl text-xs font-black uppercase text-gray-500">

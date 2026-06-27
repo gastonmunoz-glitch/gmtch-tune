@@ -2,7 +2,11 @@ const { Op, QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
 const {
   Cliente,
+  CierreSemanal,
+  ComprobantePago,
+  FondoReservaMovimiento,
   MaterialRecuperado,
+  MovimientoFinanciero,
   OrdenTrabajo,
   Vehiculo,
 } = require("../models");
@@ -13,8 +17,29 @@ const ESTADOS_MATERIAL = ["ACUMULADO", "VENDIDO", "DESCARTADO", "AJUSTADO"];
 const LOTES_ESTADO = ["ABIERTO", "CERRADO", "VENDIDO"];
 const ROLES_VALORES = ["OWNER", "ADMIN"];
 const ROLES_CIERRE = ["OWNER", "ADMIN"];
+const PARTICIPANTES_CIERRE = ["Gastón Muñoz", "Felipe Pozo", "Alejandro Cea"];
+const PORCENTAJE_FONDO_RESERVA = 15;
+
+const TIPOS_MOVIMIENTO = ["INGRESO", "EGRESO"];
+const CATEGORIAS_INGRESO = ["SERVICIO", "FILE_SERVICE", "VENTA_MATERIAL", "OTRO"];
+const CATEGORIAS_EGRESO = [
+  "GASTO_OPERATIVO",
+  "SUELDO",
+  "COMPRA",
+  "HERRAMIENTA",
+  "ARRIENDO",
+  "TRANSPORTE",
+  "MARKETING",
+  "IMPUESTO_PROVISION",
+  "OTRO",
+];
+const METODOS_PAGO = ["TRANSFERENCIA", "EFECTIVO", "TARJETA", "OTRO"];
+const ESTADOS_COMPROBANTE = ["PENDIENTE_REVISION", "VALIDADO", "RECHAZADO"];
+const TIPOS_FONDO = ["APORTE", "RETIRO", "AJUSTE"];
+const ESTADOS_CIERRE = ["BORRADOR", "CERRADO", "PAGADO"];
 
 let tablaPreparada = false;
+let tablasFinanzasPreparadas = false;
 
 const prepararTablaMaterial = async () => {
   if (tablaPreparada) return;
@@ -71,6 +96,82 @@ const prepararTablaMaterial = async () => {
   tablaPreparada = true;
 };
 
+const prepararTablasFinanzas = async () => {
+  if (tablasFinanzasPreparadas) return;
+
+  await Promise.all([
+    MovimientoFinanciero.sync(),
+    FondoReservaMovimiento.sync(),
+    CierreSemanal.sync(),
+    ComprobantePago.sync(),
+  ]);
+
+  await sequelize.query(`
+    ALTER TABLE movimientos_financieros
+      ADD COLUMN IF NOT EXISTS "tipo" VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS "categoria" VARCHAR(80),
+      ADD COLUMN IF NOT EXISTS "monto" DECIMAL(14,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "descripcion" TEXT,
+      ADD COLUMN IF NOT EXISTS "fecha" DATE,
+      ADD COLUMN IF NOT EXISTS "metodo_pago" VARCHAR(40) DEFAULT 'TRANSFERENCIA',
+      ADD COLUMN IF NOT EXISTS "ordenId" INTEGER,
+      ADD COLUMN IF NOT EXISTS "clienteId" INTEGER,
+      ADD COLUMN IF NOT EXISTS "trabajador_nombre" VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS "proveedor" VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS "periodo" VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS "estado" VARCHAR(30) DEFAULT 'REGISTRADO',
+      ADD COLUMN IF NOT EXISTS "comprobanteId" INTEGER,
+      ADD COLUMN IF NOT EXISTS "creado_por" VARCHAR(100)
+  `);
+
+  await sequelize.query(`
+    ALTER TABLE fondo_reserva_movimientos
+      ADD COLUMN IF NOT EXISTS "tipo" VARCHAR(30) DEFAULT 'APORTE',
+      ADD COLUMN IF NOT EXISTS "monto" DECIMAL(14,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "motivo" TEXT,
+      ADD COLUMN IF NOT EXISTS "fecha" DATE,
+      ADD COLUMN IF NOT EXISTS "creado_por" VARCHAR(100)
+  `);
+
+  await sequelize.query(`
+    ALTER TABLE cierres_semanales
+      ADD COLUMN IF NOT EXISTS "semana_inicio" DATE,
+      ADD COLUMN IF NOT EXISTS "semana_fin" DATE,
+      ADD COLUMN IF NOT EXISTS "ingresos_total" DECIMAL(14,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "egresos_total" DECIMAL(14,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "sueldos_total" DECIMAL(14,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "aporte_fondo_reserva" DECIMAL(14,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "utilidad_distribuible" DECIMAL(14,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "participantes" JSONB DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS "estado" VARCHAR(30) DEFAULT 'BORRADOR',
+      ADD COLUMN IF NOT EXISTS "creado_por" VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS "cerrado_por" VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS "cerrado_at" TIMESTAMP WITH TIME ZONE,
+      ADD COLUMN IF NOT EXISTS "auditoria" JSONB DEFAULT '[]'::jsonb
+  `);
+
+  await sequelize.query(`
+    ALTER TABLE comprobantes_pago
+      ADD COLUMN IF NOT EXISTS "ordenId" INTEGER,
+      ADD COLUMN IF NOT EXISTS "clienteId" INTEGER,
+      ADD COLUMN IF NOT EXISTS "movimientoFinancieroId" INTEGER,
+      ADD COLUMN IF NOT EXISTS "monto" DECIMAL(14,2) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS "fecha_pago" DATE,
+      ADD COLUMN IF NOT EXISTS "metodo_pago" VARCHAR(40) DEFAULT 'TRANSFERENCIA',
+      ADD COLUMN IF NOT EXISTS "banco_origen" VARCHAR(120),
+      ADD COLUMN IF NOT EXISTS "folio_referencia" VARCHAR(120),
+      ADD COLUMN IF NOT EXISTS "archivo_comprobante_path" TEXT,
+      ADD COLUMN IF NOT EXISTS "archivo_comprobante_nombre" VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS "estado" VARCHAR(40) DEFAULT 'PENDIENTE_REVISION',
+      ADD COLUMN IF NOT EXISTS "observacion" TEXT,
+      ADD COLUMN IF NOT EXISTS "subido_por" VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS "validado_por" VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS "validado_at" TIMESTAMP WITH TIME ZONE
+  `);
+
+  tablasFinanzasPreparadas = true;
+};
+
 const limpiarTexto = (valor) => {
   if (valor === null || valor === undefined) return "";
   return String(valor).trim();
@@ -103,6 +204,108 @@ const usuarioActual = (req) =>
 
 const puedeVerValores = (req) => ROLES_VALORES.includes(req.usuario?.rol);
 const puedeCerrarLote = (req) => ROLES_CIERRE.includes(req.usuario?.rol);
+const exigirValores = (req, res) => {
+  if (puedeVerValores(req)) return true;
+  res.status(403).json({ error: "No tienes permisos para ver o modificar valores financieros" });
+  return false;
+};
+
+const normalizarMetodoPago = (valor) => {
+  const metodo = limpiarTexto(valor).toUpperCase();
+  return METODOS_PAGO.includes(metodo) ? metodo : "TRANSFERENCIA";
+};
+
+const normalizarTipoMovimiento = (valor) => {
+  const tipo = limpiarTexto(valor).toUpperCase();
+  return TIPOS_MOVIMIENTO.includes(tipo) ? tipo : "INGRESO";
+};
+
+const normalizarCategoriaMovimiento = (tipo, valor) => {
+  const categoria = limpiarTexto(valor).toUpperCase();
+  const validas = tipo === "EGRESO" ? CATEGORIAS_EGRESO : CATEGORIAS_INGRESO;
+  return validas.includes(categoria) ? categoria : "OTRO";
+};
+
+const normalizarEstadoComprobante = (valor) => {
+  const estado = limpiarTexto(valor).toUpperCase();
+  return ESTADOS_COMPROBANTE.includes(estado) ? estado : "PENDIENTE_REVISION";
+};
+
+const normalizarTipoFondo = (valor) => {
+  const tipo = limpiarTexto(valor).toUpperCase();
+  return TIPOS_FONDO.includes(tipo) ? tipo : "APORTE";
+};
+
+const fechaFinDia = (valor) => {
+  const fecha = new Date(`${fechaISO(valor)}T23:59:59.999`);
+  return Number.isNaN(fecha.getTime()) ? new Date() : fecha;
+};
+
+const inicioSemanaLocal = () => {
+  const ahora = new Date();
+  const dia = ahora.getDay() || 7;
+  const inicio = new Date(ahora);
+  inicio.setDate(ahora.getDate() - dia + 1);
+  return inicio.toISOString().slice(0, 10);
+};
+
+const finSemanaDesdeInicio = (inicio) => {
+  const fecha = new Date(`${fechaISO(inicio)}T00:00:00`);
+  fecha.setDate(fecha.getDate() + 6);
+  return fecha.toISOString().slice(0, 10);
+};
+
+const ocultarMovimientoSiCorresponde = (movimiento, req) => {
+  const data =
+    typeof movimiento.toJSON === "function" ? movimiento.toJSON() : movimiento;
+
+  if (puedeVerValores(req)) return data;
+
+  return {
+    ...data,
+    monto: null,
+    trabajador_nombre: data.categoria === "SUELDO" ? null : data.trabajador_nombre,
+    proveedor: null,
+  };
+};
+
+const ocultarComprobanteSiCorresponde = (comprobante, req) => {
+  const data =
+    typeof comprobante.toJSON === "function" ? comprobante.toJSON() : comprobante;
+
+  if (puedeVerValores(req) || req.usuario?.rol === "RECEPCION") return data;
+
+  return {
+    ...data,
+    monto: null,
+    banco_origen: null,
+    folio_referencia: null,
+  };
+};
+
+const calcularParticipantes = (utilidadDistribuible, participantesRaw) => {
+  const nombres =
+    Array.isArray(participantesRaw) && participantesRaw.length
+      ? participantesRaw.map((item) =>
+          typeof item === "string" ? item : limpiarTexto(item.nombre)
+        )
+      : PARTICIPANTES_CIERRE;
+  const montoBase = nombres.length
+    ? redondear(normalizarNumero(utilidadDistribuible) / nombres.length, 0)
+    : 0;
+
+  return nombres.filter(Boolean).map((nombre) => ({
+    nombre,
+    monto: montoBase,
+  }));
+};
+
+const calcularSaldoFondo = (movimientos) =>
+  movimientos.reduce((acc, movimiento) => {
+    const monto = normalizarNumero(movimiento.monto);
+    if (movimiento.tipo === "RETIRO") return acc - monto;
+    return acc + monto;
+  }, 0);
 
 const normalizarTipoMaterial = (valor) => {
   const tipo = limpiarTexto(valor).toUpperCase();
@@ -754,7 +957,581 @@ const listarOrdenesParaMaterial = async (req, res) => {
   }
 };
 
+const crearMovimientoDesdePayload = async (req, forzar = {}) => {
+  const tipo = forzar.tipo || normalizarTipoMovimiento(req.body.tipo);
+  const categoria =
+    forzar.categoria || normalizarCategoriaMovimiento(tipo, req.body.categoria);
+  const monto = normalizarNumero(req.body.monto, 0);
+
+  if (monto <= 0) {
+    const error = new Error("El monto debe ser mayor a 0");
+    error.status = 400;
+    throw error;
+  }
+
+  return MovimientoFinanciero.create({
+    tipo,
+    categoria,
+    monto,
+    descripcion: limpiarTexto(req.body.descripcion || req.body.observacion),
+    fecha: fechaISO(req.body.fecha),
+    metodo_pago: normalizarMetodoPago(req.body.metodo_pago),
+    ordenId: req.body.ordenId || req.body.orden_id || null,
+    clienteId: req.body.clienteId || req.body.cliente_id || null,
+    trabajador_nombre: limpiarTexto(req.body.trabajador_nombre || req.body.trabajador),
+    proveedor: limpiarTexto(req.body.proveedor),
+    periodo: limpiarTexto(req.body.periodo),
+    estado: limpiarTexto(req.body.estado || forzar.estado || "REGISTRADO").toUpperCase(),
+    comprobanteId: req.body.comprobanteId || req.body.comprobante_id || null,
+    creado_por: usuarioActual(req),
+  });
+};
+
+const listarMovimientos = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const where = {};
+    const limit = Math.min(Math.max(Number(req.query.limit) || 150, 1), 300);
+
+    if (req.query.tipo) where.tipo = limpiarTexto(req.query.tipo).toUpperCase();
+    if (req.query.categoria) where.categoria = limpiarTexto(req.query.categoria).toUpperCase();
+    if (req.query.ordenId) where.ordenId = Number(req.query.ordenId);
+
+    const movimientos = await MovimientoFinanciero.findAll({
+      where,
+      order: [["fecha", "DESC"], ["id", "DESC"]],
+      limit,
+    });
+
+    res.json({
+      movimientos: movimientos.map((movimiento) =>
+        ocultarMovimientoSiCorresponde(movimiento, req)
+      ),
+      puedeVerValores: true,
+    });
+  } catch (error) {
+    console.error("ERROR LISTANDO MOVIMIENTOS:", error);
+    res.status(error.status || 500).json({ error: error.message || "No se pudieron listar movimientos" });
+  }
+};
+
+const crearMovimiento = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const movimiento = await crearMovimientoDesdePayload(req);
+
+    res.status(201).json({
+      mensaje: "Movimiento financiero registrado",
+      movimiento,
+    });
+  } catch (error) {
+    console.error("ERROR CREANDO MOVIMIENTO:", error);
+    res.status(error.status || 500).json({ error: error.message || "No se pudo crear movimiento" });
+  }
+};
+
+const actualizarMovimiento = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const movimiento = await MovimientoFinanciero.findByPk(req.params.id);
+
+    if (!movimiento) {
+      return res.status(404).json({ error: "Movimiento no encontrado" });
+    }
+
+    const tipo = Object.prototype.hasOwnProperty.call(req.body, "tipo")
+      ? normalizarTipoMovimiento(req.body.tipo)
+      : movimiento.tipo;
+    const categoria = Object.prototype.hasOwnProperty.call(req.body, "categoria")
+      ? normalizarCategoriaMovimiento(tipo, req.body.categoria)
+      : movimiento.categoria;
+
+    await movimiento.update({
+      tipo,
+      categoria,
+      monto: Object.prototype.hasOwnProperty.call(req.body, "monto")
+        ? normalizarNumero(req.body.monto, movimiento.monto)
+        : movimiento.monto,
+      descripcion: Object.prototype.hasOwnProperty.call(req.body, "descripcion")
+        ? limpiarTexto(req.body.descripcion)
+        : movimiento.descripcion,
+      fecha: Object.prototype.hasOwnProperty.call(req.body, "fecha")
+        ? fechaISO(req.body.fecha)
+        : movimiento.fecha,
+      metodo_pago: Object.prototype.hasOwnProperty.call(req.body, "metodo_pago")
+        ? normalizarMetodoPago(req.body.metodo_pago)
+        : movimiento.metodo_pago,
+      trabajador_nombre: Object.prototype.hasOwnProperty.call(
+        req.body,
+        "trabajador_nombre"
+      )
+        ? limpiarTexto(req.body.trabajador_nombre)
+        : movimiento.trabajador_nombre,
+      proveedor: Object.prototype.hasOwnProperty.call(req.body, "proveedor")
+        ? limpiarTexto(req.body.proveedor)
+        : movimiento.proveedor,
+      periodo: Object.prototype.hasOwnProperty.call(req.body, "periodo")
+        ? limpiarTexto(req.body.periodo)
+        : movimiento.periodo,
+      estado: Object.prototype.hasOwnProperty.call(req.body, "estado")
+        ? limpiarTexto(req.body.estado).toUpperCase()
+        : movimiento.estado,
+    });
+
+    res.json({
+      mensaje: "Movimiento financiero actualizado",
+      movimiento,
+    });
+  } catch (error) {
+    console.error("ERROR ACTUALIZANDO MOVIMIENTO:", error);
+    res.status(500).json({ error: "No se pudo actualizar movimiento" });
+  }
+};
+
+const listarComprobantes = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+
+    const where = {};
+    if (req.query.ordenId) where.ordenId = Number(req.query.ordenId);
+    if (req.query.clienteId) where.clienteId = Number(req.query.clienteId);
+    if (req.query.estado) where.estado = normalizarEstadoComprobante(req.query.estado);
+
+    const comprobantes = await ComprobantePago.findAll({
+      where,
+      order: [["fecha_pago", "DESC"], ["id", "DESC"]],
+      limit: Math.min(Math.max(Number(req.query.limit) || 100, 1), 250),
+    });
+
+    res.json({
+      comprobantes: comprobantes.map((item) => ocultarComprobanteSiCorresponde(item, req)),
+      puedeVerValores: puedeVerValores(req),
+    });
+  } catch (error) {
+    console.error("ERROR LISTANDO COMPROBANTES:", error);
+    res.status(500).json({ error: "No se pudieron listar comprobantes" });
+  }
+};
+
+const crearComprobante = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+
+    const monto = normalizarNumero(req.body.monto, 0);
+    if (monto <= 0) {
+      return res.status(400).json({ error: "Monto de comprobante debe ser mayor a 0" });
+    }
+
+    const comprobante = await ComprobantePago.create({
+      ordenId: req.body.ordenId || req.body.orden_id || null,
+      clienteId: req.body.clienteId || req.body.cliente_id || null,
+      movimientoFinancieroId:
+        req.body.movimientoFinancieroId || req.body.movimiento_financiero_id || null,
+      monto,
+      fecha_pago: fechaISO(req.body.fecha_pago || req.body.fecha),
+      metodo_pago: normalizarMetodoPago(req.body.metodo_pago),
+      banco_origen: limpiarTexto(req.body.banco_origen),
+      folio_referencia: limpiarTexto(req.body.folio_referencia),
+      archivo_comprobante_path: req.file?.path || null,
+      archivo_comprobante_nombre: req.file?.originalname || req.file?.filename || null,
+      estado: "PENDIENTE_REVISION",
+      observacion: limpiarTexto(req.body.observacion),
+      subido_por: usuarioActual(req),
+    });
+
+    res.status(201).json({
+      mensaje: "Comprobante subido para revision",
+      comprobante: ocultarComprobanteSiCorresponde(comprobante, req),
+    });
+  } catch (error) {
+    console.error("ERROR CREANDO COMPROBANTE:", error);
+    res.status(500).json({ error: "No se pudo crear comprobante" });
+  }
+};
+
+const actualizarComprobante = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const comprobante = await ComprobantePago.findByPk(req.params.id);
+    if (!comprobante) {
+      return res.status(404).json({ error: "Comprobante no encontrado" });
+    }
+
+    await comprobante.update({
+      monto: Object.prototype.hasOwnProperty.call(req.body, "monto")
+        ? normalizarNumero(req.body.monto, comprobante.monto)
+        : comprobante.monto,
+      fecha_pago: Object.prototype.hasOwnProperty.call(req.body, "fecha_pago")
+        ? fechaISO(req.body.fecha_pago)
+        : comprobante.fecha_pago,
+      metodo_pago: Object.prototype.hasOwnProperty.call(req.body, "metodo_pago")
+        ? normalizarMetodoPago(req.body.metodo_pago)
+        : comprobante.metodo_pago,
+      banco_origen: Object.prototype.hasOwnProperty.call(req.body, "banco_origen")
+        ? limpiarTexto(req.body.banco_origen)
+        : comprobante.banco_origen,
+      folio_referencia: Object.prototype.hasOwnProperty.call(
+        req.body,
+        "folio_referencia"
+      )
+        ? limpiarTexto(req.body.folio_referencia)
+        : comprobante.folio_referencia,
+      observacion: Object.prototype.hasOwnProperty.call(req.body, "observacion")
+        ? limpiarTexto(req.body.observacion)
+        : comprobante.observacion,
+    });
+
+    res.json({
+      mensaje: "Comprobante actualizado",
+      comprobante: ocultarComprobanteSiCorresponde(comprobante, req),
+    });
+  } catch (error) {
+    console.error("ERROR ACTUALIZANDO COMPROBANTE:", error);
+    res.status(500).json({ error: "No se pudo actualizar comprobante" });
+  }
+};
+
+const cambiarEstadoComprobante = async (req, res, estado) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const comprobante = await ComprobantePago.findByPk(req.params.id);
+    if (!comprobante) {
+      return res.status(404).json({ error: "Comprobante no encontrado" });
+    }
+
+    await comprobante.update({
+      estado,
+      observacion: limpiarTexto(req.body.observacion || comprobante.observacion),
+      validado_por: usuarioActual(req),
+      validado_at: new Date(),
+    });
+
+    res.json({
+      mensaje: estado === "VALIDADO" ? "Comprobante validado" : "Comprobante rechazado",
+      comprobante,
+    });
+  } catch (error) {
+    console.error("ERROR CAMBIANDO COMPROBANTE:", error);
+    res.status(500).json({ error: "No se pudo actualizar estado de comprobante" });
+  }
+};
+
+const validarComprobante = (req, res) => cambiarEstadoComprobante(req, res, "VALIDADO");
+const rechazarComprobante = (req, res) => cambiarEstadoComprobante(req, res, "RECHAZADO");
+
+const descargarComprobante = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+
+    const comprobante = await ComprobantePago.findByPk(req.params.id);
+    if (!comprobante || !comprobante.archivo_comprobante_path) {
+      return res.status(404).json({ error: "Comprobante no disponible" });
+    }
+
+    return res.download(
+      comprobante.archivo_comprobante_path,
+      comprobante.archivo_comprobante_nombre || `comprobante-${comprobante.id}`
+    );
+  } catch (error) {
+    console.error("ERROR DESCARGANDO COMPROBANTE:", error);
+    res.status(500).json({ error: "No se pudo descargar comprobante" });
+  }
+};
+
+const listarFondoReserva = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const movimientos = await FondoReservaMovimiento.findAll({
+      order: [["fecha", "DESC"], ["id", "DESC"]],
+      limit: 150,
+    });
+
+    res.json({
+      porcentaje_sugerido: PORCENTAJE_FONDO_RESERVA,
+      saldo_actual: redondear(calcularSaldoFondo(movimientos), 0),
+      movimientos,
+    });
+  } catch (error) {
+    console.error("ERROR FONDO RESERVA:", error);
+    res.status(500).json({ error: "No se pudo cargar fondo de reserva" });
+  }
+};
+
+const crearMovimientoFondo = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const monto = normalizarNumero(req.body.monto, 0);
+    if (monto <= 0) {
+      return res.status(400).json({ error: "Monto de fondo debe ser mayor a 0" });
+    }
+
+    const movimiento = await FondoReservaMovimiento.create({
+      tipo: normalizarTipoFondo(req.body.tipo),
+      monto,
+      motivo: limpiarTexto(req.body.motivo),
+      fecha: fechaISO(req.body.fecha),
+      creado_por: usuarioActual(req),
+    });
+
+    res.status(201).json({
+      mensaje: "Movimiento de fondo registrado",
+      movimiento,
+    });
+  } catch (error) {
+    console.error("ERROR MOVIMIENTO FONDO:", error);
+    res.status(500).json({ error: "No se pudo registrar movimiento de fondo" });
+  }
+};
+
+const calcularResumenSemana = async (inicio, fin) => {
+  const movimientos = await MovimientoFinanciero.findAll({
+    where: {
+      fecha: {
+        [Op.between]: [fechaISO(inicio), fechaISO(fin)],
+      },
+    },
+  });
+  const ingresos = movimientos
+    .filter((item) => item.tipo === "INGRESO")
+    .reduce((acc, item) => acc + normalizarNumero(item.monto), 0);
+  const sueldos = movimientos
+    .filter((item) => item.tipo === "EGRESO" && item.categoria === "SUELDO")
+    .reduce((acc, item) => acc + normalizarNumero(item.monto), 0);
+  const egresos = movimientos
+    .filter((item) => item.tipo === "EGRESO" && item.categoria !== "SUELDO")
+    .reduce((acc, item) => acc + normalizarNumero(item.monto), 0);
+  const utilidadAntesReserva = ingresos - egresos - sueldos;
+  const aporteFondo =
+    utilidadAntesReserva > 0
+      ? redondear(utilidadAntesReserva * (PORCENTAJE_FONDO_RESERVA / 100), 0)
+      : 0;
+  const utilidadDistribuible = redondear(utilidadAntesReserva - aporteFondo, 0);
+
+  return {
+    ingresos_total: redondear(ingresos, 0),
+    egresos_total: redondear(egresos, 0),
+    sueldos_total: redondear(sueldos, 0),
+    aporte_fondo_reserva: aporteFondo,
+    utilidad_distribuible: utilidadDistribuible,
+    participantes: calcularParticipantes(utilidadDistribuible),
+  };
+};
+
+const obtenerResumenFinanzas = async (req, res) => {
+  try {
+    await Promise.all([prepararTablasFinanzas(), prepararTablaMaterial()]);
+    if (!exigirValores(req, res)) return;
+
+    const inicio = req.query.semana_inicio || inicioSemanaLocal();
+    const fin = req.query.semana_fin || finSemanaDesdeInicio(inicio);
+    const resumenSemana = await calcularResumenSemana(inicio, fin);
+    const pendientes = await ComprobantePago.count({
+      where: { estado: "PENDIENTE_REVISION" },
+    });
+    const fondoMovimientos = await FondoReservaMovimiento.findAll();
+    const loteMes = loteDesdeFecha(new Date());
+    const materialMes = await MaterialRecuperado.findAll({
+      where: { lote_mes: loteMes },
+    });
+    const resumenMaterial = calcularResumenLote(materialMes, req);
+
+    res.json({
+      semana_inicio: fechaISO(inicio),
+      semana_fin: fechaISO(fin),
+      ...resumenSemana,
+      reparto_estimado_3: redondear(resumenSemana.utilidad_distribuible / 3, 0),
+      pagos_pendientes: pendientes,
+      fondo_reserva_saldo: redondear(calcularSaldoFondo(fondoMovimientos), 0),
+      material_mes: resumenMaterial,
+      porcentaje_fondo_reserva: PORCENTAJE_FONDO_RESERVA,
+    });
+  } catch (error) {
+    console.error("ERROR RESUMEN FINANZAS:", error);
+    res.status(500).json({ error: "No se pudo cargar resumen financiero" });
+  }
+};
+
+const previsualizarCierreSemanal = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const inicio = req.query.semana_inicio || req.body.semana_inicio || inicioSemanaLocal();
+    const fin = req.query.semana_fin || req.body.semana_fin || finSemanaDesdeInicio(inicio);
+    const resumen = await calcularResumenSemana(inicio, fin);
+
+    res.json({
+      semana_inicio: fechaISO(inicio),
+      semana_fin: fechaISO(fin),
+      ...resumen,
+    });
+  } catch (error) {
+    console.error("ERROR PREVIEW CIERRE:", error);
+    res.status(500).json({ error: "No se pudo calcular cierre semanal" });
+  }
+};
+
+const listarCierresSemanales = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const cierres = await CierreSemanal.findAll({
+      order: [["semana_inicio", "DESC"], ["id", "DESC"]],
+      limit: 80,
+    });
+
+    res.json({ cierres });
+  } catch (error) {
+    console.error("ERROR LISTANDO CIERRES:", error);
+    res.status(500).json({ error: "No se pudieron listar cierres" });
+  }
+};
+
+const crearCierreSemanal = async (req, res) => {
+  try {
+    await prepararTablasFinanzas();
+    if (!exigirValores(req, res)) return;
+
+    const inicio = fechaISO(req.body.semana_inicio || inicioSemanaLocal());
+    const fin = fechaISO(req.body.semana_fin || finSemanaDesdeInicio(inicio));
+    const resumen = await calcularResumenSemana(inicio, fin);
+    const participantes = Array.isArray(req.body.participantes)
+      ? req.body.participantes
+      : resumen.participantes;
+    const estado = limpiarTexto(req.body.estado || "BORRADOR").toUpperCase();
+    const estadoSeguro = ESTADOS_CIERRE.includes(estado) ? estado : "BORRADOR";
+
+    const cierre = await CierreSemanal.create({
+      semana_inicio: inicio,
+      semana_fin: fin,
+      ...resumen,
+      participantes,
+      estado: estadoSeguro,
+      creado_por: usuarioActual(req),
+      cerrado_por: estadoSeguro === "CERRADO" ? usuarioActual(req) : null,
+      cerrado_at: estadoSeguro === "CERRADO" ? new Date() : null,
+      auditoria: [
+        eventoAuditoria(
+          estadoSeguro === "CERRADO" ? "CIERRE_SEMANAL_CERRADO" : "CIERRE_SEMANAL_BORRADOR",
+          req,
+          { semana_inicio: inicio, semana_fin: fin }
+        ),
+      ],
+    });
+
+    if (estadoSeguro === "CERRADO" && resumen.aporte_fondo_reserva > 0) {
+      await FondoReservaMovimiento.create({
+        tipo: "APORTE",
+        monto: resumen.aporte_fondo_reserva,
+        motivo: `Aporte automatico cierre semanal ${inicio} / ${fin}`,
+        fecha: fin,
+        creado_por: usuarioActual(req),
+      });
+    }
+
+    res.status(201).json({
+      mensaje:
+        estadoSeguro === "CERRADO"
+          ? "Cierre semanal cerrado"
+          : "Cierre semanal guardado como borrador",
+      cierre,
+      advertencia:
+        resumen.utilidad_distribuible < 0
+          ? "La utilidad distribuible es negativa. Revisar antes de pagar."
+          : null,
+    });
+  } catch (error) {
+    console.error("ERROR CREANDO CIERRE:", error);
+    res.status(500).json({ error: "No se pudo crear cierre semanal" });
+  }
+};
+
+const registrarIngresoVentaMaterial = async (req, res) => {
+  try {
+    await Promise.all([prepararTablasFinanzas(), prepararTablaMaterial()]);
+    if (!exigirValores(req, res)) return;
+
+    const registro = await MaterialRecuperado.findByPk(req.params.id);
+    if (!registro) {
+      return res.status(404).json({ error: "Material recuperado no encontrado" });
+    }
+
+    const monto =
+      normalizarNumero(req.body.monto, 0) ||
+      normalizarNumero(registro.valor_real, 0) ||
+      normalizarNumero(registro.valor_estimado, 0);
+
+    if (monto <= 0) {
+      return res.status(400).json({ error: "No hay valor para registrar ingreso" });
+    }
+
+    const movimiento = await MovimientoFinanciero.create({
+      tipo: "INGRESO",
+      categoria: "VENTA_MATERIAL",
+      monto,
+      descripcion:
+        limpiarTexto(req.body.descripcion) ||
+        `Ingreso por venta material recuperado #${registro.id}`,
+      fecha: fechaISO(req.body.fecha || new Date()),
+      metodo_pago: normalizarMetodoPago(req.body.metodo_pago),
+      ordenId: registro.ordenId,
+      clienteId: registro.clienteId,
+      creado_por: usuarioActual(req),
+    });
+
+    const auditoria = normalizarAuditoria(registro.auditoria);
+    await registro.update({
+      auditoria: [
+        eventoAuditoria("INGRESO_VENTA_MATERIAL_REGISTRADO", req, {
+          movimientoFinancieroId: movimiento.id,
+          monto,
+        }),
+        ...auditoria,
+      ],
+    });
+
+    res.status(201).json({
+      mensaje: "Ingreso por venta de material registrado",
+      movimiento,
+    });
+  } catch (error) {
+    console.error("ERROR INGRESO VENTA MATERIAL:", error);
+    res.status(500).json({ error: "No se pudo registrar ingreso por venta material" });
+  }
+};
+
 module.exports = {
+  obtenerResumenFinanzas,
+  listarMovimientos,
+  crearMovimiento,
+  actualizarMovimiento,
+  listarComprobantes,
+  crearComprobante,
+  actualizarComprobante,
+  validarComprobante,
+  rechazarComprobante,
+  descargarComprobante,
+  listarFondoReserva,
+  crearMovimientoFondo,
+  previsualizarCierreSemanal,
+  listarCierresSemanales,
+  crearCierreSemanal,
+  registrarIngresoVentaMaterial,
   listarMaterialRecuperado,
   crearMaterialRecuperado,
   actualizarMaterialRecuperado,

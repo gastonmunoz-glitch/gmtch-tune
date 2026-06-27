@@ -951,6 +951,12 @@ function OrdenesPage() {
                             >
                               Archivos ECU
                             </Link>
+                            <Link
+                              to={`/finanzas?tab=comprobantes&ordenId=${o.id}`}
+                              className="border-2 border-emerald-700 bg-emerald-50 px-3 py-2 text-emerald-800 hover:bg-emerald-700 hover:text-white transition"
+                            >
+                              Subir comprobante transferencia
+                            </Link>
                             {materialRecuperable && (
                               <Link
                                 to={`/finanzas?ordenId=${o.id}`}

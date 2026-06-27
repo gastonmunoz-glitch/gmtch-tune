@@ -65,6 +65,8 @@ function VehiculoDetallePage() {
   const [vehiculo, setVehiculo] = useState(null);
   const [materialesRecuperados, setMaterialesRecuperados] = useState([]);
   const [materialesError, setMaterialesError] = useState("");
+  const [comprobantesPago, setComprobantesPago] = useState([]);
+  const [comprobantesError, setComprobantesError] = useState("");
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -72,12 +74,17 @@ function VehiculoDetallePage() {
 
     const cargar = async () => {
       try {
-        const [vehiculoRes, materialesRes] = await Promise.allSettled([
+        const [vehiculoRes, materialesRes, comprobantesRes] = await Promise.allSettled([
           api.get(`/vehiculos/${id}`),
           api.get("/finanzas/material-recuperado", {
             params: {
               vehiculoId: id,
               limit: 80,
+            },
+          }),
+          api.get("/finanzas/comprobantes", {
+            params: {
+              limit: 250,
             },
           }),
         ]);
@@ -99,6 +106,17 @@ function VehiculoDetallePage() {
           setMaterialesError("");
         } else {
           setMaterialesError("No se pudo cargar material recuperado");
+        }
+
+        if (comprobantesRes.status === "fulfilled") {
+          setComprobantesPago(
+            Array.isArray(comprobantesRes.value.data?.comprobantes)
+              ? comprobantesRes.value.data.comprobantes
+              : []
+          );
+          setComprobantesError("");
+        } else {
+          setComprobantesError("No se pudieron cargar comprobantes de pago");
         }
       } catch (err) {
         console.error("ERROR HISTORIAL VEHICULO:", err.response?.data || err.message);
@@ -184,6 +202,19 @@ function VehiculoDetallePage() {
       ultimaEntrega: vehiculo?.metricas?.ultimaEntrega ?? vehiculo?.ultimaEntrega ?? null,
     };
   }, [vehiculo, ordenes]);
+
+  const comprobantesVehiculo = useMemo(() => {
+    const ordenIds = new Set(ordenes.map((orden) => String(orden.id)));
+    const clienteId = vehiculo?.clienteId || vehiculo?.Cliente?.id || vehiculo?.cliente?.id;
+
+    return comprobantesPago.filter((comprobante) => {
+      const coincideOrden =
+        comprobante.ordenId && ordenIds.has(String(comprobante.ordenId));
+      const coincideCliente =
+        clienteId && String(comprobante.clienteId || "") === String(clienteId);
+      return coincideOrden || coincideCliente;
+    });
+  }, [comprobantesPago, ordenes, vehiculo]);
 
   if (cargando) {
     return (
@@ -300,6 +331,71 @@ function VehiculoDetallePage() {
           <QuickLink to={`/archivos-ecu?vehiculoId=${id}`} label="Ver / ir a File Service" />
           <QuickLink to={`/fotos?vehiculoId=${id}`} label="Subir fotos" />
           <QuickLink to={`/finanzas?vehiculoId=${id}`} label="Material recuperado" />
+          <QuickLink to={`/finanzas?tab=comprobantes&vehiculoId=${id}`} label="Comprobantes pago" />
+        </div>
+      </section>
+
+      <section
+        id="comprobantes-pago"
+        className="scroll-mt-24 bg-white border-4 border-black p-5 shadow-[10px_10px_0px_0px_rgba(0,0,0,1)]"
+      >
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase text-gray-500">
+              Finanzas / Evidencia de pago
+            </p>
+            <h2 className="text-2xl font-black uppercase">
+              Comprobantes asociados
+            </h2>
+          </div>
+          <Link
+            to={`/finanzas?tab=comprobantes&vehiculoId=${id}`}
+            className="bg-black text-white px-4 py-3 font-black uppercase text-xs hover:bg-blue-600 transition"
+          >
+            Subir / revisar comprobantes
+          </Link>
+        </div>
+
+        {comprobantesError && (
+          <div className="mt-4 border-2 border-yellow-500 bg-yellow-50 p-3 text-xs font-black uppercase text-yellow-800">
+            {comprobantesError}
+          </div>
+        )}
+
+        <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+          {comprobantesVehiculo.map((item) => (
+            <div key={item.id} className="border-2 border-black bg-slate-50 p-4">
+              <div className="flex flex-wrap gap-2">
+                <span className="bg-black px-2 py-1 text-[10px] font-black uppercase text-white">
+                  Comprobante #{item.id}
+                </span>
+                <span className="border-2 border-black px-2 py-1 text-[10px] font-black uppercase">
+                  {item.estado || "PENDIENTE_REVISION"}
+                </span>
+                {item.ordenId && (
+                  <span className="border-2 border-black px-2 py-1 text-[10px] font-black uppercase">
+                    Orden #{item.ordenId}
+                  </span>
+                )}
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-2 text-xs font-bold uppercase md:grid-cols-2">
+                <Info label="Monto" value={formatearMonto(item.monto)} />
+                <Info label="Fecha pago" value={formatearFecha(item.fecha_pago)} />
+                <Info label="Metodo" value={item.metodo_pago} />
+                <Info label="Banco origen" value={item.banco_origen} />
+                <Info label="Folio" value={item.folio_referencia} />
+                <Info label="Subido por" value={item.subido_por} />
+                <Info label="Validado por" value={item.validado_por} />
+                <Info label="Observacion" value={item.observacion} />
+              </div>
+            </div>
+          ))}
+
+          {comprobantesVehiculo.length === 0 && (
+            <div className="border-2 border-black bg-slate-50 p-5 text-sm font-black uppercase text-gray-500">
+              Sin comprobantes asociados a las ordenes de este vehiculo.
+            </div>
+          )}
         </div>
       </section>
 
@@ -424,6 +520,9 @@ function VehiculoDetallePage() {
               orden.intervencion_montaje_realizado === true ||
               orden.intervencion_inspeccion_visual === true ||
               orden.intervencion_listo_programacion === true;
+            const comprobantesOrden = comprobantesVehiculo.filter(
+              (item) => String(item.ordenId || "") === String(orden.id)
+            );
 
             return (
               <article
@@ -501,6 +600,25 @@ function VehiculoDetallePage() {
                     <Info label="Entregado por" value={orden.entregado_por} />
                     <Info label="Fecha entrega" value={formatearFecha(orden.entregado_at)} />
                     <Info label="Observacion cierre" value={orden.observacion_cierre} />
+                    {comprobantesOrden.length > 0 && (
+                      <div className="mt-3 border-t-2 border-black pt-3">
+                        <p className="text-[10px] font-black uppercase text-gray-500">
+                          Comprobantes asociados
+                        </p>
+                        <div className="mt-2 space-y-2">
+                          {comprobantesOrden.map((item) => (
+                            <div
+                              key={item.id}
+                              className="border-2 border-black bg-white p-2 text-[10px] font-black uppercase"
+                            >
+                              #{item.id} / {item.estado || "PENDIENTE"} /{" "}
+                              {formatearMonto(item.monto)} /{" "}
+                              {formatearFecha(item.fecha_pago)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </Panel>
 
                   <Panel title="Cierre tecnico">

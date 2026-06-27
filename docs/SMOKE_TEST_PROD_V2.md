@@ -12,6 +12,7 @@ El script hace pruebas solo lectura contra endpoints principales:
 - `GET /api/archivos-ecu`
 - `GET /api/notificaciones`
 - `GET /api/bitacora-operativa`
+- `GET /api/finanzas/resumen`
 
 No crea datos, no borra datos y no modifica produccion.
 
@@ -62,8 +63,8 @@ Cada prueba debe mostrar:
 Resumen esperado:
 
 ```text
-Total pruebas: 6
-Pasadas: 6
+Total pruebas: 7
+Pasadas: 7
 Fallidas: 0
 ```
 
@@ -87,6 +88,7 @@ Revisar:
 - rol sin permiso para endpoint
 - probar con usuario OWNER para validacion global
 - confirmar permisos de `/usuarios/responsables` y `/bitacora-operativa`
+- confirmar que `/finanzas/resumen` se prueba con OWNER/ADMIN
 
 ## Si da 500
 
