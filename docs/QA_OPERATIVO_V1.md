@@ -17,6 +17,8 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 
 - Semaforo operativo muestra Operacion normal, Atencion requerida o Bloqueo operativo segun datos.
 - Atencion inmediata muestra correcciones, archivos ECU, post escritura, nueva lectura, MOD listo, listos para entrega y pagos pendientes.
+- Finanzas OWNER/ADMIN muestra ingresos pagados separados de pendientes/presupuestados.
+- Graficos simples muestran pagado vs pendiente, ordenes por estado, material mes e ingresos vs egresos.
 - Cola de trabajo muestra orden, cliente/vehiculo, estado, prioridad, responsable y proxima accion.
 - Bloque File Service separa pendiente revision, en proceso, MOD listo, correccion, nueva lectura y post escritura.
 - Postventa/correcciones muestra DTC, cliente volvio, responsable sugerido y estado.
@@ -68,6 +70,9 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Entrar a `/finanzas` con OWNER o ADMIN y confirmar que se ven valores.
 - Entrar con RECEPCION/OPERADOR_ECU/MECANICO y confirmar que kg se ven, pero valores financieros aparecen ocultos.
 - Confirmar que el acceso de menu Finanzas solo aparece para OWNER/ADMIN.
+- Confirmar que cada tab muestra resumen/lista primero y no despliega todo el detalle al cargar.
+- Confirmar que formularios de crear nuevo estan colapsados o claramente separados.
+- Seleccionar/expandir movimiento, comprobante o material y confirmar que aparece el detalle.
 - Subir comprobante de transferencia desde una orden y confirmar estado `PENDIENTE_REVISION`.
 - Confirmar que subir comprobante no marca la orden como pagada ni entregada.
 - Validar y rechazar comprobantes con OWNER/ADMIN.
@@ -130,6 +135,11 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Postventa interna crea alerta.
 - Bitacora urgente crea alerta.
 - Material recuperado fuera de rango crea alerta accionable hacia Finanzas.
+- Notificacion operativa critica crea primera alerta inmediata.
+- Si sigue no leida por 2 horas, se genera recordatorio suave con misma accion directa.
+- Si sigue alta/urgente por 3 horas, se genera recordatorio fuerte.
+- Confirmar que no se crean duplicados infinitos por la misma notificacion.
+- Confirmar que recordatorio fuerte usa sonido fuerte/tsunami solo si el usuario activo alertas sonoras.
 - Sonido activado suena una vez por evento nuevo.
 - Alerta visual aparece sin tapar toda la pantalla.
 - Contador de campana aumenta y baja al marcar leidas.

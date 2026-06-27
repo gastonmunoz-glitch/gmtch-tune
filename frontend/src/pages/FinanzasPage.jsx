@@ -577,16 +577,21 @@ function FinanzasPage() {
           <p className="mb-4 border-2 border-yellow-500 bg-yellow-50 p-3 text-xs font-black uppercase text-yellow-900">
             Registro interno de control. Validar con contador si se requiere liquidacion formal.
           </p>
-          <form onSubmit={crearSueldo} className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <Select label="Trabajador" value={sueldoForm.trabajador_nombre} onChange={(v) => setSueldoForm((a) => ({ ...a, trabajador_nombre: v }))} options={TRABAJADORES.map((v) => [v, v])} />
-            <Select label="Tipo" value={sueldoForm.tipo_pago} onChange={(v) => setSueldoForm((a) => ({ ...a, tipo_pago: v }))} options={["SUELDO", "ADELANTO", "BONO", "COMISION", "OTRO"].map((v) => [v, v])} />
-            <Select label="Estado" value={sueldoForm.estado} onChange={(v) => setSueldoForm((a) => ({ ...a, estado: v }))} options={["PENDIENTE", "PAGADO"].map((v) => [v, v])} />
-            <Input label="Periodo" type="month" value={sueldoForm.periodo} onChange={(v) => setSueldoForm((a) => ({ ...a, periodo: v }))} />
-            <Input label="Fecha pago/control" type="date" value={sueldoForm.fecha} onChange={(v) => setSueldoForm((a) => ({ ...a, fecha: v }))} />
-            <Input label="Monto" type="number" value={sueldoForm.monto} onChange={(v) => setSueldoForm((a) => ({ ...a, monto: v }))} />
-            <Input label="Observacion" value={sueldoForm.descripcion} onChange={(v) => setSueldoForm((a) => ({ ...a, descripcion: v }))} className="md:col-span-2" />
-            <button className="self-end bg-black px-4 py-3 text-xs font-black uppercase text-white" type="submit">Registrar pago</button>
-          </form>
+          <details className="mb-4 border-2 border-black bg-slate-50 p-3">
+            <summary className="cursor-pointer text-xs font-black uppercase">
+              Crear nuevo pago trabajador
+            </summary>
+            <form onSubmit={crearSueldo} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <Select label="Trabajador" value={sueldoForm.trabajador_nombre} onChange={(v) => setSueldoForm((a) => ({ ...a, trabajador_nombre: v }))} options={TRABAJADORES.map((v) => [v, v])} />
+              <Select label="Tipo" value={sueldoForm.tipo_pago} onChange={(v) => setSueldoForm((a) => ({ ...a, tipo_pago: v }))} options={["SUELDO", "ADELANTO", "BONO", "COMISION", "OTRO"].map((v) => [v, v])} />
+              <Select label="Estado" value={sueldoForm.estado} onChange={(v) => setSueldoForm((a) => ({ ...a, estado: v }))} options={["PENDIENTE", "PAGADO"].map((v) => [v, v])} />
+              <Input label="Periodo" type="month" value={sueldoForm.periodo} onChange={(v) => setSueldoForm((a) => ({ ...a, periodo: v }))} />
+              <Input label="Fecha pago/control" type="date" value={sueldoForm.fecha} onChange={(v) => setSueldoForm((a) => ({ ...a, fecha: v }))} />
+              <Input label="Monto" type="number" value={sueldoForm.monto} onChange={(v) => setSueldoForm((a) => ({ ...a, monto: v }))} />
+              <Input label="Observacion" value={sueldoForm.descripcion} onChange={(v) => setSueldoForm((a) => ({ ...a, descripcion: v }))} className="md:col-span-2" />
+              <button className="self-end bg-black px-4 py-3 text-xs font-black uppercase text-white" type="submit">Registrar pago</button>
+            </form>
+          </details>
           <ListaMovimientos movimientos={movimientos.filter((m) => m.categoria === "SUELDO")} />
         </Panel>
       )}
@@ -598,13 +603,18 @@ function FinanzasPage() {
             <Metric label="Porcentaje sugerido" value={`${fondo?.porcentaje_sugerido ?? 15}%`} />
             <Metric label="Movimientos" value={fondo?.movimientos?.length || 0} />
           </div>
-          <form onSubmit={crearFondo} className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <Select label="Tipo" value={fondoForm.tipo} onChange={(v) => setFondoForm((a) => ({ ...a, tipo: v }))} options={["APORTE", "RETIRO", "AJUSTE"].map((v) => [v, v])} />
-            <Input label="Fecha" type="date" value={fondoForm.fecha} onChange={(v) => setFondoForm((a) => ({ ...a, fecha: v }))} />
-            <Input label="Monto" type="number" value={fondoForm.monto} onChange={(v) => setFondoForm((a) => ({ ...a, monto: v }))} />
-            <Input label="Motivo" value={fondoForm.motivo} onChange={(v) => setFondoForm((a) => ({ ...a, motivo: v }))} />
-            <button className="bg-black px-4 py-3 text-xs font-black uppercase text-white md:col-span-4" type="submit">Registrar fondo</button>
-          </form>
+          <details className="border-2 border-black bg-slate-50 p-3">
+            <summary className="cursor-pointer text-xs font-black uppercase">
+              Crear movimiento fondo
+            </summary>
+            <form onSubmit={crearFondo} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+              <Select label="Tipo" value={fondoForm.tipo} onChange={(v) => setFondoForm((a) => ({ ...a, tipo: v }))} options={["APORTE", "RETIRO", "AJUSTE"].map((v) => [v, v])} />
+              <Input label="Fecha" type="date" value={fondoForm.fecha} onChange={(v) => setFondoForm((a) => ({ ...a, fecha: v }))} />
+              <Input label="Monto" type="number" value={fondoForm.monto} onChange={(v) => setFondoForm((a) => ({ ...a, monto: v }))} />
+              <Input label="Motivo" value={fondoForm.motivo} onChange={(v) => setFondoForm((a) => ({ ...a, motivo: v }))} />
+              <button className="bg-black px-4 py-3 text-xs font-black uppercase text-white md:col-span-4" type="submit">Registrar fondo</button>
+            </form>
+          </details>
           <div className="mt-4 space-y-2">
             {(fondo?.movimientos || []).map((item) => (
               <MiniRow key={item.id} title={`${item.tipo} ${formatearMonto(item.monto)}`} detail={`${formatearFecha(item.fecha)} - ${item.motivo || "Sin motivo"}`} />
@@ -736,29 +746,88 @@ const MiniRow = ({ title, detail }) => (
   </div>
 );
 
+const EmptyDetail = () => (
+  <div className="border-2 border-dashed border-gray-400 bg-gray-50 p-6 text-center text-xs font-black uppercase text-gray-500">
+    Selecciona un registro para ver el detalle.
+  </div>
+);
+
 const MovimientoTab = ({ titulo, tipo, form, setForm, onSubmit, movimientos }) => {
+  const [seleccionId, setSeleccionId] = useState("");
+  const seleccionado =
+    movimientos.find((item) => String(item.id) === String(seleccionId)) || null;
   const categorias =
     tipo === "EGRESO"
       ? ["GASTO_OPERATIVO", "COMPRA", "HERRAMIENTA", "ARRIENDO", "TRANSPORTE", "MARKETING", "IMPUESTO_PROVISION", "OTRO"]
       : ["SERVICIO", "FILE_SERVICE", "VENTA_MATERIAL", "OTRO"];
+  const total = movimientos.reduce((acc, item) => acc + Number(item.monto || 0), 0);
 
   return (
-    <Panel title={titulo}>
-      <form onSubmit={(e) => onSubmit(e, tipo)} className="grid grid-cols-1 gap-3 md:grid-cols-4">
-        <Select label="Categoria" value={form.categoria} onChange={(v) => setForm((a) => ({ ...a, tipo, categoria: v }))} options={categorias.map((v) => [v, v])} />
-        <Input label="Monto" type="number" value={form.monto} onChange={(v) => setForm((a) => ({ ...a, tipo, monto: v }))} />
-        <Input label="Fecha" type="date" value={form.fecha} onChange={(v) => setForm((a) => ({ ...a, tipo, fecha: v }))} />
-        <Select label="Metodo" value={form.metodo_pago} onChange={(v) => setForm((a) => ({ ...a, tipo, metodo_pago: v }))} options={["TRANSFERENCIA", "EFECTIVO", "TARJETA", "OTRO"].map((v) => [v, v])} />
-        {tipo === "EGRESO" && (
-          <Input label="Proveedor opcional" value={form.proveedor} onChange={(v) => setForm((a) => ({ ...a, tipo, proveedor: v }))} />
-        )}
-        <Input label="Descripcion" value={form.descripcion} onChange={(v) => setForm((a) => ({ ...a, tipo, descripcion: v }))} className={tipo === "EGRESO" ? "md:col-span-2" : "md:col-span-3"} />
-        <button className="self-end bg-black px-4 py-3 text-xs font-black uppercase text-white" type="submit">
-          Registrar
-        </button>
-      </form>
-      <ListaMovimientos movimientos={movimientos} />
-    </Panel>
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Metric label="Registros" value={movimientos.length} />
+        <Metric label="Total visible" value={formatearMonto(total)} />
+        <Metric label="Ultimo registro" value={movimientos[0] ? formatearFecha(movimientos[0].fecha) : "Sin registros"} />
+      </div>
+
+      <details className="border-4 border-black bg-white p-4 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
+        <summary className="cursor-pointer text-xs font-black uppercase">
+          Crear nuevo
+        </summary>
+        <form onSubmit={(e) => onSubmit(e, tipo)} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+          <Select label="Categoria" value={form.categoria} onChange={(v) => setForm((a) => ({ ...a, tipo, categoria: v }))} options={categorias.map((v) => [v, v])} />
+          <Input label="Monto" type="number" value={form.monto} onChange={(v) => setForm((a) => ({ ...a, tipo, monto: v }))} />
+          <Input label="Fecha" type="date" value={form.fecha} onChange={(v) => setForm((a) => ({ ...a, tipo, fecha: v }))} />
+          <Select label="Metodo" value={form.metodo_pago} onChange={(v) => setForm((a) => ({ ...a, tipo, metodo_pago: v }))} options={["TRANSFERENCIA", "EFECTIVO", "TARJETA", "OTRO"].map((v) => [v, v])} />
+          {tipo === "EGRESO" && (
+            <Input label="Proveedor opcional" value={form.proveedor} onChange={(v) => setForm((a) => ({ ...a, tipo, proveedor: v }))} />
+          )}
+          <Input label="Descripcion" value={form.descripcion} onChange={(v) => setForm((a) => ({ ...a, tipo, descripcion: v }))} className={tipo === "EGRESO" ? "md:col-span-2" : "md:col-span-3"} />
+          <button className="self-end bg-black px-4 py-3 text-xs font-black uppercase text-white" type="submit">
+            Registrar
+          </button>
+        </form>
+      </details>
+
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        <Panel title="Lista compacta">
+          <div className="space-y-2">
+            {movimientos.slice(0, 50).map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setSeleccionId(String(m.id))}
+                className={`w-full border-2 p-3 text-left ${String(m.id) === String(seleccionId) ? "border-blue-700 bg-blue-50" : "border-black bg-slate-50"}`}
+              >
+                <p className="text-xs font-black uppercase">
+                  #{m.id} / {m.categoria} / {formatearMonto(m.monto)}
+                </p>
+                <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
+                  {formatearFecha(m.fecha)} - {m.trabajador_nombre || m.proveedor || m.descripcion || "Sin detalle"}
+                </p>
+              </button>
+            ))}
+            {!movimientos.length && <MiniRow title="Sin movimientos" detail="No hay registros para esta seccion." />}
+          </div>
+        </Panel>
+
+        <Panel title="Detalle">
+          {seleccionado ? (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <MiniRow title="Tipo / categoria" detail={`${seleccionado.tipo} / ${seleccionado.categoria}`} />
+              <MiniRow title="Monto" detail={formatearMonto(seleccionado.monto)} />
+              <MiniRow title="Fecha" detail={formatearFecha(seleccionado.fecha)} />
+              <MiniRow title="Metodo" detail={seleccionado.metodo_pago || "No registrado"} />
+              <MiniRow title="Proveedor / trabajador" detail={seleccionado.proveedor || seleccionado.trabajador_nombre || "No registrado"} />
+              <MiniRow title="Creado por" detail={seleccionado.creado_por || "No registrado"} />
+              <MiniRow title="Descripcion" detail={seleccionado.descripcion || "No registrado"} />
+            </div>
+          ) : (
+            <EmptyDetail />
+          )}
+        </Panel>
+      </section>
+    </div>
   );
 };
 
@@ -820,8 +889,12 @@ const MaterialTab = ({
       <Metric label="Diferencia" value={`${formatearKg(resumenLote?.diferencia_kg)} / ${resumenLote?.diferencia_porcentaje ?? 0}%`} />
     </div>
 
-    <section className="grid grid-cols-1 gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-      <Panel title="Registrar material recuperado">
+    <details className="border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <summary className="cursor-pointer text-xs font-black uppercase">
+        Crear registro / revisar cierre mensual
+      </summary>
+      <section className="mt-4 grid grid-cols-1 gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <Panel title="Registrar material recuperado">
         <p className="mb-3 text-xs font-bold uppercase text-gray-500">
           Registro administrativo/contable. No contiene instrucciones tecnicas.
         </p>
@@ -857,9 +930,9 @@ const MaterialTab = ({
           <Input label="Observacion" value={form.observacion} onChange={(v) => setForm((a) => ({ ...a, observacion: v }))} className="md:col-span-2" />
           <button className="bg-black px-4 py-3 text-xs font-black uppercase text-white md:col-span-2" type="submit">Registrar material</button>
         </form>
-      </Panel>
+        </Panel>
 
-      <Panel title="Cierre mensual material">
+        <Panel title="Cierre mensual material">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Input label="Lote" type="month" value={loteMes} onChange={setLoteMes} />
           <Metric label="Estado lote" value={resumenLote?.estado_lote || "ABIERTO"} />
@@ -871,8 +944,9 @@ const MaterialTab = ({
             Cerrar lote mensual
           </button>
         )}
-      </Panel>
-    </section>
+        </Panel>
+      </section>
+    </details>
 
     <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_0.8fr]">
       <Panel title="Registros historicos">
@@ -881,8 +955,9 @@ const MaterialTab = ({
             const destacado = String(registro.id) === String(materialIdQuery);
             const venta = ventaMaterial[registro.id] || {};
             return (
-              <article key={registro.id} id={`material-${registro.id}`} className={`border-2 p-4 ${destacado ? "border-blue-600 bg-blue-50" : "border-black bg-white"}`}>
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <details key={registro.id} id={`material-${registro.id}`} className={`border-2 p-4 ${destacado ? "border-blue-600 bg-blue-50" : "border-black bg-white"}`}>
+                <summary className="cursor-pointer list-none">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="flex flex-wrap gap-2">
                       <span className="bg-black px-2 py-1 text-[10px] font-black uppercase text-white">Material #{registro.id}</span>
@@ -898,7 +973,11 @@ const MaterialTab = ({
                     {registro.ordenId && <Link to={`/ordenes?ordenId=${registro.ordenId}`} className="text-xs font-black uppercase text-blue-700 underline">Ver orden #{registro.ordenId}</Link>}
                     {puedeVerValores && <p className="mt-2 text-xs font-black uppercase">Estimado: {formatearMonto(registro.valor_estimado)} / Real: {formatearMonto(registro.valor_real)}</p>}
                   </div>
-                </div>
+                  </div>
+                  <p className="mt-2 text-[10px] font-black uppercase text-blue-700">
+                    Ver detalle operativo
+                  </p>
+                </summary>
                 {puedeCerrarLote && registro.estado !== "VENDIDO" && (
                   <div className="mt-3 grid grid-cols-1 gap-2 border-t-2 border-black pt-3 md:grid-cols-[1fr_1fr_auto]">
                     <input className={inputClass} placeholder="Comprador" value={venta.comprador || ""} onChange={(e) => setVentaMaterial((a) => ({ ...a, [registro.id]: { ...venta, comprador: e.target.value } }))} />
@@ -911,7 +990,7 @@ const MaterialTab = ({
                     Registrar ingreso por venta de material
                   </button>
                 )}
-              </article>
+              </details>
             );
           })}
           {!registros.length && <MiniRow title="Sin registros" detail="Aun no hay material recuperado." />}
@@ -931,7 +1010,16 @@ const MaterialTab = ({
 
 const ComprobantesTab = ({ form, setForm, ordenes, comprobantes, onSubmit, validarComprobante, descargarComprobante, puedeVerValores }) => (
   <Panel title="Comprobantes de transferencia / pago">
-    <form onSubmit={onSubmit} className="grid grid-cols-1 gap-3 md:grid-cols-3">
+    <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+      <Metric label="Comprobantes" value={comprobantes.length} />
+      <Metric label="Pendientes revision" value={comprobantes.filter((item) => item.estado === "PENDIENTE_REVISION").length} />
+      <Metric label="Validados" value={comprobantes.filter((item) => item.estado === "VALIDADO").length} />
+    </div>
+    <details className="border-2 border-black bg-slate-50 p-3">
+      <summary className="cursor-pointer text-xs font-black uppercase">
+        Subir comprobante
+      </summary>
+    <form onSubmit={onSubmit} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
       <label className="text-[10px] font-black uppercase text-gray-500">
         Orden asociada
         <select
@@ -964,11 +1052,17 @@ const ComprobantesTab = ({ form, setForm, ordenes, comprobantes, onSubmit, valid
       <Input label="Observacion" value={form.observacion} onChange={(v) => setForm((a) => ({ ...a, observacion: v }))} className="md:col-span-2" />
       <button className="bg-black px-4 py-3 text-xs font-black uppercase text-white md:col-span-3" type="submit">Subir comprobante</button>
     </form>
+    </details>
     <div className="mt-5 space-y-2">
       {comprobantes.map((item) => (
-        <div key={item.id} className="border-2 border-black bg-slate-50 p-3">
+        <details key={item.id} className="border-2 border-black bg-slate-50 p-3">
+          <summary className="cursor-pointer list-none">
           <p className="text-xs font-black uppercase">Comprobante #{item.id} / {item.estado} / {formatearMonto(item.monto)}</p>
           <p className="text-[10px] font-bold uppercase text-gray-500">Orden #{item.ordenId || "S/O"} / {formatearFecha(item.fecha_pago)} / {item.metodo_pago}</p>
+          <p className="mt-1 text-[10px] font-black uppercase text-blue-700">
+            Ver detalle
+          </p>
+          </summary>
           <div className="mt-2 flex flex-wrap gap-2">
             {item.archivo_comprobante_path && (
               <button
@@ -986,7 +1080,14 @@ const ComprobantesTab = ({ form, setForm, ordenes, comprobantes, onSubmit, valid
               </>
             )}
           </div>
-        </div>
+          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+            <MiniRow title="Banco origen" detail={item.banco_origen || "No registrado"} />
+            <MiniRow title="Folio referencia" detail={item.folio_referencia || "No registrado"} />
+            <MiniRow title="Subido por" detail={item.subido_por || "No registrado"} />
+            <MiniRow title="Validado por" detail={item.validado_por || "No registrado"} />
+            <MiniRow title="Observacion" detail={item.observacion || "No registrado"} />
+          </div>
+        </details>
       ))}
       {!comprobantes.length && <MiniRow title="Sin comprobantes" detail="No hay comprobantes cargados." />}
     </div>

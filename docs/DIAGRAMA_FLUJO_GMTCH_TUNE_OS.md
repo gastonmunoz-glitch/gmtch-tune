@@ -67,6 +67,7 @@ flowchart TD
   A --> F["Postventa tecnica / correcciones"]
   A --> G["Intervencion fisica"]
   A --> H["Acciones rapidas"]
+  A --> X["Graficos simples sin dependencias"]
 
   B --> B1["Correcciones tecnicas pendientes"]
   B --> B2["Archivos ECU pendientes"]
@@ -99,9 +100,13 @@ flowchart TD
 
   G --> G1["Mecanica asociada al servicio tecnico"]
   G --> G2["Mecanica independiente / mantencion"]
+  X --> X1["Ingresos pagados vs pendientes"]
+  X --> X2["Ordenes por estado"]
+  X --> X3["Material recuperado del mes"]
+  X --> X4["Ingresos vs egresos semana"]
 ```
 
-Regla: el Centro de Mando V2 prioriza bloqueos operativos, postventa tecnica, File Service, post escritura, pagos pendientes antes de entrega e intervencion fisica sin exponer caja a roles no autorizados.
+Regla: el Centro de Mando V2 prioriza bloqueos operativos, postventa tecnica, File Service, post escritura, pagos pendientes antes de entrega e intervencion fisica sin exponer caja a roles no autorizados. Ingresos reales solo consideran pagos confirmados; montos pendientes o presupuestados se muestran separados.
 
 ## 4. Flujo Orden de Trabajo
 
@@ -239,7 +244,10 @@ Regla: la bitacora operativa global sirve para no perder observaciones del dia. 
 
 ```mermaid
 flowchart TD
-  A["Finanzas / Material"] --> B["Comprobantes de pago"]
+  A["Finanzas / Material"] --> UX["Resumen compacto + lista compacta"]
+  UX --> UX2["Detalle solo al seleccionar o expandir registro"]
+  UX --> UX3["Crear nuevo queda colapsado"]
+  A --> B["Comprobantes de pago"]
   A --> C["Movimientos financieros"]
   A --> D["Sueldos / pagos trabajadores"]
   A --> E["Fondo de reserva"]
@@ -279,7 +287,7 @@ flowchart TD
   G9 --> G10["Registrar ingreso financiero VENTA_MATERIAL"]
 ```
 
-Regla: este flujo es administrativo/contable interno. No marca pagado ni entregado automaticamente. No entrega instrucciones tecnicas de extraccion, desmontaje o intervencion. Sueldos, utilidad, reparto y caja son visibles solo para roles autorizados.
+Regla: este flujo es administrativo/contable interno. No marca pagado ni entregado automaticamente. No entrega instrucciones tecnicas de extraccion, desmontaje o intervencion. Sueldos, utilidad, reparto y caja son visibles solo para roles autorizados. La UX debe mostrar resumen/lista primero y detalle despues de seleccionar.
 
 ## 12. Flujo Notificaciones
 
@@ -300,6 +308,24 @@ flowchart TD
 ```
 
 Regla: el modo tsunami es opcional y se usa solo en recepcion/taller cuando se requiere maxima atencion. No debe sonar infinitamente ni repetirse por notificaciones antiguas.
+
+## 12.0.1 Flujo Recordatorios Insistentes
+
+```mermaid
+flowchart TD
+  A["Notificacion operativa critica creada"] --> B["Primera alerta inmediata"]
+  B --> C{"Sigue no leida despues de 2h"}
+  C -->|Si| D["Crear RECORDATORIO_OPERATIVO suave"]
+  C -->|No| E["No insistir"]
+  D --> F{"Prioridad alta/urgente y sigue pendiente despues de 3h"}
+  F -->|Si| G["Crear RECORDATORIO_OPERATIVO fuerte"]
+  F -->|No| H["No crear duplicados"]
+  G --> I["Mantener accion_url original"]
+  D --> I
+  I --> J["Frontend muestra alerta visual; sonido fuerte/tsunami si usuario lo activo"]
+```
+
+Regla: los recordatorios se limitan a familias operativas criticas como post escritura pendiente, nueva lectura requerida, correccion tecnica, cliente volvio por DTC, pago bloqueando entrega, archivo portal sin revisar y bitacora urgente. No se generan duplicados infinitos.
 
 ## 12.1 Flujo Notificaciones Accionables
 

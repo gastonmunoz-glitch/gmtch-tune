@@ -71,6 +71,16 @@ const Notificacion = sequelize.define(
       defaultValue: {},
     },
 
+    recordatorio_de_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    recordatorio_nivel: {
+      type: DataTypes.STRING(30),
+      allowNull: true,
+    },
+
     leida: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

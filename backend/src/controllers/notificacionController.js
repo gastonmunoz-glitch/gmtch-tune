@@ -14,7 +14,9 @@ const prepararTablaNotificaciones = async () => {
       ADD COLUMN IF NOT EXISTS accion_tipo VARCHAR(80),
       ADD COLUMN IF NOT EXISTS entidad_tipo VARCHAR(80),
       ADD COLUMN IF NOT EXISTS entidad_id VARCHAR(80),
-      ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb
+      ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS recordatorio_de_id INTEGER,
+      ADD COLUMN IF NOT EXISTS recordatorio_nivel VARCHAR(30)
   `);
   await sequelize.query(`
     UPDATE notificaciones
@@ -170,6 +172,115 @@ const whereVisiblesParaUsuario = (req) => {
   };
 };
 
+const TIPOS_INSISTENTES = [
+  "POST_ESCRITURA_PENDIENTE",
+  "PORTAL_FILE_NUEVO",
+  "PORTAL_FILE_NUEVA_LECTURA",
+  "PORTAL_FILE_CORRECCION",
+  "CORRECCION_TECNICA_SOLICITADA",
+  "BITACORA_OPERATIVA_PRIORITARIA",
+  "ORDEN_LISTA_ENTREGA",
+  "FILE_REQUIERE_CORRECCION",
+  "FILE_MOD_LISTO",
+  "ORDEN_ASIGNADA_ECU",
+  "FILE_TUNER_ASIGNADO",
+  "FILE_OPERADOR_ECU_ASIGNADO",
+  "FILE_SLAVE_ASIGNADO",
+];
+
+const esTipoInsistente = (tipo) => {
+  const normalizado = limpiarTexto(tipo).toUpperCase();
+  return TIPOS_INSISTENTES.some((item) => normalizado.includes(item));
+};
+
+const esPrioridadAlta = (notificacion, metadata = {}) => {
+  const texto = [
+    notificacion.tipo,
+    notificacion.titulo,
+    notificacion.mensaje,
+    metadata.prioridad,
+    metadata.severidad,
+    metadata.recordatorio_nivel,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toUpperCase();
+
+  return (
+    texto.includes("URGENTE") ||
+    texto.includes("CRITICA") ||
+    texto.includes("CRÍTICA") ||
+    texto.includes("ALTA") ||
+    texto.includes("REQUIERE_CORRECCION") ||
+    texto.includes("CORRECCION") ||
+    texto.includes("PAGO") ||
+    texto.includes("NUEVA_LECTURA")
+  );
+};
+
+const crearRecordatoriosPendientes = async (req) => {
+  const ahora = new Date();
+  const haceDosHoras = new Date(ahora.getTime() - 2 * 60 * 60 * 1000);
+
+  const pendientes = await Notificacion.findAll({
+    where: {
+      ...whereVisiblesParaUsuario(req),
+      leida: false,
+      createdAt: { [Op.lte]: haceDosHoras },
+      tipo: { [Op.notLike]: "RECORDATORIO_%" },
+    },
+    order: [["createdAt", "ASC"]],
+    limit: 80,
+  });
+
+  for (const notificacion of pendientes) {
+    if (!esTipoInsistente(notificacion.tipo)) continue;
+
+    const metadata = normalizarMetadata(notificacion.metadata);
+    const horas = (ahora.getTime() - new Date(notificacion.createdAt).getTime()) / 36e5;
+    const nivel =
+      horas >= 3 && esPrioridadAlta(notificacion, metadata) ? "FUERTE" : "SUAVE";
+
+    const existente = await Notificacion.findOne({
+      where: {
+        recordatorio_de_id: notificacion.id,
+        recordatorio_nivel: nivel,
+      },
+    });
+
+    if (existente) continue;
+
+    await Notificacion.create({
+      usuarioDestino: notificacion.usuarioDestino,
+      rolDestino: notificacion.rolDestino,
+      tipo: "RECORDATORIO_OPERATIVO",
+      titulo:
+        nivel === "FUERTE"
+          ? "Recordatorio fuerte: accion pendiente"
+          : "Recordatorio operativo",
+      mensaje:
+        nivel === "FUERTE"
+          ? `Sigue pendiente: ${notificacion.titulo}. ${notificacion.mensaje || ""}`.trim()
+          : `Aun pendiente: ${notificacion.titulo}. ${notificacion.mensaje || ""}`.trim(),
+      ordenId: notificacion.ordenId,
+      archivoECUId: notificacion.archivoECUId,
+      accion_url: notificacion.accion_url,
+      accion_tipo: notificacion.accion_tipo,
+      entidad_tipo: notificacion.entidad_tipo,
+      entidad_id: notificacion.entidad_id,
+      metadata: {
+        ...metadata,
+        recordatorio: true,
+        recordatorio_nivel: nivel,
+        notificacion_original_id: notificacion.id,
+        tipo_original: notificacion.tipo,
+      },
+      recordatorio_de_id: notificacion.id,
+      recordatorio_nivel: nivel,
+    });
+  }
+};
+
 const crearNotificacionesInternas = async ({
   usuariosDestino = [],
   rolesDestino = [],
@@ -240,6 +351,7 @@ const crearNotificacionesInternas = async ({
 const obtenerNotificaciones = async (req, res) => {
   try {
     await prepararTablaNotificaciones();
+    await crearRecordatoriosPendientes(req);
 
     const notificaciones = await Notificacion.findAll({
       where: whereVisiblesParaUsuario(req),

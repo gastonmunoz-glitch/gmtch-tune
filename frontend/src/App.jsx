@@ -196,6 +196,14 @@ const obtenerIdNotificacion = (notificacion) =>
 
 const esNotificacionNoLeida = (notificacion) => notificacion && !notificacion.leida;
 
+const esRecordatorioFuerte = (notificacion) => {
+  const metadata = notificacion?.metadata || {};
+  return (
+    String(notificacion?.recordatorio_nivel || metadata.recordatorio_nivel || "")
+      .toUpperCase() === "FUERTE"
+  );
+};
+
 const reproducirSonidoNotificacion = async ({ modo = "normal" } = {}) => {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -335,8 +343,15 @@ function App() {
           mostrarAlertaNotificacion(masReciente);
 
           if (sonidoNotificacionesActivo) {
+            const modoAudio =
+              esRecordatorioFuerte(masReciente) &&
+              ["fuerte", "tsunami"].includes(sonidoNotificacionesModo)
+                ? sonidoNotificacionesModo
+                : esRecordatorioFuerte(masReciente)
+                  ? "fuerte"
+                  : sonidoNotificacionesModo;
             const audioOk = await reproducirSonidoNotificacion({
-              modo: sonidoNotificacionesModo,
+              modo: modoAudio,
             });
 
             if (!audioOk) {
@@ -1382,6 +1397,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     cajaSemana: 0,
     cajaMes: 0,
     trabajosIngresadosHoy: 0,
+    pendientePagoMonto: 0,
+    montoTotalRegistrado: 0,
+    presupuestadoNoPagado: 0,
     totalPagadoMes: 0,
     ticketPromedioMes: 0,
     ordenesActivas: 0,
@@ -1406,6 +1424,12 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     alertasOperativas: [],
     checklistOperativo: [],
     finanzas: null,
+    graficos: {
+      ventas: [],
+      ordenesEstado: [],
+      materialMes: [],
+      ingresosGastos: [],
+    },
     clientes: puedeVerBase ? 0 : "Sin acceso",
     vehiculos: puedeVerBase ? 0 : "Sin acceso",
     ordenes: 0,
@@ -1673,9 +1697,18 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         const fechaPago = parseFecha(orden.fecha_pago);
         const fechaCreacion = parseFecha(orden.createdAt);
         const pagado = montoPagadoOrden(orden);
+        const montoTotal = numero(orden.monto_total);
+        const estadoPago = String(orden.estado_pago || "").toUpperCase();
 
         if (dentroDelDiaLocal(fechaCreacion, hoy)) {
-          acc.trabajosIngresadosHoy += numero(orden.monto_total);
+          acc.trabajosIngresadosHoy += montoTotal;
+        }
+
+        acc.montoTotalRegistrado += montoTotal;
+
+        if (estadoPago !== "PAGADO" && montoTotal > 0) {
+          acc.pendientePagoMonto += montoTotal;
+          acc.presupuestadoNoPagado += montoTotal;
         }
 
         if (!fechaPago || pagado <= 0) return acc;
@@ -1699,9 +1732,23 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         cajaSemana: 0,
         cajaMes: 0,
         trabajosIngresadosHoy: 0,
+        pendientePagoMonto: 0,
+        montoTotalRegistrado: 0,
+        presupuestadoNoPagado: 0,
         totalPagadoMes: 0,
       }
     );
+
+    const ordenesPorEstadoMap = ordenesReales.reduce((acc, orden) => {
+      const estado = String(orden.estado || "SIN_ESTADO").toUpperCase();
+      acc[estado] = (acc[estado] || 0) + 1;
+      return acc;
+    }, {});
+
+    const ordenesEstadoGrafico = Object.entries(ordenesPorEstadoMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([label, value]) => ({ label, value }));
 
     const entregadasHoy = ordenesReales.filter((orden) => {
       const estado = String(orden.estado || "").toUpperCase();
@@ -2154,6 +2201,41 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       return b.horas - a.horas;
     });
 
+    const graficos = {
+      ventas: [
+        { label: "Pagado mes", value: comercial.totalPagadoMes, color: "bg-green-600" },
+        { label: "Pendiente", value: comercial.pendientePagoMonto, color: "bg-yellow-500" },
+      ],
+      ordenesEstado: ordenesEstadoGrafico.map((item) => ({
+        ...item,
+        color: "bg-blue-600",
+      })),
+      materialMes: [
+        {
+          label: "Kg reales",
+          value: Number(finanzas?.material_mes?.kg_reales || 0),
+          color: "bg-slate-700",
+        },
+        {
+          label: "Kg esperados",
+          value: Number(finanzas?.material_mes?.kg_esperados || 0),
+          color: "bg-blue-500",
+        },
+      ],
+      ingresosGastos: [
+        {
+          label: "Ingresos semana",
+          value: Number(finanzas?.ingresos_total || 0),
+          color: "bg-green-600",
+        },
+        {
+          label: "Egresos semana",
+          value: Number(finanzas?.egresos_total || 0) + Number(finanzas?.sueldos_total || 0),
+          color: "bg-red-600",
+        },
+      ],
+    };
+
     return {
       ...comercial,
       ticketPromedioMes: pagadasMes.length
@@ -2201,6 +2283,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         crearItemChecklist("Entregadas hoy", entregadasHoy),
       ],
       finanzas,
+      graficos,
       clientes: puedeVerBase ? clientesReales.length : "Sin acceso",
       vehiculos: puedeVerBase ? vehiculosReales.length : "Sin acceso",
       ordenes: ordenesReales.length,
@@ -2429,27 +2512,43 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       <AccionesRapidasCentroMando usuario={usuario} />
 
       {mostrarComercial ? (
-        <DashboardSection title="Comercial">
-          <StatCard label="Caja hoy" val={formatoCLP(stats.cajaHoy)} color="border-black bg-black text-white" />
-          <StatCard label="Caja semana" val={formatoCLP(stats.cajaSemana)} color="border-blue-500" />
-          <StatCard label="Caja mes" val={formatoCLP(stats.cajaMes)} color="border-blue-500" />
-          <StatCard label="Trabajos ingresados hoy" val={formatoCLP(stats.trabajosIngresadosHoy)} color="border-yellow-500" />
+        <DashboardSection title="Finanzas OWNER/ADMIN">
+          <StatCard label="Ingresos pagados hoy" val={formatoCLP(stats.cajaHoy)} color="border-black bg-black text-white" />
+          <StatCard label="Ingresos pagados semana" val={formatoCLP(stats.cajaSemana)} color="border-blue-500" />
+          <StatCard label="Ingresos pagados mes" val={formatoCLP(stats.cajaMes)} color="border-blue-500" />
+          <StatCard label="Pendiente de pago" val={formatoCLP(stats.pendientePagoMonto)} color="border-yellow-500" />
+          <StatCard label="Presupuestado no pagado" val={formatoCLP(stats.presupuestadoNoPagado)} color="border-yellow-500" />
+          <StatCard label="Monto total registrado" val={formatoCLP(stats.montoTotalRegistrado)} color="border-slate-500" />
+          <StatCard label="Presupuestado hoy" val={formatoCLP(stats.trabajosIngresadosHoy)} color="border-yellow-500" />
           <StatCard label="Total pagado mes" val={formatoCLP(stats.totalPagadoMes)} color="border-green-500" />
           <StatCard label="Ticket promedio mes" val={formatoCLP(stats.ticketPromedioMes)} color="border-green-500" />
           <StatCard label="Pagos por revisar" val={stats.finanzas?.pagos_pendientes ?? 0} color="border-red-500" />
           <StatCard label="Utilidad semana estimada" val={formatoCLP(stats.finanzas?.utilidad_distribuible)} color="border-emerald-500" />
           <StatCard label="Fondo reserva" val={formatoCLP(stats.finanzas?.fondo_reserva_saldo)} color="border-blue-500" />
-          <StatCard
-            label="Material mes"
-            val={`${Number(stats.finanzas?.material_mes?.kg_reales || 0).toLocaleString("es-CL")} kg / ${formatoCLP(stats.finanzas?.material_mes?.valor_estimado)}`}
-            color="border-slate-500"
-          />
         </DashboardSection>
       ) : (
         <section className="border-4 border-black bg-white p-4 rounded-2xl text-xs font-black uppercase text-gray-500">
           Métricas comerciales ocultas para este rol.
         </section>
       )}
+
+      {mostrarComercial && (
+        <DashboardSection title="Material recuperado OWNER/ADMIN">
+          <StatCard
+            label="Material mes"
+            val={`${Number(stats.finanzas?.material_mes?.kg_reales || 0).toLocaleString("es-CL")} kg / ${formatoCLP(stats.finanzas?.material_mes?.valor_estimado)}`}
+            color="border-slate-500"
+          />
+          <StatCard label="Valor real vendido" val={formatoCLP(stats.finanzas?.material_mes?.valor_real_vendido)} color="border-emerald-500" />
+          <StatCard label="Diferencia kg" val={`${Number(stats.finanzas?.material_mes?.diferencia_kg || 0).toLocaleString("es-CL")} kg`} color="border-yellow-500" />
+        </DashboardSection>
+      )}
+
+      <DashboardGraficos
+        mostrarComercial={mostrarComercial}
+        graficos={stats.graficos}
+        formatoCLP={formatoCLP}
+      />
 
       {mostrarOperacion && (
         <DashboardSection title="Operación">
@@ -3201,6 +3300,75 @@ const DashboardSection = ({ title, children }) => (
     </div>
   </section>
 );
+
+const DashboardGraficos = ({ mostrarComercial, graficos = {}, formatoCLP }) => (
+  <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+    {mostrarComercial && (
+      <>
+        <BarChartCard
+          title="Ingresos pagados vs pendientes"
+          items={graficos.ventas || []}
+          formatValue={formatoCLP}
+        />
+        <BarChartCard
+          title="Ingresos vs egresos semana"
+          items={graficos.ingresosGastos || []}
+          formatValue={formatoCLP}
+        />
+        <BarChartCard
+          title="Material recuperado mes"
+          items={graficos.materialMes || []}
+          formatValue={(valor) =>
+            `${Number(valor || 0).toLocaleString("es-CL", {
+              maximumFractionDigits: 3,
+            })} kg`
+          }
+        />
+      </>
+    )}
+    <BarChartCard
+      title="Ordenes por estado"
+      items={graficos.ordenesEstado || []}
+      formatValue={(valor) => Number(valor || 0).toLocaleString("es-CL")}
+    />
+  </section>
+);
+
+const BarChartCard = ({ title, items = [], formatValue }) => {
+  const max = Math.max(...items.map((item) => Number(item.value || 0)), 1);
+
+  return (
+    <section className="rounded-2xl border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <h3 className="text-xs font-black uppercase tracking-[0.16em] text-gray-500">
+        {title}
+      </h3>
+      <div className="mt-4 space-y-3">
+        {items.filter((item) => item.value !== undefined).map((item) => {
+          const width = Math.max(6, (Number(item.value || 0) / max) * 100);
+          return (
+            <div key={item.label}>
+              <div className="mb-1 flex items-center justify-between gap-3 text-[10px] font-black uppercase">
+                <span className="truncate">{item.label}</span>
+                <span>{formatValue ? formatValue(item.value) : item.value}</span>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full border-2 border-black bg-slate-100">
+                <div
+                  className={`h-full ${item.color || "bg-blue-600"}`}
+                  style={{ width: `${width}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+        {!items.length && (
+          <p className="text-xs font-black uppercase text-gray-400">
+            Sin datos suficientes para graficar.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+};
 
 const StatCard = ({ label, val, color }) => (
   <div
