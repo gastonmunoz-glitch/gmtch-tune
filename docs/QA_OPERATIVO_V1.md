@@ -13,6 +13,16 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Portal admin interno carga en `/portal-admin` solo para rol autorizado.
 - Notificaciones cargan contador y ultimas alertas.
 
+## 1.1 QA Post Reset Operativo
+
+- Ejecutar primero `node scripts/reset-operacion.js` en DRY_RUN y revisar conteos.
+- Confirmar que `Usuarios` no se borra.
+- Confirmar si `PortalCuenta` y `PortalUsuario` se conservan o si se usara `RESET_PORTAL_ACCOUNTS=true`.
+- Despues del reset real, confirmar dashboard sin clientes, vehiculos, ordenes, fotos, File Service ni finanzas demo.
+- Confirmar que `gaston` puede iniciar sesion.
+- Crear cliente, vehiculo y orden real de prueba controlada.
+- Ejecutar `node scripts/smoke-prod.js` con token OWNER.
+
 ## 2. QA Dashboard / Centro de Mando
 
 - Semaforo operativo muestra Operacion normal, Atencion requerida o Bloqueo operativo segun datos.
