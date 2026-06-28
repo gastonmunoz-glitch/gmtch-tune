@@ -75,6 +75,41 @@ const alertaClase = (alerta) => {
   return "bg-green-600 text-white border-green-900";
 };
 
+const porcentajeSeguro = (valor, total) => {
+  const base = Number(total || 0);
+  if (!base || base <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((Number(valor || 0) / base) * 100)));
+};
+
+const periodoSemanaTexto = (inicio, fin) => `${inicio || inicioSemana()} / ${fin || finSemana(inicio)}`;
+
+const estadoFinanciero = (resumen) => {
+  const pendiente = Number(resumen?.pagos_pendientes || 0);
+  const utilidad = Number(resumen?.utilidad_distribuible || 0);
+
+  if (utilidad < 0) {
+    return {
+      label: "Atencion financiera",
+      detalle: "La utilidad distribuible semanal esta negativa. Revisar gastos y sueldos.",
+      className: "border-red-600 bg-red-50 text-red-900",
+    };
+  }
+
+  if (pendiente > 0) {
+    return {
+      label: "Cobranza pendiente",
+      detalle: "Hay comprobantes o pagos por revisar antes de considerar caja cerrada.",
+      className: "border-yellow-500 bg-yellow-50 text-yellow-900",
+    };
+  }
+
+  return {
+    label: "Finanzas en orden",
+    detalle: "Caja pagada, gastos y fondo reserva sin alertas visibles.",
+    className: "border-emerald-600 bg-emerald-50 text-emerald-900",
+  };
+};
+
 function FinanzasPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabQuery = searchParams.get("tab") || "resumen";
@@ -113,7 +148,9 @@ function FinanzasPage() {
   });
   const [sueldoForm, setSueldoForm] = useState({
     trabajador_nombre: TRABAJADORES[0],
-    periodo: loteActual(),
+    semana_inicio: inicioSemana(),
+    semana_fin: finSemana(inicioSemana()),
+    periodo: periodoSemanaTexto(inicioSemana(), finSemana(inicioSemana())),
     monto: "",
     tipo_pago: "SUELDO",
     estado: "PENDIENTE",
@@ -310,19 +347,25 @@ function FinanzasPage() {
     try {
       setError("");
       setMensaje("");
+      const periodoSemana = periodoSemanaTexto(sueldoForm.semana_inicio, sueldoForm.semana_fin);
       await api.post("/finanzas/movimientos", {
         tipo: "EGRESO",
         categoria: "SUELDO",
         monto: sueldoForm.monto,
-        descripcion: `${sueldoForm.tipo_pago}: ${sueldoForm.descripcion || sueldoForm.trabajador_nombre}`,
+        descripcion: `${sueldoForm.tipo_pago} semana ${periodoSemana}: ${sueldoForm.descripcion || sueldoForm.trabajador_nombre}`,
         fecha: sueldoForm.fecha,
         metodo_pago: "TRANSFERENCIA",
         trabajador_nombre: sueldoForm.trabajador_nombre,
-        periodo: sueldoForm.periodo,
+        periodo: periodoSemana,
         estado: sueldoForm.estado,
       });
-      setMensaje("Pago trabajador registrado.");
-      setSueldoForm((actual) => ({ ...actual, monto: "", descripcion: "" }));
+      setMensaje("Pago semanal trabajador registrado.");
+      setSueldoForm((actual) => ({
+        ...actual,
+        periodo: periodoSemana,
+        monto: "",
+        descripcion: "",
+      }));
       await cargarTodo();
     } catch (err) {
       setError(err.response?.data?.error || "No se pudo registrar sueldo/pago.");
@@ -493,6 +536,11 @@ function FinanzasPage() {
     }
   };
 
+  const semaforo = estadoFinanciero(resumen);
+  const totalSemana = Number(resumen?.ingresos_total || 0) + Number(resumen?.egresos_total || 0) + Number(resumen?.sueldos_total || 0);
+  const totalCaja = Number(resumen?.ingresos_total || 0) + Number(resumen?.pagos_pendientes || 0);
+  const materialMes = resumen?.material_mes || {};
+
   return (
     <div className="space-y-6">
       <div className="bg-black p-6 text-white border-b-8 border-blue-600">
@@ -525,16 +573,66 @@ function FinanzasPage() {
 
       {tab === "resumen" && (
         <section className="space-y-5">
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-            <Metric label="Ingresos semana" value={formatearMonto(resumen?.ingresos_total)} />
-            <Metric label="Egresos semana" value={formatearMonto(resumen?.egresos_total)} />
-            <Metric label="Sueldos semana" value={formatearMonto(resumen?.sueldos_total)} />
-            <Metric label="Fondo reserva" value={formatearMonto(resumen?.fondo_reserva_saldo)} />
-            <Metric label="Utilidad distribuible" value={formatearMonto(resumen?.utilidad_distribuible)} />
-            <Metric label="Reparto estimado x3" value={formatearMonto(resumen?.reparto_estimado_3)} />
-            <Metric label="Pagos pendientes" value={resumen?.pagos_pendientes ?? 0} />
-            <Metric label="Material mes" value={formatearKg(resumen?.material_mes?.kg_reales)} />
+          <section className={`border-4 p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] ${semaforo.className}`}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] opacity-70">
+                  Semaforo financiero
+                </p>
+                <h2 className="mt-2 text-3xl font-black uppercase">{semaforo.label}</h2>
+                <p className="mt-2 max-w-3xl text-xs font-bold uppercase leading-relaxed">
+                  {semaforo.detalle}
+                </p>
+              </div>
+              <div className="border-2 border-current bg-white/60 px-4 py-3 text-xs font-black uppercase">
+                Semana {formatearFecha(semanaInicio)} - {formatearFecha(semanaFin)}
+              </div>
+            </div>
+          </section>
+
+          <section className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <ExecutiveMetric label="Dinero recibido semana" value={formatearMonto(resumen?.ingresos_total)} help="Pagado: dinero realmente recibido." tone="black" />
+            <ExecutiveMetric label="Pendiente de pago" value={resumen?.pagos_pendientes ?? 0} help="Pendiente: trabajos con monto registrado, pero sin pago confirmado." tone="yellow" />
+            <ExecutiveMetric label="Gastos semana" value={formatearMonto(resumen?.egresos_total)} help="Salidas operativas registradas en la semana." tone="slate" />
+            <ExecutiveMetric label="Sueldos semana" value={formatearMonto(resumen?.sueldos_total)} help="Pagos internos controlados semanalmente." tone="blue" />
+            <ExecutiveMetric label="Fondo reserva" value={formatearMonto(resumen?.fondo_reserva_saldo)} help="Fondo reserva: dinero separado antes de repartir utilidad." tone="emerald" />
+            <ExecutiveMetric label="Utilidad estimada" value={formatearMonto(resumen?.utilidad_distribuible)} help="Estimacion operativa, no contabilidad formal." tone="emerald" />
+            <ExecutiveMetric label="Reparto estimado en 3" value={formatearMonto(resumen?.reparto_estimado_3)} help="Base sugerida para cierre semanal." tone="blue" />
+            <ExecutiveMetric label="Material recuperado mes" value={formatearKg(materialMes?.kg_reales)} help="Control administrativo de kg acumulados por lote." tone="slate" />
+          </section>
+
+          <section className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MicroChart title="Ingresos vs gastos" items={[
+              ["Ingresos", resumen?.ingresos_total || 0, "bg-emerald-500"],
+              ["Gastos", resumen?.egresos_total || 0, "bg-red-500"],
+              ["Sueldos", resumen?.sueldos_total || 0, "bg-blue-500"],
+            ]} total={totalSemana} format={formatearMonto} />
+            <MicroChart title="Pagado vs pendiente" items={[
+              ["Pagado", resumen?.ingresos_total || 0, "bg-emerald-500"],
+              ["Pendiente", resumen?.pagos_pendientes || 0, "bg-yellow-500"],
+            ]} total={totalCaja} />
+            <MicroChart title="Fondo reserva" items={[
+              ["Reserva", resumen?.fondo_reserva_saldo || 0, "bg-blue-600"],
+              ["Aporte sugerido", resumen?.aporte_fondo_reserva || 0, "bg-sky-300"],
+            ]} total={Number(resumen?.fondo_reserva_saldo || 0) + Number(resumen?.aporte_fondo_reserva || 0)} format={formatearMonto} />
+            <MicroChart title="Material mes" items={[
+              ["Kg real", materialMes?.kg_reales || 0, "bg-slate-800"],
+              ["Kg esperado", materialMes?.kg_esperados || 0, "bg-blue-500"],
+            ]} total={Number(materialMes?.kg_reales || 0) + Number(materialMes?.kg_esperados || 0)} format={formatearKg} />
+          </section>
+
+          <section className="grid grid-cols-1 gap-3 md:grid-cols-5">
+            <QuickFinanceButton label="Crear ingreso" onClick={() => cambiarTab("ingresos")} />
+            <QuickFinanceButton label="Registrar gasto" onClick={() => cambiarTab("gastos")} />
+            <QuickFinanceButton label="Registrar sueldo semanal" onClick={() => cambiarTab("sueldos")} />
+            <QuickFinanceButton label="Material recuperado" onClick={() => cambiarTab("material")} />
+            <QuickFinanceButton label="Subir comprobante" onClick={() => cambiarTab("comprobantes")} />
+          </section>
+
+          <div className="border-2 border-yellow-500 bg-yellow-50 p-3 text-[11px] font-black uppercase text-yellow-900">
+            Datos actuales pueden incluir pruebas hasta ejecutar reset operativo.
           </div>
+
           <Panel title="Rango semanal">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <Input label="Semana inicio" type="date" value={semanaInicio} onChange={(v) => {
@@ -575,21 +673,30 @@ function FinanzasPage() {
       {tab === "sueldos" && (
         <Panel title="Sueldos / pagos trabajadores">
           <p className="mb-4 border-2 border-yellow-500 bg-yellow-50 p-3 text-xs font-black uppercase text-yellow-900">
-            Registro interno de control. Validar con contador si se requiere liquidacion formal.
+            Los pagos internos se controlan semanalmente. Validar formalizacion con contador si corresponde.
           </p>
+          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Metric label="Semana seleccionada" value={`${formatearFecha(semanaInicio)} - ${formatearFecha(semanaFin)}`} />
+            <Metric label="Sueldos semana" value={formatearMonto(resumen?.sueldos_total)} />
+            <Metric label="Pagos registrados" value={movimientos.filter((m) => m.categoria === "SUELDO").length} />
+          </div>
           <details className="mb-4 border-2 border-black bg-slate-50 p-3">
             <summary className="cursor-pointer text-xs font-black uppercase">
-              Crear nuevo pago trabajador
+              Registrar sueldo semanal
             </summary>
             <form onSubmit={crearSueldo} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
               <Select label="Trabajador" value={sueldoForm.trabajador_nombre} onChange={(v) => setSueldoForm((a) => ({ ...a, trabajador_nombre: v }))} options={TRABAJADORES.map((v) => [v, v])} />
               <Select label="Tipo" value={sueldoForm.tipo_pago} onChange={(v) => setSueldoForm((a) => ({ ...a, tipo_pago: v }))} options={["SUELDO", "ADELANTO", "BONO", "COMISION", "OTRO"].map((v) => [v, v])} />
               <Select label="Estado" value={sueldoForm.estado} onChange={(v) => setSueldoForm((a) => ({ ...a, estado: v }))} options={["PENDIENTE", "PAGADO"].map((v) => [v, v])} />
-              <Input label="Periodo" type="month" value={sueldoForm.periodo} onChange={(v) => setSueldoForm((a) => ({ ...a, periodo: v }))} />
+              <Input label="Semana inicio" type="date" value={sueldoForm.semana_inicio} onChange={(v) => setSueldoForm((a) => ({ ...a, semana_inicio: v, semana_fin: finSemana(v), periodo: periodoSemanaTexto(v, finSemana(v)) }))} />
+              <Input label="Semana fin" type="date" value={sueldoForm.semana_fin} onChange={(v) => setSueldoForm((a) => ({ ...a, semana_fin: v, periodo: periodoSemanaTexto(a.semana_inicio, v) }))} />
               <Input label="Fecha pago/control" type="date" value={sueldoForm.fecha} onChange={(v) => setSueldoForm((a) => ({ ...a, fecha: v }))} />
               <Input label="Monto" type="number" value={sueldoForm.monto} onChange={(v) => setSueldoForm((a) => ({ ...a, monto: v }))} />
               <Input label="Observacion" value={sueldoForm.descripcion} onChange={(v) => setSueldoForm((a) => ({ ...a, descripcion: v }))} className="md:col-span-2" />
-              <button className="self-end bg-black px-4 py-3 text-xs font-black uppercase text-white" type="submit">Registrar pago</button>
+              <div className="border-2 border-blue-600 bg-blue-50 p-3 text-[10px] font-black uppercase text-blue-900">
+                Periodo guardado: {periodoSemanaTexto(sueldoForm.semana_inicio, sueldoForm.semana_fin)}
+              </div>
+              <button className="self-end bg-black px-4 py-3 text-xs font-black uppercase text-white" type="submit">Registrar pago semanal</button>
             </form>
           </details>
           <ListaMovimientos movimientos={movimientos.filter((m) => m.categoria === "SUELDO")} />
@@ -721,6 +828,58 @@ const Metric = ({ label, value }) => (
   </div>
 );
 
+const ExecutiveMetric = ({ label, value, help, tone = "slate" }) => {
+  const tones = {
+    black: "border-black bg-black text-white",
+    yellow: "border-yellow-500 bg-yellow-50 text-yellow-900",
+    slate: "border-slate-700 bg-slate-50 text-slate-950",
+    blue: "border-blue-600 bg-blue-50 text-blue-950",
+    emerald: "border-emerald-600 bg-emerald-50 text-emerald-950",
+  };
+
+  return (
+    <div className={`border-4 p-4 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] ${tones[tone] || tones.slate}`}>
+      <p className="text-[10px] font-black uppercase opacity-70">{label}</p>
+      <p className="mt-2 text-2xl font-black uppercase">{value}</p>
+      <p className="mt-2 text-[10px] font-bold uppercase leading-relaxed opacity-75">
+        {help}
+      </p>
+    </div>
+  );
+};
+
+const MicroChart = ({ title, items, total, format = (v) => Number(v || 0).toLocaleString("es-CL") }) => (
+  <div className="border-4 border-black bg-white p-4 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)]">
+    <p className="text-[10px] font-black uppercase text-gray-500">{title}</p>
+    <div className="mt-3 space-y-3">
+      {items.map(([label, value, color]) => (
+        <div key={label}>
+          <div className="mb-1 flex items-center justify-between gap-3 text-[10px] font-black uppercase text-gray-500">
+            <span>{label}</span>
+            <span>{format(value)}</span>
+          </div>
+          <div className="h-3 overflow-hidden border-2 border-black bg-slate-100">
+            <div
+              className={`h-full ${color}`}
+              style={{ width: `${porcentajeSeguro(value, total)}%` }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const QuickFinanceButton = ({ label, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="border-2 border-black bg-slate-950 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-blue-700"
+  >
+    {label}
+  </button>
+);
+
 const Input = ({ label, value, onChange, type = "text", className = "" }) => (
   <label className={`text-[10px] font-black uppercase text-gray-500 ${className}`}>
     {label}
@@ -837,7 +996,7 @@ const ListaMovimientos = ({ movimientos }) => (
       <MiniRow
         key={m.id}
         title={`${m.tipo} / ${m.categoria} / ${formatearMonto(m.monto)}`}
-        detail={`${formatearFecha(m.fecha)} - ${m.trabajador_nombre || m.proveedor || m.descripcion || "Sin detalle"}`}
+        detail={`${m.periodo ? `Semana ${m.periodo} - ` : ""}${formatearFecha(m.fecha)} - ${m.trabajador_nombre || m.proveedor || m.descripcion || "Sin detalle"} - ${m.estado || "REGISTRADO"}`}
       />
     ))}
     {!movimientos.length && (
@@ -880,133 +1039,228 @@ const MaterialTab = ({
   venderMaterial,
   registrarIngresoMaterial,
   cerrarLote,
-}) => (
-  <div className="space-y-5">
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-      <Metric label="Kg acumulados mes" value={formatearKg(resumenLote?.kg_reales)} />
-      <Metric label="Valor estimado mes" value={formatearMonto(resumenLote?.valor_estimado)} />
-      <Metric label="Valor real vendido" value={formatearMonto(resumenLote?.valor_real_vendido)} />
-      <Metric label="Diferencia" value={`${formatearKg(resumenLote?.diferencia_kg)} / ${resumenLote?.diferencia_porcentaje ?? 0}%`} />
-    </div>
+}) => {
+  const [seleccionId, setSeleccionId] = useState(materialIdQuery || "");
+  const seleccionado =
+    registros.find((registro) => String(registro.id) === String(seleccionId)) || null;
+  const venta = seleccionado ? ventaMaterial[seleccionado.id] || {} : {};
+  const fueraRango = registros.filter((registro) =>
+    ["ALERTA", "REVISAR"].includes(String(registro.alerta_rango || "").toUpperCase())
+  );
 
-    <details className="border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-      <summary className="cursor-pointer text-xs font-black uppercase">
-        Crear registro / revisar cierre mensual
-      </summary>
-      <section className="mt-4 grid grid-cols-1 gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <Panel title="Registrar material recuperado">
-        <p className="mb-3 text-xs font-bold uppercase text-gray-500">
-          Registro administrativo/contable. No contiene instrucciones tecnicas.
-        </p>
-        <form onSubmit={onSubmit} className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <label className="text-[10px] font-black uppercase text-gray-500 md:col-span-2">
-            Orden asociada
-            <select className={inputClass} value={form.ordenId} onChange={(e) => seleccionarOrden(e.target.value)}>
-              <option value="">Sin orden asociada</option>
-              {ordenes.map((orden) => (
-                <option key={orden.id} value={orden.id}>
-                  Orden #{orden.id} - {orden.patente || "S/P"} - {orden.marca} {orden.modelo}
-                </option>
-              ))}
-            </select>
-          </label>
-          {ordenSeleccionada && (
-            <div className="border-2 border-blue-600 bg-blue-50 p-3 text-[10px] font-bold uppercase text-blue-900 md:col-span-2">
-              Cliente: {ordenSeleccionada.cliente_nombre || "No registrado"} / Estado: {ordenSeleccionada.estado || "Pendiente"}
-            </div>
-          )}
-          <Input label="Fecha" type="date" value={form.fecha} onChange={(v) => setForm((a) => ({ ...a, fecha: v }))} />
-          <Input label="Lote automatico" value={loteDesdeFecha(form.fecha)} onChange={() => {}} />
-          <Input label="Marca" value={form.marca} onChange={(v) => setForm((a) => ({ ...a, marca: v }))} />
-          <Input label="Modelo" value={form.modelo} onChange={(v) => setForm((a) => ({ ...a, modelo: v }))} />
-          <Input label="Motor opcional" value={form.motor} onChange={(v) => setForm((a) => ({ ...a, motor: v }))} />
-          <Input label="Ano" value={form.anio} onChange={(v) => setForm((a) => ({ ...a, anio: v }))} />
-          <Input label="Patente" value={form.patente} onChange={(v) => setForm((a) => ({ ...a, patente: v }))} />
-          <Select label="Tipo material" value={form.tipo_material} onChange={(v) => setForm((a) => ({ ...a, tipo_material: v }))} options={[["LOZA_DPF", "LOZA_DPF"], ["OTRO", "OTRO"]]} />
-          <Input label="Kilos" type="number" value={form.kilos} onChange={(v) => setForm((a) => ({ ...a, kilos: v }))} />
-          {puedeVerValores && (
-            <Input label="Precio estimado kg" type="number" value={form.precio_estimado_kg} onChange={(v) => setForm((a) => ({ ...a, precio_estimado_kg: v }))} />
-          )}
-          <Input label="Observacion" value={form.observacion} onChange={(v) => setForm((a) => ({ ...a, observacion: v }))} className="md:col-span-2" />
-          <button className="bg-black px-4 py-3 text-xs font-black uppercase text-white md:col-span-2" type="submit">Registrar material</button>
-        </form>
-        </Panel>
+  useEffect(() => {
+    if (materialIdQuery) setSeleccionId(materialIdQuery);
+  }, [materialIdQuery]);
 
-        <Panel title="Cierre mensual material">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Input label="Lote" type="month" value={loteMes} onChange={setLoteMes} />
-          <Metric label="Estado lote" value={resumenLote?.estado_lote || "ABIERTO"} />
-          <Metric label="Kg esperados" value={formatearKg(resumenLote?.kg_esperados)} />
-          <Metric label="Kg reales" value={formatearKg(resumenLote?.kg_reales)} />
+  return (
+    <div className="space-y-5">
+      <section className="border-4 border-black bg-slate-950 p-5 text-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-300">
+              Lote mensual {loteMes}
+            </p>
+            <h2 className="mt-2 text-3xl font-black uppercase">
+              Material recuperado
+            </h2>
+            <p className="mt-2 max-w-3xl text-xs font-bold uppercase text-slate-300">
+              Control administrativo de kg acumulados por lote, estadisticas por modelo y alertas de diferencia.
+            </p>
+          </div>
+          <div className={`border-2 px-4 py-3 text-xs font-black uppercase ${alertaClase(resumenLote?.alerta_rango || "OK")}`}>
+            Alerta lote: {resumenLote?.alerta_rango || "OK"}
+          </div>
         </div>
-        {puedeCerrarLote && (
-          <button type="button" onClick={cerrarLote} className="mt-4 bg-blue-700 px-4 py-3 text-xs font-black uppercase text-white">
-            Cerrar lote mensual
-          </button>
-        )}
-        </Panel>
-      </section>
-    </details>
 
-    <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-      <Panel title="Registros historicos">
-        <div className="space-y-3">
-          {registros.map((registro) => {
-            const destacado = String(registro.id) === String(materialIdQuery);
-            const venta = ventaMaterial[registro.id] || {};
-            return (
-              <details key={registro.id} id={`material-${registro.id}`} className={`border-2 p-4 ${destacado ? "border-blue-600 bg-blue-50" : "border-black bg-white"}`}>
-                <summary className="cursor-pointer list-none">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <ExecutiveMetric label="Kg acumulados" value={formatearKg(resumenLote?.kg_reales)} help="Total administrativo del lote actual." tone="black" />
+          <ExecutiveMetric label="Kg esperados" value={formatearKg(resumenLote?.kg_esperados)} help="Referencia historica por modelo." tone="blue" />
+          <ExecutiveMetric label="Diferencia kg" value={formatearKg(resumenLote?.diferencia_kg)} help={`Diferencia ${resumenLote?.diferencia_porcentaje ?? 0}% vs esperado.`} tone={Math.abs(Number(resumenLote?.diferencia_porcentaje || 0)) > 20 ? "yellow" : "emerald"} />
+          <ExecutiveMetric label="Valor vendido" value={puedeVerValores ? formatearMonto(resumenLote?.valor_real_vendido) : "Oculto"} help="Visible solo para OWNER/ADMIN." tone="slate" />
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <QuickFinanceButton label="Registrar material" onClick={() => document.getElementById("form-material-recuperado")?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+        <QuickFinanceButton label="Marcar vendido" onClick={() => seleccionado && document.getElementById("detalle-material-seleccionado")?.scrollIntoView({ behavior: "smooth", block: "center" })} />
+        <QuickFinanceButton label="Registrar ingreso por venta" onClick={() => seleccionado && registrarIngresoMaterial(seleccionado)} />
+        <QuickFinanceButton label="Ver estadisticas por modelo" onClick={() => document.getElementById("ranking-material-modelo")?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+      </section>
+
+      <details id="form-material-recuperado" className="border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+        <summary className="cursor-pointer text-xs font-black uppercase">
+          Registrar material / cierre mensual
+        </summary>
+        <section className="mt-4 grid grid-cols-1 gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+          <Panel title="Registrar material recuperado">
+            <p className="mb-3 text-xs font-bold uppercase text-gray-500">
+              Registro administrativo. No contiene instrucciones tecnicas de intervencion.
+            </p>
+            <form onSubmit={onSubmit} className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="text-[10px] font-black uppercase text-gray-500 md:col-span-2">
+                Orden asociada
+                <select className={inputClass} value={form.ordenId} onChange={(e) => seleccionarOrden(e.target.value)}>
+                  <option value="">Sin orden asociada</option>
+                  {ordenes.map((orden) => (
+                    <option key={orden.id} value={orden.id}>
+                      Orden #{orden.id} - {orden.patente || "S/P"} - {orden.marca} {orden.modelo}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {ordenSeleccionada && (
+                <div className="border-2 border-blue-600 bg-blue-50 p-3 text-[10px] font-bold uppercase text-blue-900 md:col-span-2">
+                  Cliente: {ordenSeleccionada.cliente_nombre || "No registrado"} / Estado: {ordenSeleccionada.estado || "Pendiente"}
+                </div>
+              )}
+              <Input label="Fecha" type="date" value={form.fecha} onChange={(v) => setForm((a) => ({ ...a, fecha: v }))} />
+              <Input label="Lote automatico" value={loteDesdeFecha(form.fecha)} onChange={() => {}} />
+              <Input label="Marca" value={form.marca} onChange={(v) => setForm((a) => ({ ...a, marca: v }))} />
+              <Input label="Modelo" value={form.modelo} onChange={(v) => setForm((a) => ({ ...a, modelo: v }))} />
+              <Input label="Motor opcional" value={form.motor} onChange={(v) => setForm((a) => ({ ...a, motor: v }))} />
+              <Input label="Ano" value={form.anio} onChange={(v) => setForm((a) => ({ ...a, anio: v }))} />
+              <Input label="Patente" value={form.patente} onChange={(v) => setForm((a) => ({ ...a, patente: v }))} />
+              <Select label="Tipo material" value={form.tipo_material} onChange={(v) => setForm((a) => ({ ...a, tipo_material: v }))} options={[["LOZA_DPF", "LOZA_DPF"], ["OTRO", "OTRO"]]} />
+              <Input label="Kilos" type="number" value={form.kilos} onChange={(v) => setForm((a) => ({ ...a, kilos: v }))} />
+              {puedeVerValores && (
+                <Input label="Precio estimado kg" type="number" value={form.precio_estimado_kg} onChange={(v) => setForm((a) => ({ ...a, precio_estimado_kg: v }))} />
+              )}
+              <Input label="Observacion" value={form.observacion} onChange={(v) => setForm((a) => ({ ...a, observacion: v }))} className="md:col-span-2" />
+              <button className="bg-black px-4 py-3 text-xs font-black uppercase text-white md:col-span-2" type="submit">Registrar material</button>
+            </form>
+          </Panel>
+
+          <Panel title="Cierre mensual material">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <Input label="Lote" type="month" value={loteMes} onChange={setLoteMes} />
+              <Metric label="Estado lote" value={resumenLote?.estado_lote || "ABIERTO"} />
+              <Metric label="Kg esperados" value={formatearKg(resumenLote?.kg_esperados)} />
+              <Metric label="Kg reales" value={formatearKg(resumenLote?.kg_reales)} />
+            </div>
+            {puedeCerrarLote && (
+              <button type="button" onClick={cerrarLote} className="mt-4 bg-blue-700 px-4 py-3 text-xs font-black uppercase text-white">
+                Cerrar lote mensual
+              </button>
+            )}
+          </Panel>
+        </section>
+      </details>
+
+      {fueraRango.length > 0 && (
+        <section className="border-4 border-yellow-500 bg-yellow-50 p-4">
+          <h3 className="text-sm font-black uppercase text-yellow-900">
+            Registros fuera de rango
+          </h3>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {fueraRango.slice(0, 6).map((registro) => (
+              <button
+                key={registro.id}
+                type="button"
+                onClick={() => setSeleccionId(String(registro.id))}
+                className="border-2 border-yellow-700 bg-white p-3 text-left text-xs font-black uppercase text-yellow-900"
+              >
+                #{registro.id} {registro.marca} {registro.modelo} / {formatearKg(registro.kilos)} / {registro.diferencia_porcentaje ?? 0}%
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <Panel title="Lista compacta de registros">
+          <div className="space-y-2">
+            {registros.map((registro) => (
+              <button
+                key={registro.id}
+                id={`material-${registro.id}`}
+                type="button"
+                onClick={() => setSeleccionId(String(registro.id))}
+                className={`w-full border-2 p-3 text-left ${String(registro.id) === String(seleccionId) ? "border-blue-700 bg-blue-50" : "border-black bg-slate-50"}`}
+              >
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <div className="flex flex-wrap gap-2">
-                      <span className="bg-black px-2 py-1 text-[10px] font-black uppercase text-white">Material #{registro.id}</span>
-                      <span className={`border-2 px-2 py-1 text-[10px] font-black uppercase ${alertaClase(registro.alerta_rango)}`}>{registro.alerta_rango || "OK"}</span>
-                      <span className="border-2 border-black px-2 py-1 text-[10px] font-black uppercase">{registro.estado}</span>
-                    </div>
-                    <h3 className="mt-2 text-xl font-black uppercase">{registro.marca} {registro.modelo} {registro.anio || ""}</h3>
-                    <p className="text-xs font-bold uppercase text-gray-500">{registro.patente || "Sin patente"} / {registro.tipo_material} / {formatearFecha(registro.fecha)}</p>
-                    <p className="mt-2 text-sm font-black uppercase">Kg reales: {formatearKg(registro.kilos)}</p>
-                    <p className="text-xs font-bold uppercase text-gray-500">Promedio historico: {registro.promedio_historico_kg ? formatearKg(registro.promedio_historico_kg) : "Sin historico"} / Diferencia: {registro.diferencia_porcentaje ?? "0"}%</p>
+                    <p className="text-xs font-black uppercase">
+                      Material #{registro.id} / {registro.marca} {registro.modelo}
+                    </p>
+                    <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
+                      {registro.patente || "Sin patente"} / {formatearFecha(registro.fecha)} / {registro.estado}
+                    </p>
                   </div>
-                  <div className="text-left md:text-right">
-                    {registro.ordenId && <Link to={`/ordenes?ordenId=${registro.ordenId}`} className="text-xs font-black uppercase text-blue-700 underline">Ver orden #{registro.ordenId}</Link>}
-                    {puedeVerValores && <p className="mt-2 text-xs font-black uppercase">Estimado: {formatearMonto(registro.valor_estimado)} / Real: {formatearMonto(registro.valor_real)}</p>}
+                  <div className="flex flex-wrap gap-2">
+                    <span className={`border-2 px-2 py-1 text-[10px] font-black uppercase ${alertaClase(registro.alerta_rango)}`}>{registro.alerta_rango || "OK"}</span>
+                    <span className="border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase">{formatearKg(registro.kilos)}</span>
                   </div>
-                  </div>
-                  <p className="mt-2 text-[10px] font-black uppercase text-blue-700">
-                    Ver detalle operativo
-                  </p>
-                </summary>
-                {puedeCerrarLote && registro.estado !== "VENDIDO" && (
-                  <div className="mt-3 grid grid-cols-1 gap-2 border-t-2 border-black pt-3 md:grid-cols-[1fr_1fr_auto]">
-                    <input className={inputClass} placeholder="Comprador" value={venta.comprador || ""} onChange={(e) => setVentaMaterial((a) => ({ ...a, [registro.id]: { ...venta, comprador: e.target.value } }))} />
-                    <input className={inputClass} type="number" placeholder="Precio real kg" value={venta.precio_real_kg || ""} onChange={(e) => setVentaMaterial((a) => ({ ...a, [registro.id]: { ...venta, precio_real_kg: e.target.value } }))} />
-                    <button type="button" onClick={() => venderMaterial(registro)} className="bg-black px-4 py-2 text-xs font-black uppercase text-white">Vendido</button>
+                </div>
+              </button>
+            ))}
+            {!registros.length && <MiniRow title="Sin registros" detail="Aun no hay material recuperado." />}
+          </div>
+        </Panel>
+
+        <Panel title="Detalle seleccionado">
+          <div id="detalle-material-seleccionado">
+            {seleccionado ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <MiniRow title="Modelo" detail={`${seleccionado.marca} ${seleccionado.modelo} ${seleccionado.anio || ""}`} />
+                  <MiniRow title="Patente / fecha" detail={`${seleccionado.patente || "Sin patente"} / ${formatearFecha(seleccionado.fecha)}`} />
+                  <MiniRow title="Kg reales" detail={formatearKg(seleccionado.kilos)} />
+                  <MiniRow title="Promedio historico" detail={seleccionado.promedio_historico_kg ? formatearKg(seleccionado.promedio_historico_kg) : "Sin historico"} />
+                  <MiniRow title="Diferencia" detail={`${formatearKg(seleccionado.diferencia_kg)} / ${seleccionado.diferencia_porcentaje ?? 0}%`} />
+                  <MiniRow title="Confianza" detail={seleccionado.confianza_estadistica || "BAJA"} />
+                  <MiniRow title="Estado" detail={`${seleccionado.estado} / ${seleccionado.lote_estado}`} />
+                  <MiniRow title="Observacion" detail={seleccionado.observacion || "No registrado"} />
+                  {puedeVerValores && (
+                    <>
+                      <MiniRow title="Valor estimado" detail={formatearMonto(seleccionado.valor_estimado)} />
+                      <MiniRow title="Valor real" detail={formatearMonto(seleccionado.valor_real)} />
+                    </>
+                  )}
+                </div>
+                {seleccionado.ordenId && (
+                  <Link to={`/ordenes?ordenId=${seleccionado.ordenId}`} className="inline-block border-2 border-blue-700 px-3 py-2 text-xs font-black uppercase text-blue-700">
+                    Ver orden #{seleccionado.ordenId}
+                  </Link>
+                )}
+                {puedeCerrarLote && seleccionado.estado !== "VENDIDO" && (
+                  <div className="grid grid-cols-1 gap-2 border-t-2 border-black pt-3 md:grid-cols-[1fr_1fr_auto]">
+                    <input className={inputClass} placeholder="Comprador" value={venta.comprador || ""} onChange={(e) => setVentaMaterial((a) => ({ ...a, [seleccionado.id]: { ...venta, comprador: e.target.value } }))} />
+                    <input className={inputClass} type="number" placeholder="Precio real kg" value={venta.precio_real_kg || ""} onChange={(e) => setVentaMaterial((a) => ({ ...a, [seleccionado.id]: { ...venta, precio_real_kg: e.target.value } }))} />
+                    <button type="button" onClick={() => venderMaterial(seleccionado)} className="bg-black px-4 py-2 text-xs font-black uppercase text-white">Marcar vendido</button>
                   </div>
                 )}
-                {puedeCerrarLote && registro.estado === "VENDIDO" && (
-                  <button type="button" onClick={() => registrarIngresoMaterial(registro)} className="mt-3 border-2 border-blue-700 px-3 py-2 text-[10px] font-black uppercase text-blue-700">
+                {puedeCerrarLote && seleccionado.estado === "VENDIDO" && (
+                  <button type="button" onClick={() => registrarIngresoMaterial(seleccionado)} className="border-2 border-blue-700 px-3 py-2 text-[10px] font-black uppercase text-blue-700">
                     Registrar ingreso por venta de material
                   </button>
                 )}
-              </details>
-            );
-          })}
-          {!registros.length && <MiniRow title="Sin registros" detail="Aun no hay material recuperado." />}
-        </div>
-      </Panel>
+              </div>
+            ) : (
+              <EmptyDetail />
+            )}
+          </div>
+        </Panel>
+      </section>
+
       <Panel title="Ranking por modelo">
-        <div className="space-y-3">
-          {estadisticas.slice(0, 8).map((item) => (
-            <MiniRow key={item.clave} title={`${item.marca} ${item.modelo}`} detail={`Promedio ${formatearKg(item.promedio)} / Registros ${item.cantidad} / Confianza ${item.confianza}`} />
+        <div id="ranking-material-modelo" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {estadisticas.slice(0, 12).map((item) => (
+            <div key={item.clave} className="border-2 border-black bg-slate-50 p-3">
+              <p className="text-xs font-black uppercase">{item.marca} {item.modelo}</p>
+              <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
+                Promedio {formatearKg(item.promedio)} / Registros {item.cantidad}
+              </p>
+              <span className="mt-2 inline-block border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase">
+                Confianza {item.confianza}
+              </span>
+            </div>
           ))}
           {!estadisticas.length && <MiniRow title="Sin estadistica" detail="Faltan registros historicos." />}
         </div>
       </Panel>
-    </section>
-  </div>
-);
+    </div>
+  );
+};
 
 const ComprobantesTab = ({ form, setForm, ordenes, comprobantes, onSubmit, validarComprobante, descargarComprobante, puedeVerValores }) => (
   <Panel title="Comprobantes de transferencia / pago">

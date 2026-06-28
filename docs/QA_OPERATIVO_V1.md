@@ -113,13 +113,19 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Confirmar que cada tab muestra resumen/lista primero y no despliega todo el detalle al cargar.
 - Confirmar que formularios de crear nuevo estan colapsados o claramente separados.
 - Seleccionar/expandir movimiento, comprobante o material y confirmar que aparece el detalle.
+- Confirmar panel ejecutivo de Finanzas: semaforo financiero, tarjetas grandes y micrograficos simples.
+- Confirmar ayuda visible: Pagado, Pendiente, Fondo reserva y Material recuperado.
+- Confirmar aviso OWNER/ADMIN: datos actuales pueden incluir pruebas hasta ejecutar reset operativo.
 - Subir comprobante de transferencia desde una orden y confirmar estado `PENDIENTE_REVISION`.
 - Confirmar que subir comprobante no marca la orden como pagada ni entregada.
 - Validar y rechazar comprobantes con OWNER/ADMIN.
 - Descargar comprobante protegido con sesion activa.
 - Registrar ingreso tipo `SERVICIO`, `FILE_SERVICE`, `VENTA_MATERIAL` u `OTRO`.
 - Registrar gasto operativo con categoria, monto, fecha, proveedor y descripcion.
-- Registrar sueldo/pago trabajador como egreso categoria `SUELDO`.
+- Registrar sueldo semanal como egreso categoria `SUELDO`.
+- Confirmar campos sueldo semanal: semana_inicio, semana_fin, trabajador, tipo, monto, estado, fecha pago y observacion.
+- Confirmar que `periodo` queda guardado como rango semanal compatible.
+- Confirmar que cierre semanal toma sueldos dentro del rango semana seleccionado.
 - Confirmar que sueldos y utilidad no son visibles para roles operativos.
 - Registrar movimiento de fondo de reserva: aporte, retiro y ajuste.
 - Previsualizar cierre semanal con ingresos, egresos, sueldos, aporte reserva y utilidad distribuible.
@@ -129,6 +135,10 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Confirmar autocompletado de patente, marca, modelo y ano al seleccionar orden.
 - Registrar kg mayores a 0 y confirmar lote automatico `YYYY-MM`.
 - Confirmar que se calcula alerta OK/REVISAR/ALERTA segun promedio historico.
+- Confirmar resumen mensual de material: lote actual, kg acumulados, kg esperados, diferencia kg/%, valor estimado y valor vendido.
+- Confirmar ranking por modelo: promedio kg, cantidad registros y confianza BAJA/MEDIA/ALTA.
+- Confirmar que registros fuera de rango aparecen como alertas y se puede seleccionarlos.
+- Confirmar que el detalle de material aparece solo al seleccionar un registro.
 - Crear caso fuera de rango mayor a 20% y confirmar notificacion a OWNER/ADMIN.
 - Revisar ranking por modelo, promedio kg, minimo, maximo y confianza estadistica.
 - Revisar cierre mensual: kg esperados, kg reales, diferencia y valor estimado.
@@ -138,6 +148,7 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Confirmar que ficha vehiculo muestra historial de material recuperado.
 - Confirmar que ficha vehiculo muestra comprobantes asociados.
 - Confirmar que Centro de Mando muestra solo para OWNER/ADMIN: pagos por revisar, utilidad semanal estimada, fondo reserva y material del mes.
+- Confirmar que Centro de Mando muestra micrograficos de ingresos/gastos, pagado/pendiente, fondo/material.
 - Confirmar que no se modifican pagos, entrega ni cierre comercial de la orden.
 
 ## 8. QA File Service Interno

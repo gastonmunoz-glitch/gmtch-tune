@@ -2772,36 +2772,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       <AccionesRapidasCentroMando usuario={usuario} />
 
       {mostrarComercial ? (
-        <DashboardSection title="Finanzas OWNER/ADMIN">
-          <StatCard label="Ingresos pagados hoy" val={formatoCLP(stats.cajaHoy)} color="border-black bg-black text-white" />
-          <StatCard label="Ingresos pagados semana" val={formatoCLP(stats.cajaSemana)} color="border-blue-500" />
-          <StatCard label="Ingresos pagados mes" val={formatoCLP(stats.cajaMes)} color="border-blue-500" />
-          <StatCard label="Pendiente de pago" val={formatoCLP(stats.pendientePagoMonto)} color="border-yellow-500" />
-          <StatCard label="Presupuestado no pagado" val={formatoCLP(stats.presupuestadoNoPagado)} color="border-yellow-500" />
-          <StatCard label="Monto total registrado" val={formatoCLP(stats.montoTotalRegistrado)} color="border-slate-500" />
-          <StatCard label="Presupuestado hoy" val={formatoCLP(stats.trabajosIngresadosHoy)} color="border-yellow-500" />
-          <StatCard label="Total pagado mes" val={formatoCLP(stats.totalPagadoMes)} color="border-green-500" />
-          <StatCard label="Ticket promedio mes" val={formatoCLP(stats.ticketPromedioMes)} color="border-green-500" />
-          <StatCard label="Pagos por revisar" val={stats.finanzas?.pagos_pendientes ?? 0} color="border-red-500" />
-          <StatCard label="Utilidad semana estimada" val={formatoCLP(stats.finanzas?.utilidad_distribuible)} color="border-emerald-500" />
-          <StatCard label="Fondo reserva" val={formatoCLP(stats.finanzas?.fondo_reserva_saldo)} color="border-blue-500" />
-        </DashboardSection>
+        <FinanzasDashboardV2 stats={stats} formatoCLP={formatoCLP} />
       ) : (
         <section className="border-4 border-black bg-white p-4 rounded-2xl text-xs font-black uppercase text-gray-500">
           Métricas comerciales ocultas para este rol.
         </section>
-      )}
-
-      {mostrarComercial && (
-        <DashboardSection title="Material recuperado OWNER/ADMIN">
-          <StatCard
-            label="Material mes"
-            val={`${Number(stats.finanzas?.material_mes?.kg_reales || 0).toLocaleString("es-CL")} kg / ${formatoCLP(stats.finanzas?.material_mes?.valor_estimado)}`}
-            color="border-slate-500"
-          />
-          <StatCard label="Valor real vendido" val={formatoCLP(stats.finanzas?.material_mes?.valor_real_vendido)} color="border-emerald-500" />
-          <StatCard label="Diferencia kg" val={`${Number(stats.finanzas?.material_mes?.diferencia_kg || 0).toLocaleString("es-CL")} kg`} color="border-yellow-500" />
-        </DashboardSection>
       )}
 
       <DashboardGraficos
@@ -3699,6 +3674,128 @@ const QuickAction = ({ to, label }) => (
     {label}
   </Link>
 );
+
+const numeroDashboard = (valor) => {
+  const parsed = Number(valor || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const porcentajeDashboard = (valor, total) => {
+  const base = numeroDashboard(total);
+  if (!base || base <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((numeroDashboard(valor) / base) * 100)));
+};
+
+const FinanzasMiniBar = ({ label, value, total, color, formatValue }) => (
+  <div>
+    <div className="mb-1 flex items-center justify-between gap-3 text-[10px] font-black uppercase text-slate-500">
+      <span>{label}</span>
+      <span>{formatValue ? formatValue(value) : value}</span>
+    </div>
+    <div className="h-3 overflow-hidden rounded-full border-2 border-black bg-slate-100">
+      <div
+        className={`h-full ${color}`}
+        style={{ width: `${porcentajeDashboard(value, total)}%` }}
+      />
+    </div>
+  </div>
+);
+
+const FinanzasDashboardV2 = ({ stats, formatoCLP }) => {
+  const finanzas = stats.finanzas || {};
+  const material = finanzas.material_mes || {};
+  const totalSemana =
+    numeroDashboard(stats.cajaSemana) +
+    numeroDashboard(finanzas.egresos_total) +
+    numeroDashboard(finanzas.sueldos_total);
+  const totalPagadoPendiente =
+    numeroDashboard(stats.cajaMes) + numeroDashboard(stats.pendientePagoMonto);
+  const utilidad = numeroDashboard(finanzas.utilidad_distribuible);
+  const semaforoClass =
+    utilidad < 0
+      ? "border-red-600 bg-red-50 text-red-900"
+      : numeroDashboard(stats.pendientePagoMonto) > 0
+      ? "border-yellow-500 bg-yellow-50 text-yellow-900"
+      : "border-emerald-600 bg-emerald-50 text-emerald-900";
+  const semaforoTexto =
+    utilidad < 0
+      ? "Atencion financiera"
+      : numeroDashboard(stats.pendientePagoMonto) > 0
+      ? "Cobranza pendiente"
+      : "Finanzas en orden";
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+            Finanzas OWNER/ADMIN
+          </h2>
+          <p className="mt-1 text-[11px] font-bold uppercase text-gray-400">
+            Pagado separado de pendiente, gastos, reserva y material del mes
+          </p>
+        </div>
+        <span className="rounded-full border-2 border-yellow-500 bg-yellow-50 px-3 py-2 text-[10px] font-black uppercase text-yellow-900">
+          Datos actuales pueden incluir pruebas hasta ejecutar reset operativo.
+        </span>
+      </div>
+
+      <div className={`rounded-2xl border-4 p-4 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] ${semaforoClass}`}>
+        <p className="text-[11px] font-black uppercase tracking-[0.16em] opacity-70">
+          Semaforo financiero
+        </p>
+        <h3 className="mt-2 text-2xl font-black uppercase">{semaforoTexto}</h3>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Ingresos pagados hoy" val={formatoCLP(stats.cajaHoy)} color="border-black bg-black text-white" />
+        <StatCard label="Ingresos pagados semana" val={formatoCLP(stats.cajaSemana)} color="border-emerald-500" />
+        <StatCard label="Ingresos pagados mes" val={formatoCLP(stats.cajaMes)} color="border-blue-500" />
+        <StatCard label="Pendiente de pago" val={formatoCLP(stats.pendientePagoMonto)} color="border-yellow-500" />
+        <StatCard label="Gastos semana" val={formatoCLP(finanzas.egresos_total)} color="border-red-500" />
+        <StatCard label="Sueldos semana" val={formatoCLP(finanzas.sueldos_total)} color="border-blue-500" />
+        <StatCard label="Utilidad estimada" val={formatoCLP(finanzas.utilidad_distribuible)} color="border-emerald-500" />
+        <StatCard label="Fondo reserva" val={formatoCLP(finanzas.fondo_reserva_saldo)} color="border-slate-500" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+        <div className="rounded-2xl border-4 border-black bg-white p-4 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)]">
+          <p className="text-[10px] font-black uppercase text-slate-500">Ingresos vs gastos</p>
+          <div className="mt-3 space-y-3">
+            <FinanzasMiniBar label="Pagado semana" value={stats.cajaSemana} total={totalSemana} color="bg-emerald-500" formatValue={formatoCLP} />
+            <FinanzasMiniBar label="Gastos" value={finanzas.egresos_total} total={totalSemana} color="bg-red-500" formatValue={formatoCLP} />
+            <FinanzasMiniBar label="Sueldos" value={finanzas.sueldos_total} total={totalSemana} color="bg-blue-500" formatValue={formatoCLP} />
+          </div>
+        </div>
+        <div className="rounded-2xl border-4 border-black bg-white p-4 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)]">
+          <p className="text-[10px] font-black uppercase text-slate-500">Pagado vs pendiente</p>
+          <div className="mt-3 space-y-3">
+            <FinanzasMiniBar label="Pagado mes" value={stats.cajaMes} total={totalPagadoPendiente} color="bg-emerald-500" formatValue={formatoCLP} />
+            <FinanzasMiniBar label="Pendiente" value={stats.pendientePagoMonto} total={totalPagadoPendiente} color="bg-yellow-500" formatValue={formatoCLP} />
+          </div>
+        </div>
+        <div className="rounded-2xl border-4 border-black bg-white p-4 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)]">
+          <p className="text-[10px] font-black uppercase text-slate-500">Material recuperado mes</p>
+          <p className="mt-2 text-xl font-black uppercase">
+            {Number(material.kg_reales || 0).toLocaleString("es-CL")} kg
+          </p>
+          <p className="mt-1 text-[10px] font-bold uppercase text-slate-500">
+            Esperado {Number(material.kg_esperados || 0).toLocaleString("es-CL")} kg / Diferencia {Number(material.diferencia_kg || 0).toLocaleString("es-CL")} kg
+          </p>
+        </div>
+        <div className="rounded-2xl border-4 border-black bg-white p-4 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)]">
+          <p className="text-[10px] font-black uppercase text-slate-500">Valor material</p>
+          <p className="mt-2 text-xl font-black uppercase">
+            {formatoCLP(material.valor_real_vendido)}
+          </p>
+          <p className="mt-1 text-[10px] font-bold uppercase text-slate-500">
+            Estimado {formatoCLP(material.valor_estimado)}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const ToastStack = ({ toasts = [], onCerrar }) => {
   if (!toasts.length) return null;

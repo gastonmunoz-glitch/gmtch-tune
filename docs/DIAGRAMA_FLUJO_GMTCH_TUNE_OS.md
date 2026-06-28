@@ -240,13 +240,14 @@ flowchart TD
 
 Regla: la bitacora operativa global sirve para no perder observaciones del dia. No reemplaza la postventa tecnica cuando existe una orden o un DTC claro; permite anotar rapido aunque todavia no se conozca la orden, vehiculo o archivo relacionado.
 
-## 11. Flujo Finanzas Nucleo V1
+## 11. Flujo Finanzas y Material Recuperado UX V2
 
 ```mermaid
 flowchart TD
   A["Finanzas / Material"] --> UX["Resumen compacto + lista compacta"]
   UX --> UX2["Detalle solo al seleccionar o expandir registro"]
   UX --> UX3["Crear nuevo queda colapsado"]
+  UX --> UX4["Panel ejecutivo con semaforo y micrograficos"]
   A --> B["Comprobantes de pago"]
   A --> C["Movimientos financieros"]
   A --> D["Sueldos / pagos trabajadores"]
@@ -263,7 +264,9 @@ flowchart TD
   C --> C1["Ingreso: SERVICIO, FILE_SERVICE, VENTA_MATERIAL u OTRO"]
   C --> C2["Egreso: gasto operativo, compra, herramienta, arriendo, transporte, marketing, impuesto provision u otro"]
   D --> D1["Movimiento EGRESO categoria SUELDO"]
-  D1 --> D2["Trabajador, periodo, monto, estado y comprobante opcional"]
+  D1 --> D2["Semana inicio / semana fin"]
+  D2 --> D3["Trabajador, tipo: SUELDO / ADELANTO / BONO / COMISION / OTRO"]
+  D3 --> D4["Monto, estado PENDIENTE/PAGADO, fecha pago y observacion"]
 
   E --> E1["APORTE / RETIRO / AJUSTE"]
   E1 --> E2["Saldo actual e historial"]
@@ -277,17 +280,19 @@ flowchart TD
 
   G --> G1["Orden DPF/FAP autorizada o intervencion fisica asociada"]
   G1 --> G2["Registrar kg, lote mensual y observacion administrativa"]
-  G2 --> G3["Comparar kg contra promedio historico por marca/modelo/motor"]
-  G3 --> G4{"Diferencia vs promedio"}
-  G4 -->|Hasta 10%| G5["OK"]
-  G4 -->|10% a 20%| G6["REVISAR"]
-  G4 -->|Mas de 20%| G7["ALERTA"]
-  G7 --> G8["Notificacion interna OWNER / ADMIN con accion a Finanzas"]
-  G2 --> G9["Marcar venta con comprador y precio real kg"]
-  G9 --> G10["Registrar ingreso financiero VENTA_MATERIAL"]
+  G2 --> G3["Panel mensual: kg reales, kg esperados, diferencia, valor estimado y vendido"]
+  G3 --> G4["Ranking por modelo: promedio kg, cantidad y confianza"]
+  G4 --> G5["Comparar kg contra promedio historico por marca/modelo/motor"]
+  G5 --> G6{"Diferencia vs promedio"}
+  G6 -->|Hasta 10%| G7["OK"]
+  G6 -->|10% a 20%| G8["REVISAR"]
+  G6 -->|Mas de 20%| G9["ALERTA"]
+  G9 --> G10["Notificacion interna OWNER / ADMIN con accion a Finanzas"]
+  G2 --> G11["Marcar venta con comprador y precio real kg"]
+  G11 --> G12["Registrar ingreso financiero VENTA_MATERIAL"]
 ```
 
-Regla: este flujo es administrativo/contable interno. No marca pagado ni entregado automaticamente. No entrega instrucciones tecnicas de extraccion, desmontaje o intervencion. Sueldos, utilidad, reparto y caja son visibles solo para roles autorizados. La UX debe mostrar resumen/lista primero y detalle despues de seleccionar.
+Regla: este flujo es administrativo/contable interno. No marca pagado ni entregado automaticamente. No entrega instrucciones tecnicas de extraccion, desmontaje o intervencion. Sueldos se controlan semanalmente usando `periodo` como compatibilidad. Utilidad, reparto, caja y valores de material son visibles solo para roles autorizados. La UX debe mostrar panel ejecutivo, resumen/lista primero, micrograficos simples y detalle despues de seleccionar. Si aun no se ejecuto reset operativo, OWNER/ADMIN pueden ver aviso discreto de datos de prueba.
 
 ## 12. Flujo Notificaciones
 
