@@ -23,6 +23,24 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Crear cliente, vehiculo y orden real de prueba controlada.
 - Ejecutar `node scripts/smoke-prod.js` con token OWNER.
 
+## 1.2 Puesta en marcha lunes / operacion con base limpia
+
+- Login como OWNER y confirmar que el Dashboard muestra el checklist de inicio del lunes.
+- Confirmar empty state de Clientes: aun no hay clientes reales registrados.
+- Confirmar empty state de Vehiculos: registrar el primer vehiculo para iniciar operacion.
+- Confirmar empty state de Ordenes: crear la primera orden real del dia.
+- Confirmar empty state de File Service: seleccionar o crear una orden antes de registrar archivos.
+- Confirmar empty state de Finanzas: sin movimientos registrados despues del reset.
+- Confirmar empty state de Bitacora: sin observaciones abiertas.
+- Crear el primer cliente real con nombre y telefono correcto.
+- Crear el primer vehiculo real con patente normalizada, marca y modelo.
+- Crear la primera orden usando servicio sugerido y luego editar motivo si corresponde.
+- Validar que prioridad quede seleccionada y editable manualmente.
+- Validar que recepcion use la guia: Cliente, Vehiculo, Motivo / Servicio, Prioridad / Responsable, Crear orden.
+- Probar notificacion interna con una accion simple.
+- Probar PWA en iPhone desde Safari: Compartir, Agregar a pantalla de inicio.
+- Confirmar que datos demo no aparecen en dashboard, finanzas ni estadisticas.
+
 ## 2. QA Dashboard / Centro de Mando
 
 - Semaforo operativo muestra Operacion normal, Atencion requerida o Bloqueo operativo segun datos.

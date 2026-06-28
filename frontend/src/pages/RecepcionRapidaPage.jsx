@@ -118,6 +118,39 @@ const CATEGORIAS_CLIENTE = [
   { value: "INTERNO", label: "Interno" },
 ];
 
+const GUIA_RECEPCION_LUNES = [
+  "Paso 1 Cliente",
+  "Paso 2 Vehículo",
+  "Paso 3 Motivo / Servicio",
+  "Paso 4 Prioridad / Responsable",
+  "Paso 5 Crear orden",
+];
+
+const SERVICIOS_ORDEN_SUGERIDOS = [
+  "Diagnóstico profesional",
+  "Revisión DTC",
+  "Stage 1",
+  "Stage 2",
+  "Stage 3 / proyecto especial",
+  "Reprogramación ECU",
+  "Reprogramación TCU",
+  "File Service",
+  "DPF/FAP",
+  "EGR",
+  "SCR/AdBlue/DEF",
+  "NOx",
+  "Lambda/O2",
+  "TVA",
+  "IMMO",
+  "Vmax",
+  "Pops & Bangs",
+  "Launch Control",
+  "Hardcut",
+  "Mecánica asociada al servicio técnico",
+  "Mecánica independiente / mantención",
+  "Postventa técnica / corrección",
+];
+
 const normalizarCategoriaCliente = (categoria) => {
   const valor = String(categoria || "NORMAL").trim().toUpperCase();
   if (["MAYORISTA", "PROVEEDOR"].includes(valor)) return "TALLER_ALIADO";
@@ -1018,6 +1051,25 @@ function RecepcionRapidaPage() {
               {prioridadSugeridaPorCategoria(cliente.categoria_cliente)}
             </p>
 
+            <select
+              className="border border-black p-3 w-full bg-white font-bold"
+              value=""
+              onChange={(e) => {
+                if (!e.target.value) return;
+                setOrden((prev) => ({
+                  ...prev,
+                  servicio_solicitado: e.target.value,
+                }));
+              }}
+            >
+              <option value="">Seleccionar servicio sugerido</option>
+              {SERVICIOS_ORDEN_SUGERIDOS.map((servicio) => (
+                <option key={servicio} value={servicio}>
+                  {servicio}
+                </option>
+              ))}
+            </select>
+
             <textarea
               className="border border-black p-3 w-full"
               placeholder="Servicio solicitado por el cliente. Ej: DPF Off, diagnóstico, EGR, AdBlue, Stage 1, lectura ECU, etc."
@@ -1282,6 +1334,25 @@ function RecepcionRapidaPage() {
         </h1>
         <p className="text-xs font-black uppercase text-gray-500 mt-2">
           Ingreso inicial por patente. Scanner, lectura ECU y mecánica se asignan después.
+        </p>
+      </div>
+
+      <div className="mb-6 border-4 border-blue-700 bg-blue-50 p-4">
+        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-900">
+          Guía visual de recepción rápida
+        </p>
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-5">
+          {GUIA_RECEPCION_LUNES.map((item) => (
+            <div
+              key={item}
+              className="border-2 border-blue-700 bg-white p-3 text-[10px] font-black uppercase text-blue-950"
+            >
+              {item}
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[10px] font-black uppercase text-blue-900">
+          Todo trabajo debe tener cliente, vehículo y motivo claro.
         </p>
       </div>
 

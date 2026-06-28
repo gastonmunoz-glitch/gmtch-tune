@@ -430,7 +430,9 @@ function VehiculosPage() {
 
         {gruposPorCliente.length === 0 && (
           <div className="bg-white border-4 border-black p-10 text-center">
-            <p className="text-xl font-black uppercase">No se encontraron vehículos</p>
+            <p className="text-xl font-black uppercase">
+              Registra el primer vehículo para iniciar operación.
+            </p>
           </div>
         )}
       </div>

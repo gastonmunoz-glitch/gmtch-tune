@@ -1166,6 +1166,11 @@ export default function ArchivosECUPage() {
                   </option>
                 ))}
               </select>
+              {ordenes.length === 0 && (
+                <p className="mt-2 rounded-xl border border-yellow-500/40 bg-yellow-500/10 p-3 text-xs font-semibold text-yellow-100">
+                  Selecciona o crea una orden antes de registrar archivos.
+                </p>
+              )}
             </div>
 
             <div>
@@ -1450,7 +1455,9 @@ export default function ArchivosECUPage() {
 
           {!loading && archivosFiltrados.length === 0 && (
             <div className="text-slate-400 p-4 border border-dashed border-slate-700 rounded-2xl">
-              No hay archivos ECU activos con este filtro.
+              {archivos.length === 0
+                ? "Selecciona o crea una orden antes de registrar archivos."
+                : "No hay archivos ECU activos con este filtro."}
             </div>
           )}
 

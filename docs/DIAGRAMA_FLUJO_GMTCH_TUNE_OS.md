@@ -426,7 +426,30 @@ flowchart TD
 
 Regla: Automatizaciones V1 es manual y no destructiva. No borra datos, no cambia estados criticos, no marca pagos, no cierra ordenes y no envia mensajes externos. `ENABLE_INTERNAL_AUTOMATIONS=false` debe mantenerse como base hasta una fase futura con cron controlado.
 
-## 15. Flujo Dominios
+## 15. Puesta en marcha lunes / operacion con base limpia
+
+```mermaid
+flowchart TD
+  A["Base operativa limpia despues del reset"] --> B["OWNER / ADMIN / SUPERVISOR revisa Dashboard"]
+  B --> C["Checklist inicio lunes"]
+  C --> D["Crear primer cliente real"]
+  D --> E["Crear primer vehiculo real"]
+  E --> F["Crear primera orden real"]
+  F --> G["Motivo / servicio estandarizado"]
+  G --> H["Prioridad editable y responsable si aplica"]
+  H --> I["Subir fotos / evidencia si corresponde"]
+  I --> J{"Requiere File Service"}
+  J -->|Si| K["Crear File Service asociado a orden"]
+  J -->|No| L["Continuar diagnostico / trabajo tecnico"]
+  K --> M["Registrar post escritura y cierre tecnico"]
+  L --> N["Listo para entrega cuando corresponda"]
+  M --> N
+  N --> O["Cobro y entrega comercial"]
+```
+
+Regla: con base limpia no se ingresan trabajos sin cliente, vehiculo y motivo claro. Si no esta registrado, no existe. Datos demo no deben volver a contaminar dashboard, finanzas ni estadisticas.
+
+## 16. Flujo Dominios
 
 ```mermaid
 flowchart LR
@@ -438,6 +461,6 @@ flowchart LR
   API --> BE
 ```
 
-## 16. Regla de Mantenimiento
+## 17. Regla de Mantenimiento
 
 Este documento debe actualizarse cada vez que se cambie un flujo operativo, ruta critica, rol, portal, dominio, integracion, estado de File Service, pago, notificacion o arquitectura.

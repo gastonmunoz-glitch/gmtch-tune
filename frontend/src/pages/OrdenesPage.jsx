@@ -25,6 +25,31 @@ const FILTROS_ORDENES = [
   { value: "TODAS", label: "TODAS" },
 ];
 
+const SERVICIOS_ORDEN_SUGERIDOS = [
+  "Diagnóstico profesional",
+  "Revisión DTC",
+  "Stage 1",
+  "Stage 2",
+  "Stage 3 / proyecto especial",
+  "Reprogramación ECU",
+  "Reprogramación TCU",
+  "File Service",
+  "DPF/FAP",
+  "EGR",
+  "SCR/AdBlue/DEF",
+  "NOx",
+  "Lambda/O2",
+  "TVA",
+  "IMMO",
+  "Vmax",
+  "Pops & Bangs",
+  "Launch Control",
+  "Hardcut",
+  "Mecánica asociada al servicio técnico",
+  "Mecánica independiente / mantención",
+  "Postventa técnica / corrección",
+];
+
 const RESPONSABLES_ETAPAS = [
   {
     campo: "diagnostico_asignado_a",
@@ -407,11 +432,37 @@ function OrdenesPage() {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
+    const vehiculoSeleccionado = vehiculos.find(
+      (item) => String(item.id) === String(formData.vehiculoId)
+    );
+    const motivo = String(formData.motivo_ingreso || "").trim();
+
+    if (!formData.vehiculoId || !vehiculoSeleccionado) {
+      alert("Selecciona un vehículo antes de crear la orden.");
+      return;
+    }
+
+    if (!String(vehiculoSeleccionado.patente || "").trim()) {
+      alert("El vehículo seleccionado no tiene patente registrada.");
+      return;
+    }
+
+    if (!motivo) {
+      alert("Todo trabajo debe tener un motivo o servicio claro.");
+      return;
+    }
+
+    if (!formData.prioridad) {
+      alert("Selecciona una prioridad para la orden.");
+      return;
+    }
+
     try {
       setCargando(true);
 
       await api.post("/ordenes", {
         ...formData,
+        motivo_ingreso: motivo,
         estado: "RECEPCIONADO",
       });
 
@@ -761,6 +812,33 @@ function OrdenesPage() {
               Sugerida por categoría de cliente. Puedes cambiarla manualmente.
             </p>
           )}
+
+          <p className="text-[10px] font-black uppercase text-gray-500">
+            Responsable si aplica: asignalo en la tarjeta de la orden despues de crearla.
+          </p>
+
+          <div className="space-y-2">
+            <label className="block text-[10px] font-black uppercase text-gray-500">
+              Servicio sugerido / motivo estandarizado
+            </label>
+            <select
+              className="w-full border-4 border-black p-3 font-black bg-white"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) actualizarForm("motivo_ingreso", e.target.value);
+              }}
+            >
+              <option value="">Elegir servicio para completar motivo</option>
+              {SERVICIOS_ORDEN_SUGERIDOS.map((servicio) => (
+                <option key={servicio} value={servicio}>
+                  {servicio}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] font-black uppercase text-gray-500">
+              Ayuda a partir con datos reales ordenados. Puedes editar el texto abajo.
+            </p>
+          </div>
 
           <textarea
             className="w-full border-4 border-black p-4 font-black uppercase"
@@ -1629,7 +1707,9 @@ function OrdenesPage() {
           {ordenesFiltradas.length === 0 && (
             <div className="p-20 text-center border-4 border-dashed border-gray-300 rounded-3xl bg-white">
               <p className="text-gray-300 font-black text-3xl uppercase tracking-widest">
-                Sin actividad en fila de trabajo
+                {ordenes.length === 0
+                  ? "Crea la primera orden real del día."
+                  : "Sin actividad en fila de trabajo"}
               </p>
             </div>
           )}

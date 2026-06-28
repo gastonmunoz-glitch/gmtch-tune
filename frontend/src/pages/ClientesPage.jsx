@@ -474,7 +474,7 @@ function ClientesPage() {
 
           {clientes.length === 0 && (
             <div className="p-16 text-center text-gray-400 font-black text-xl uppercase tracking-widest">
-              Sin clientes registrados
+              Aún no hay clientes reales registrados.
             </div>
           )}
         </div>

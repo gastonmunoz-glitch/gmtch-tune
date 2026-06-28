@@ -897,7 +897,7 @@ function VehiculoDetallePage() {
           {ordenes.length === 0 && (
             <div className="p-10 text-center">
               <p className="text-xl font-black uppercase">
-                Este vehiculo aun no tiene historial
+                Este vehículo aún no tiene historial. Crea una orden real para iniciar trazabilidad.
               </p>
             </div>
           )}

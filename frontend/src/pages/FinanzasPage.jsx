@@ -966,7 +966,12 @@ const MovimientoTab = ({ titulo, tipo, form, setForm, onSubmit, movimientos }) =
                 </p>
               </button>
             ))}
-            {!movimientos.length && <MiniRow title="Sin movimientos" detail="No hay registros para esta seccion." />}
+            {!movimientos.length && (
+              <MiniRow
+                title="Sin movimientos registrados después del reset."
+                detail="Registra movimientos reales cuando comience la operación."
+              />
+            )}
           </div>
         </Panel>
 
@@ -1001,7 +1006,7 @@ const ListaMovimientos = ({ movimientos }) => (
     ))}
     {!movimientos.length && (
       <div className="border-2 border-black bg-gray-50 p-4 text-xs font-black uppercase text-gray-500">
-        Sin movimientos.
+        Sin movimientos registrados después del reset.
       </div>
     )}
   </div>

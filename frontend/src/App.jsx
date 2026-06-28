@@ -1431,6 +1431,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const mostrarOperacion = puedeVerOperacion(usuario);
   const mostrarAgentesIA = puedeVerAgentesIA(usuario);
   const mostrarAutomatizaciones = puedeVerAutomatizaciones(usuario);
+  const mostrarChecklistLunes = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
+    String(usuario?.rol || "").toUpperCase()
+  );
   const puedeGenerarReportesAutomatizacion = ["OWNER", "ADMIN"].includes(
     String(usuario?.rol || "").toUpperCase()
   );
@@ -2723,6 +2726,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
       <PwaIOSInstallSection />
 
+      {mostrarChecklistLunes && <PuestaMarchaLunesSection stats={stats} />}
+
       <SemaforoOperativo semaforo={stats.semaforoOperativo} />
 
       {mostrarAgentesIA && (
@@ -2899,6 +2904,78 @@ const PwaIOSInstallSection = () => (
     </p>
   </section>
 );
+
+const PuestaMarchaLunesSection = ({ stats }) => {
+  const tieneClientes = numeroDashboard(stats.clientes) > 0;
+  const tieneVehiculos = numeroDashboard(stats.vehiculos) > 0;
+  const tieneOrdenes = numeroDashboard(stats.ordenes) > 0;
+  const fileServiceProbado = numeroDashboard(stats.fileServiceActivos) > 0;
+  const finanzasProbadas =
+    numeroDashboard(stats.cajaMes) > 0 ||
+    numeroDashboard(stats.finanzas?.egresos_total) > 0 ||
+    numeroDashboard(stats.finanzas?.fondo_reserva_saldo) > 0;
+
+  const items = [
+    ["Crear primer cliente real", tieneClientes],
+    ["Crear primer vehiculo real", tieneVehiculos],
+    ["Crear primera orden real", tieneOrdenes],
+    ["Validar usuarios y roles", null],
+    ["Probar notificaciones", null],
+    ["Probar PWA en iPhone", null],
+    ["Probar File Service", fileServiceProbado],
+    ["Probar Finanzas", finanzasProbadas],
+    ["Confirmar que datos demo fueron eliminados", null],
+  ];
+
+  return (
+    <section className="rounded-3xl border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">
+            Puesta en marcha lunes
+          </p>
+          <h2 className="mt-1 text-2xl font-black uppercase text-black">
+            Operacion con base limpia
+          </h2>
+          <p className="mt-2 text-xs font-bold uppercase text-gray-500">
+            Checklist visible para OWNER, ADMIN y SUPERVISOR antes de atender datos reales.
+          </p>
+        </div>
+        <span className="rounded-full border-2 border-blue-700 bg-blue-50 px-3 py-2 text-[10px] font-black uppercase text-blue-900">
+          Sin demo / sin basura operativa
+        </span>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+        {items.map(([label, completado]) => {
+          const manual = completado === null;
+          const ok = completado === true;
+          return (
+            <div
+              key={label}
+              className={`rounded-2xl border-2 p-4 ${
+                ok
+                  ? "border-emerald-600 bg-emerald-50 text-emerald-900"
+                  : manual
+                  ? "border-blue-500 bg-blue-50 text-blue-900"
+                  : "border-yellow-500 bg-yellow-50 text-yellow-900"
+              }`}
+            >
+              <p className="text-xs font-black uppercase">{label}</p>
+              <p className="mt-2 text-[10px] font-black uppercase">
+                {ok ? "OK" : manual ? "Validacion manual" : "Pendiente"}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="mt-4 text-xs font-black uppercase text-gray-500">
+        Instala GMTCH Tune OS en iPhone desde Safari para acceso rapido y alertas.
+      </p>
+    </section>
+  );
+};
 
 const textoAlertaAgente = (alerta) => {
   if (typeof alerta === "string") return alerta;
@@ -3586,7 +3663,7 @@ const BitacoraRapidaSection = ({
     <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-2">
       {items.length === 0 ? (
         <div className="rounded-xl border-2 border-slate-700 bg-slate-900 p-4 text-xs font-black uppercase text-slate-400">
-          Sin observaciones operativas abiertas
+          Sin observaciones abiertas.
         </div>
       ) : (
         items.slice(0, 6).map((item) => (
@@ -4008,6 +4085,7 @@ const ChecklistOperativoSection = ({ items = [] }) => (
 const ReglaOperativaGMTCH = () => {
   const frases = [
     "Si no esta registrado, no existe.",
+    "Todo trabajo debe tener cliente, vehiculo y motivo claro.",
     "Cliente que vuelve por DTC debe quedar como postventa tecnica.",
     "Un archivo sin post escritura registrada es un trabajo inconcluso.",
     "La mecanica asociada al servicio se traza, no se separa como mantencion.",
