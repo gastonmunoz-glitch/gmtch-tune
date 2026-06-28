@@ -1,6 +1,8 @@
 import axios from "axios";
 
-const API_URL = "https://gmtch-tune-production.up.railway.app/api";
+const API_URL = (
+  import.meta.env.VITE_API_URL || "https://api.gmtchtune.com/api"
+).replace(/\/$/, "");
 
 const api = axios.create({
   baseURL: API_URL,
@@ -27,7 +29,7 @@ api.interceptors.response.use(
       localStorage.removeItem("nombre");
       localStorage.removeItem("userId");
 
-      window.location.href = "/";
+      window.location.href = "/login";
     }
 
     return Promise.reject(error);

@@ -43,7 +43,7 @@ node scripts/smoke-prod.js
 Opcionalmente se puede cambiar la API:
 
 ```bat
-set API_BASE=https://gmtch-tune-production.up.railway.app/api
+set API_BASE=https://api.gmtchtune.com/api
 node scripts/smoke-prod.js
 ```
 

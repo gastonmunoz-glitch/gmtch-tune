@@ -32,9 +32,17 @@ if (!fs.existsSync(fotosPath)) {
 const allowedOrigins = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "https://gmtchtune.com",
+  "https://www.gmtchtune.com",
   "https://abundant-emotion-production-830a.up.railway.app",
   process.env.FRONTEND_URL,
+  ...(process.env.FRONTEND_URLS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
 ].filter(Boolean);
+
+const isAllowedOrigin = (origin) => !origin || allowedOrigins.includes(origin);
 
 const corsOptions = {
   origin: function (origin, callback) {
@@ -42,12 +50,12 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    if (allowedOrigins.includes(origin)) {
+    if (isAllowedOrigin(origin)) {
       return callback(null, true);
     }
 
-    console.warn("CORS permitido temporalmente para origin:", origin);
-    return callback(null, true);
+    console.warn("CORS bloqueado para origin:", origin);
+    return callback(new Error("Origen no permitido por CORS"));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: [
@@ -64,7 +72,7 @@ const corsOptions = {
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
-  if (origin) {
+  if (origin && isAllowedOrigin(origin)) {
     res.header("Access-Control-Allow-Origin", origin);
   }
 
@@ -88,12 +96,32 @@ app.use((req, res, next) => {
 
 app.use(cors(corsOptions));
 
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=()"
+  );
+  next();
+});
+
 // ====================== MIDDLEWARES BASE ======================
 
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
-app.use("/uploads", express.static(uploadsPath));
+app.use(
+  "/uploads",
+  express.static(uploadsPath, {
+    dotfiles: "deny",
+    setHeaders: (res) => {
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    },
+  })
+);
 
 // ====================== MODELOS ======================
 
@@ -1486,7 +1514,8 @@ const prepararBaseDatos = async () => {
 
 const crearUsuarioMaestro = async () => {
   try {
-    const passwordHash = await bcrypt.hash("123", 10);
+    const passwordInicial = process.env.OWNER_INITIAL_PASSWORD || "123";
+    const passwordHash = await bcrypt.hash(passwordInicial, 10);
 
     const [usuarios] = await sequelize.query(`
       SELECT "id", "username", "rol"
@@ -1501,19 +1530,13 @@ const crearUsuarioMaestro = async () => {
         UPDATE "Usuarios"
         SET "rol" = 'OWNER',
             "nombre" = COALESCE("nombre", 'Gastón Muñoz'),
-            "password" = :password,
             "activo" = true,
             "updatedAt" = NOW()
         WHERE "username" = 'gaston';
-        `,
-        {
-          replacements: {
-            password: passwordHash,
-          },
-        }
+        `
       );
 
-      console.log("Usuario gaston actualizado como OWNER y password reseteada a 123");
+      console.log("Usuario gaston verificado como OWNER sin resetear password");
       return;
     }
 
@@ -1535,7 +1558,7 @@ const crearUsuarioMaestro = async () => {
       }
     );
 
-    console.log("ACCESO OWNER CREADO: gaston / 123");
+    console.log("ACCESO OWNER CREADO: usuario gaston");
   } catch (error) {
     console.error("Error creando usuario maestro:", error);
     throw error;

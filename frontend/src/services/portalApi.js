@@ -1,6 +1,6 @@
 import api from "./api";
 
-const API_BASE = api.defaults.baseURL || "https://gmtch-tune-production.up.railway.app/api";
+const API_BASE = api.defaults.baseURL || "https://api.gmtchtune.com/api";
 
 const getPortalToken = () => localStorage.getItem("portalToken");
 const getInternalToken = () => localStorage.getItem("token");
