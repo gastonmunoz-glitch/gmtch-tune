@@ -52,6 +52,21 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Confirmar que si un endpoint falla, el dashboard sigue funcionando.
 - Confirmar que los links de agentes llevan a modulos existentes: ordenes, File Service, Finanzas, Portal admin o bitacora.
 
+## 2.2 QA Automatizaciones Operativas V1
+
+- Login como OWNER y confirmar bloque `Automatizaciones GMTCH`.
+- Ejecutar `Revision operativa` y confirmar resumen, prioridad, alertas y links accionables.
+- Generar `Reporte apertura` y confirmar que se guarda como ultimo reporte.
+- Generar `Reporte cierre` y confirmar que se guarda como ultimo reporte.
+- Confirmar que apertura/cierre crean notificacion interna para OWNER/ADMIN/SUPERVISOR si hay alertas ALTA/URGENTE.
+- Confirmar anti-spam: repetir la misma automatizacion no debe duplicar la misma alerta mas de una vez cada 2 horas.
+- Ejecutar revision `File Service` y confirmar deteccion de post escritura, correcciones, nueva lectura, archivos sin responsable y casos viejos.
+- Ejecutar revision `Finanzas` solo con OWNER/ADMIN.
+- Ejecutar revision `Material recuperado` con OWNER/ADMIN/SUPERVISOR.
+- Login como RECEPCION/OPERADOR_ECU/MECANICO/TUNER y confirmar que no aparecen botones de Finanzas ni reportes administrativos.
+- Confirmar que ninguna automatizacion cambia estado, marca pagos, cierra ordenes, borra datos ni envia mensajes externos.
+- Confirmar que Portal Masters externo no puede acceder a `/api/automatizaciones`.
+
 ## 3. QA Ordenes
 
 - Crear orden con vehiculo existente.
@@ -198,6 +213,7 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 | Login interno |  |  |  |  |
 | Dashboard V2 |  |  |  |  |
 | Agentes IA GMTCH V1 |  |  |  |  |
+| Automatizaciones GMTCH V1 |  |  |  |  |
 | Bitacora operativa |  |  |  |  |
 | Ordenes |  |  |  |  |
 | Postventa tecnica |  |  |  |  |

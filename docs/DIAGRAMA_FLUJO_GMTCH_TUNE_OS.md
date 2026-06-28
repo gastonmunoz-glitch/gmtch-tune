@@ -385,7 +385,43 @@ flowchart TD
 
 Regla: Agentes IA V1 es solo lectura. No crea ordenes, no cambia estados, no marca pagos, no borra datos y no ejecuta acciones automaticas. Toda accion futura requiere confirmacion humana.
 
-## 14. Flujo Dominios
+## 14. Flujo Automatizaciones Operativas V1
+
+```mermaid
+flowchart TD
+  A["Usuario interno abre Dashboard"] --> B["Bloque Automatizaciones GMTCH"]
+  B --> C{"Accion manual"}
+  C --> D["GET /api/automatizaciones/revision-operativa"]
+  C --> E["POST /api/automatizaciones/reporte-apertura"]
+  C --> F["POST /api/automatizaciones/reporte-cierre"]
+  C --> G["GET /api/automatizaciones/file-service"]
+  C --> H["GET /api/automatizaciones/finanzas"]
+  C --> I["GET /api/automatizaciones/material-recuperado"]
+  C --> J["GET /api/automatizaciones/reportes/ultimo"]
+
+  D --> K["Leer ordenes, File Service, bitacora, notificaciones, finanzas y material"]
+  G --> K
+  H --> K
+  I --> K
+  E --> K
+  F --> K
+
+  K --> L["Generar resumen, alertas, prioridad, accion_url y sugerencias"]
+  E --> M["Guardar AutomatizacionReporte"]
+  F --> M
+  M --> N["Crear notificacion interna a OWNER / ADMIN / SUPERVISOR"]
+  L --> O{"Alertas ALTA / URGENTE"}
+  O -->|Si| P["Anti-spam: no duplicar en 2 horas por entidad"]
+  P --> Q["Crear notificacion accionable origen AUTOMATIZACION"]
+  O -->|No| R["Solo mostrar resultado"]
+  Q --> S["Humano abre modulo y decide"]
+  R --> S
+  N --> S
+```
+
+Regla: Automatizaciones V1 es manual y no destructiva. No borra datos, no cambia estados criticos, no marca pagos, no cierra ordenes y no envia mensajes externos. `ENABLE_INTERNAL_AUTOMATIONS=false` debe mantenerse como base hasta una fase futura con cron controlado.
+
+## 15. Flujo Dominios
 
 ```mermaid
 flowchart LR
@@ -397,6 +433,6 @@ flowchart LR
   API --> BE
 ```
 
-## 15. Regla de Mantenimiento
+## 16. Regla de Mantenimiento
 
 Este documento debe actualizarse cada vez que se cambie un flujo operativo, ruta critica, rol, portal, dominio, integracion, estado de File Service, pago, notificacion o arquitectura.

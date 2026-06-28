@@ -180,6 +180,17 @@ const puedeVerOperacion = (usuario) =>
 const puedeVerAgentesIA = (usuario) =>
   ["OWNER", "ADMIN"].includes(String(usuario?.rol || "").toUpperCase());
 
+const puedeVerAutomatizaciones = (usuario) =>
+  [
+    "OWNER",
+    "ADMIN",
+    "SUPERVISOR",
+    "RECEPCION",
+    "OPERADOR_ECU",
+    "MECANICO",
+    "TUNER",
+  ].includes(String(usuario?.rol || "").toUpperCase());
+
 const limpiarSesion = () => {
   localStorage.removeItem("token");
   localStorage.removeItem("rol");
@@ -1419,6 +1430,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const mostrarComercial = puedeVerMetricasComerciales(usuario);
   const mostrarOperacion = puedeVerOperacion(usuario);
   const mostrarAgentesIA = puedeVerAgentesIA(usuario);
+  const mostrarAutomatizaciones = puedeVerAutomatizaciones(usuario);
+  const puedeGenerarReportesAutomatizacion = ["OWNER", "ADMIN"].includes(
+    String(usuario?.rol || "").toUpperCase()
+  );
+  const puedeVerFinanzasAutomatizacion = puedeGenerarReportesAutomatizacion;
+  const puedeVerMaterialAutomatizacion = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
+    String(usuario?.rol || "").toUpperCase()
+  );
 
   const [stats, setStats] = useState({
     cajaHoy: 0,
@@ -1474,6 +1493,13 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     error: "",
     cargando: false,
     ultimaActualizacion: null,
+  });
+  const [automatizaciones, setAutomatizaciones] = useState({
+    resultado: null,
+    ultimoReporte: null,
+    error: "",
+    cargando: "",
+    ultimaEjecucion: null,
   });
   const [bitacoraForm, setBitacoraForm] = useState({
     tipo: "OPERACION",
@@ -2426,6 +2452,86 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     }
   };
 
+  const ejecutarAutomatizacion = async (tipo) => {
+    const acciones = {
+      revision: {
+        label: "Revision operativa",
+        request: () => api.get("/automatizaciones/revision-operativa"),
+      },
+      apertura: {
+        label: "Reporte apertura",
+        request: () => api.post("/automatizaciones/reporte-apertura"),
+      },
+      cierre: {
+        label: "Reporte cierre",
+        request: () => api.post("/automatizaciones/reporte-cierre"),
+      },
+      fileService: {
+        label: "Revision File Service",
+        request: () => api.get("/automatizaciones/file-service"),
+      },
+      finanzas: {
+        label: "Revision Finanzas",
+        request: () => api.get("/automatizaciones/finanzas"),
+      },
+      material: {
+        label: "Revision Material",
+        request: () => api.get("/automatizaciones/material-recuperado"),
+      },
+      ultimoReporte: {
+        label: "Ultimo reporte",
+        request: () => api.get("/automatizaciones/reportes/ultimo"),
+      },
+    };
+
+    const accion = acciones[tipo];
+    if (!accion) return;
+
+    setAutomatizaciones((actual) => ({
+      ...actual,
+      cargando: tipo,
+      error: "",
+    }));
+
+    try {
+      const respuesta = await accion.request();
+      const data = respuesta.data || {};
+
+      setAutomatizaciones((actual) => ({
+        ...actual,
+        resultado:
+          tipo === "ultimoReporte"
+            ? actual.resultado
+            : {
+                ...data,
+                nombre: accion.label,
+              },
+        ultimoReporte:
+          tipo === "ultimoReporte"
+            ? data.reporte || null
+            : data.reporte || actual.ultimoReporte,
+        error: "",
+        cargando: "",
+        ultimaEjecucion: new Date().toLocaleString("es-CL", {
+          dateStyle: "short",
+          timeStyle: "short",
+        }),
+      }));
+
+      if (actualizarNotificaciones) {
+        await actualizarNotificaciones();
+      }
+    } catch (error) {
+      setAutomatizaciones((actual) => ({
+        ...actual,
+        error:
+          error.response?.data?.error ||
+          "No se pudo ejecutar la automatizacion seleccionada.",
+        cargando: "",
+      }));
+    }
+  };
+
   const fetchStats = async () => {
     try {
       setCargandoDashboard(true);
@@ -2623,6 +2729,16 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         <AgentesIAGMTCHSection
           estado={agentesIA}
           onActualizar={cargarAgentesIA}
+        />
+      )}
+
+      {mostrarAutomatizaciones && (
+        <AutomatizacionesGMTCHSection
+          estado={automatizaciones}
+          puedeGenerarReportes={puedeGenerarReportesAutomatizacion}
+          puedeVerFinanzas={puedeVerFinanzasAutomatizacion}
+          puedeVerMaterial={puedeVerMaterialAutomatizacion}
+          onEjecutar={ejecutarAutomatizacion}
         />
       )}
 
@@ -2944,6 +3060,212 @@ const AgentesIAGMTCHSection = ({ estado, onActualizar }) => {
             </article>
           ))
         )}
+      </div>
+    </section>
+  );
+};
+
+const normalizarResultadoAutomatizacion = (estado = {}) => {
+  const resultado = estado.resultado?.reporte || estado.resultado || null;
+  if (!resultado) return null;
+
+  return {
+    titulo:
+      resultado.titulo ||
+      estado.resultado?.nombre ||
+      "Resultado de automatizacion",
+    resumen: resultado.resumen || "Sin resumen disponible.",
+    prioridad: resultado.prioridad || "MEDIA",
+    alertas: Array.isArray(resultado.alertas) ? resultado.alertas : [],
+    sugerencias: Array.isArray(resultado.sugerencias) ? resultado.sugerencias : [],
+    accion:
+      resultado.accion_recomendada ||
+      resultado.accionRecomendada ||
+      "Revisar modulo relacionado.",
+    metricas: resultado.metricas || {},
+  };
+};
+
+const clasePrioridadAutomatizacion = (prioridad) => {
+  const valor = String(prioridad || "").toUpperCase();
+  if (valor === "URGENTE") return "border-red-500 bg-red-950/40 text-red-100";
+  if (valor === "ALTA") return "border-orange-400 bg-orange-950/30 text-orange-100";
+  if (valor === "MEDIA") return "border-yellow-400 bg-yellow-950/30 text-yellow-100";
+  return "border-emerald-400 bg-emerald-950/30 text-emerald-100";
+};
+
+const AutomatizacionesGMTCHSection = ({
+  estado,
+  puedeGenerarReportes,
+  puedeVerFinanzas,
+  puedeVerMaterial,
+  onEjecutar,
+}) => {
+  const resultado = normalizarResultadoAutomatizacion(estado);
+  const acciones = [
+    ["revision", "Ejecutar revision", true],
+    ["apertura", "Generar reporte apertura", puedeGenerarReportes],
+    ["cierre", "Generar reporte cierre", puedeGenerarReportes],
+    ["fileService", "File Service", true],
+    ["finanzas", "Finanzas", puedeVerFinanzas],
+    ["material", "Material recuperado", puedeVerMaterial],
+    ["ultimoReporte", "Ver ultimo reporte", puedeGenerarReportes || puedeVerMaterial],
+  ];
+
+  return (
+    <section className="rounded-3xl border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="max-w-3xl">
+          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">
+            Automatizaciones GMTCH
+          </p>
+          <h2 className="mt-2 text-3xl font-black uppercase tracking-tight text-black">
+            Revisiones manuales y reportes operativos
+          </h2>
+          <p className="mt-2 text-xs font-bold uppercase leading-relaxed text-gray-500">
+            V1 manual, auditable y no destructiva. Genera reportes, sugerencias y
+            notificaciones internas accionables; no cambia estados, no marca pagos y no
+            cierra ordenes.
+          </p>
+          {estado?.ultimaEjecucion && (
+            <p className="mt-2 text-[11px] font-black uppercase text-gray-400">
+              Ultima ejecucion: {estado.ultimaEjecucion}
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:max-w-xl xl:grid-cols-3">
+          {acciones
+            .filter(([, , visible]) => visible)
+            .map(([tipo, label]) => (
+              <button
+                key={tipo}
+                type="button"
+                onClick={() => onEjecutar(tipo)}
+                disabled={estado?.cargando === tipo}
+                className="rounded-xl border-2 border-black bg-slate-950 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-blue-700 disabled:opacity-50"
+              >
+                {estado?.cargando === tipo ? "Ejecutando..." : label}
+              </button>
+            ))}
+        </div>
+      </div>
+
+      {estado?.error && (
+        <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-50 p-3 text-xs font-black uppercase text-red-800">
+          {estado.error}
+        </div>
+      )}
+
+      <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="xl:col-span-2 rounded-2xl border-4 border-slate-900 bg-slate-950 p-4 text-white">
+          {!resultado ? (
+            <div>
+              <p className="text-sm font-black uppercase text-slate-300">
+                Sin automatizacion ejecutada en esta sesion
+              </p>
+              <p className="mt-2 text-xs font-bold text-slate-400">
+                Usa Ejecutar revision para levantar pendientes operativos del momento.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h3 className="text-xl font-black uppercase">{resultado.titulo}</h3>
+                  <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-200">
+                    {resultado.resumen}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full border px-3 py-2 text-[10px] font-black uppercase ${clasePrioridadAutomatizacion(
+                    resultado.prioridad
+                  )}`}
+                >
+                  {resultado.prioridad}
+                </span>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {(resultado.alertas || []).slice(0, 6).map((alerta) => (
+                  <div
+                    key={alerta.id || alerta.titulo}
+                    className={`rounded-xl border p-3 ${clasePrioridadAutomatizacion(
+                      alerta.prioridad
+                    )}`}
+                  >
+                    <p className="text-xs font-black uppercase">{alerta.titulo}</p>
+                    <p className="mt-1 text-[11px] font-semibold leading-relaxed">
+                      {alerta.detalle}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {alerta.accion_url && (
+                        <Link
+                          to={alerta.accion_url}
+                          className="rounded-lg border border-current px-2 py-1 text-[10px] font-black uppercase"
+                        >
+                          Abrir
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {(resultado.alertas || []).length === 0 && (
+                  <div className="rounded-xl border border-emerald-400 bg-emerald-950/30 p-3 text-xs font-black uppercase text-emerald-100">
+                    Sin alertas relevantes en esta revision.
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-blue-400/40 bg-black/30 p-3">
+                <p className="text-[10px] font-black uppercase text-blue-300">
+                  Accion recomendada
+                </p>
+                <p className="mt-1 text-xs font-bold leading-relaxed text-white">
+                  {resultado.accion}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <aside className="rounded-2xl border-4 border-black bg-blue-50 p-4">
+          <p className="text-[11px] font-black uppercase tracking-[0.16em] text-blue-800">
+            Ultimo reporte guardado
+          </p>
+          {estado?.ultimoReporte ? (
+            <div className="mt-3">
+              <h3 className="text-lg font-black uppercase text-black">
+                {estado.ultimoReporte.titulo}
+              </h3>
+              <p className="mt-2 text-xs font-bold leading-relaxed text-gray-700">
+                {estado.ultimoReporte.resumen}
+              </p>
+              <p className="mt-3 text-[10px] font-black uppercase text-gray-500">
+                Por {estado.ultimoReporte.generado_por || "sistema"} -{" "}
+                {formatoFechaCorta(estado.ultimoReporte.createdAt)}
+              </p>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs font-bold uppercase text-gray-500">
+              Presiona Ver ultimo reporte o genera apertura/cierre.
+            </p>
+          )}
+
+          {resultado?.sugerencias?.length > 0 && (
+            <div className="mt-4 border-t-2 border-blue-200 pt-4">
+              <p className="text-[10px] font-black uppercase text-blue-800">
+                Sugerencias
+              </p>
+              <ul className="mt-2 space-y-1 text-[11px] font-bold leading-relaxed text-gray-700">
+                {resultado.sugerencias.slice(0, 4).map((item) => (
+                  <li key={item}>- {item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </aside>
       </div>
     </section>
   );

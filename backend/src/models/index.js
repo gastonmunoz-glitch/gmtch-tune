@@ -7,6 +7,7 @@ const FotoVehiculo = require("./FotoVehiculo");
 const Usuario = require("./Usuario");
 const Notificacion = require("./Notificacion");
 const BitacoraOperativa = require("./BitacoraOperativa");
+const AutomatizacionReporte = require("./AutomatizacionReporte");
 const MaterialRecuperado = require("./MaterialRecuperado");
 const MovimientoFinanciero = require("./MovimientoFinanciero");
 const FondoReservaMovimiento = require("./FondoReservaMovimiento");
@@ -253,6 +254,7 @@ module.exports = {
   Usuario,
   Notificacion,
   BitacoraOperativa,
+  AutomatizacionReporte,
   MaterialRecuperado,
   MovimientoFinanciero,
   FondoReservaMovimiento,
