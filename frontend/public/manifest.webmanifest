@@ -1,0 +1,48 @@
+{
+  "name": "GMTCH Tune OS",
+  "short_name": "GMTCH OS",
+  "description": "Plataforma operativa GMTCH Tune OS",
+  "id": "/login",
+  "start_url": "/login",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "browser"],
+  "background_color": "#020617",
+  "theme_color": "#006DFF",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity", "automotive"],
+  "icons": [
+    {
+      "src": "/pwa/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/pwa/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Acceso plataforma",
+      "short_name": "Login",
+      "url": "/login",
+      "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Web GMTCH Tune",
+      "short_name": "Web",
+      "url": "/web",
+      "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Portal File Service",
+      "short_name": "Portal",
+      "url": "/portal/login",
+      "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

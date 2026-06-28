@@ -302,6 +302,30 @@ function App() {
     rutaActual === "/portal" ||
     (rutaActual.startsWith("/portal/") && rutaActual !== "/portal/login");
 
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return undefined;
+
+    const host = window.location.hostname;
+    const contextoSeguro =
+      window.location.protocol === "https:" ||
+      host === "localhost" ||
+      host === "127.0.0.1";
+
+    if (!contextoSeguro) return undefined;
+
+    const registrarServiceWorker = () => {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    };
+
+    if (document.readyState === "complete") {
+      registrarServiceWorker();
+      return undefined;
+    }
+
+    window.addEventListener("load", registrarServiceWorker, { once: true });
+    return () => window.removeEventListener("load", registrarServiceWorker);
+  }, []);
+
   const mostrarAlertaNotificacion = (notificacion) => {
     if (!notificacion) return;
 
@@ -2480,6 +2504,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
       <ReglaOperativaGMTCH />
 
+      <PwaIOSInstallSection />
+
       <SemaforoOperativo semaforo={stats.semaforoOperativo} />
 
       <AtencionInmediataSection items={stats.atencionInmediata} />
@@ -2621,6 +2647,47 @@ const SemaforoOperativo = ({ semaforo }) => (
         Centro de Mando V2
       </span>
     </div>
+  </section>
+);
+
+const PwaIOSInstallSection = () => (
+  <section className="rounded-3xl border-4 border-blue-600 bg-slate-950 p-5 text-white shadow-[8px_8px_0px_0px_rgba(37,99,235,0.35)]">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="max-w-3xl">
+        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-300">
+          App instalable iPhone / iPad
+        </p>
+        <h2 className="mt-2 text-2xl font-black uppercase tracking-tight">
+          Instalar GMTCH Tune OS
+        </h2>
+        <p className="mt-2 text-sm font-bold text-slate-200">
+          Instala GMTCH Tune OS en tu iPhone para acceso rapido y mejor experiencia
+          de alertas. Las notificaciones push reales quedan preparadas para una fase
+          posterior; por ahora se mantienen campana, sonido y polling interno.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 text-[11px] font-black uppercase text-slate-100 sm:grid-cols-2 lg:min-w-[420px]">
+        <span className="rounded-2xl border border-blue-400/40 bg-white/10 px-3 py-2">
+          1. Abrir en Safari
+        </span>
+        <span className="rounded-2xl border border-blue-400/40 bg-white/10 px-3 py-2">
+          2. Tocar Compartir
+        </span>
+        <span className="rounded-2xl border border-blue-400/40 bg-white/10 px-3 py-2">
+          3. Agregar a pantalla de inicio
+        </span>
+        <span className="rounded-2xl border border-blue-400/40 bg-white/10 px-3 py-2">
+          4. Abrir desde el icono GMTCH
+        </span>
+      </div>
+    </div>
+
+    <p className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-3 text-xs font-bold text-slate-300">
+      Dentro de la app, activa sonido fuerte o normal desde Notificaciones para no
+      perder tareas asignadas. En iOS, los permisos dependen de Safari y de la version
+      instalada en el dispositivo.
+    </p>
   </section>
 );
 
