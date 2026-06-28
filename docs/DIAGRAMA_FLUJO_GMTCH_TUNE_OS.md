@@ -353,7 +353,39 @@ flowchart TD
 
 Regla: toda notificacion nueva debe incluir una accion directa cuando conozca la orden, archivo ECU, solicitud portal, cliente, vehiculo, bitacora o postventa relacionada. Las notificaciones antiguas usan fallback por `ordenId`, `archivoECUId` o metadata disponible.
 
-## 13. Flujo Dominios
+## 13. Flujo Agentes IA V1
+
+```mermaid
+flowchart TD
+  A["OWNER / ADMIN abre Dashboard"] --> B["Frontend carga /api/ai-agents/*"]
+  B --> C["Backend autentica token interno"]
+  C --> D{"Rol autorizado"}
+  D -->|OWNER / ADMIN| E["Leer datos operativos existentes"]
+  D -->|Otro rol| X["403 sin mostrar panel"]
+  E --> F["Ordenes, clientes y vehiculos"]
+  E --> G["File Service interno"]
+  E --> H["Bitacora operativa"]
+  E --> I["Finanzas y material"]
+  F --> J["Reglas deterministicas V1"]
+  G --> J
+  H --> J
+  I --> J
+  J --> K["Asistente Recepcion"]
+  J --> L["Auditor Operativo"]
+  J --> M["Asistente File Service"]
+  J --> N["Asistente Finanzas"]
+  J --> O["Gerente Diario GMTCH"]
+  K --> P["Resumen, alertas, sugerencias y links"]
+  L --> P
+  M --> P
+  N --> P
+  O --> P
+  P --> Q["Humano decide y actua en modulo correspondiente"]
+```
+
+Regla: Agentes IA V1 es solo lectura. No crea ordenes, no cambia estados, no marca pagos, no borra datos y no ejecuta acciones automaticas. Toda accion futura requiere confirmacion humana.
+
+## 14. Flujo Dominios
 
 ```mermaid
 flowchart LR
@@ -365,6 +397,6 @@ flowchart LR
   API --> BE
 ```
 
-## 14. Regla de Mantenimiento
+## 15. Regla de Mantenimiento
 
 Este documento debe actualizarse cada vez que se cambie un flujo operativo, ruta critica, rol, portal, dominio, integracion, estado de File Service, pago, notificacion o arquitectura.

@@ -161,6 +161,7 @@ const fotoVehiculoRoutes = require("./src/routes/fotoVehiculoRoutes");
 const notificacionRoutes = require("./src/routes/notificacionRoutes");
 const bitacoraOperativaRoutes = require("./src/routes/bitacoraOperativaRoutes");
 const finanzasRoutes = require("./src/routes/finanzasRoutes");
+const aiAgentRoutes = require("./src/routes/aiAgentRoutes");
 const portalAuthRoutes = require("./src/routes/portalAuthRoutes");
 const portalFileRoutes = require("./src/routes/portalFileRoutes");
 const portalAdminRoutes = require("./src/routes/portalAdminRoutes");
@@ -175,6 +176,7 @@ app.use("/api/portal/auth", portalAuthRoutes);
 app.use("/api/portal/files", autenticarPortal, portalFileRoutes);
 app.use("/api/portal/creditos", autenticarPortal, portalFileRoutes.creditosRouter);
 app.use("/api/portal/admin", autenticar, permitirRoles("OWNER"), portalAdminRoutes);
+app.use("/api/ai-agents", autenticar, permitirRoles("OWNER", "ADMIN"), aiAgentRoutes);
 
 app.use(
   "/api/usuarios",

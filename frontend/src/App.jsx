@@ -177,6 +177,9 @@ const puedeVerOperacion = (usuario) =>
     "TUNER",
   ].includes(String(usuario?.rol || "").toUpperCase());
 
+const puedeVerAgentesIA = (usuario) =>
+  ["OWNER", "ADMIN"].includes(String(usuario?.rol || "").toUpperCase());
+
 const limpiarSesion = () => {
   localStorage.removeItem("token");
   localStorage.removeItem("rol");
@@ -1415,6 +1418,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const puedeVerFileService = tieneRol(usuario, PERMISOS_RUTAS["/archivos-ecu"]);
   const mostrarComercial = puedeVerMetricasComerciales(usuario);
   const mostrarOperacion = puedeVerOperacion(usuario);
+  const mostrarAgentesIA = puedeVerAgentesIA(usuario);
 
   const [stats, setStats] = useState({
     cajaHoy: 0,
@@ -1464,6 +1468,12 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     items: [],
     puedeResolver: false,
     error: "",
+  });
+  const [agentesIA, setAgentesIA] = useState({
+    items: [],
+    error: "",
+    cargando: false,
+    ultimaActualizacion: null,
   });
   const [bitacoraForm, setBitacoraForm] = useState({
     tipo: "OPERACION",
@@ -2318,6 +2328,104 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     };
   };
 
+  const normalizarAgenteIA = (definicion, respuesta) => {
+    const data = respuesta?.data || {};
+
+    return {
+      id: definicion.id,
+      titulo: data.agente || definicion.titulo,
+      resumen: data.resumen || "Sin resumen disponible.",
+      alertas: Array.isArray(data.alertas) ? data.alertas : [],
+      sugerencias: Array.isArray(data.sugerencias) ? data.sugerencias : [],
+      accionRecomendada:
+        data.accionRecomendada ||
+        data.accion_recomendada ||
+        "Revisar modulo relacionado.",
+      links: Array.isArray(data.links) ? data.links : [],
+      metricas: data.metricas || {},
+      modo: data.modo || "deterministico_v1",
+    };
+  };
+
+  const cargarAgentesIA = async () => {
+    if (!mostrarAgentesIA) {
+      setAgentesIA({
+        items: [],
+        error: "",
+        cargando: false,
+        ultimaActualizacion: null,
+      });
+      return;
+    }
+
+    const definiciones = [
+      {
+        id: "gerente-diario",
+        titulo: "Gerente Diario",
+        endpoint: "/ai-agents/gerente-diario",
+      },
+      {
+        id: "auditoria-dia",
+        titulo: "Auditor Operativo",
+        endpoint: "/ai-agents/auditoria-dia",
+      },
+      {
+        id: "file-service-alertas",
+        titulo: "File Service",
+        endpoint: "/ai-agents/file-service-alertas",
+      },
+      {
+        id: "finanzas-resumen",
+        titulo: "Finanzas",
+        endpoint: "/ai-agents/finanzas-resumen",
+      },
+      {
+        id: "resumen-operativo",
+        titulo: "Recepcion",
+        endpoint: "/ai-agents/resumen-operativo",
+      },
+    ];
+
+    setAgentesIA((actual) => ({ ...actual, cargando: true }));
+
+    try {
+      const respuestas = await Promise.allSettled(
+        definiciones.map((definicion) => api.get(definicion.endpoint))
+      );
+
+      const items = respuestas
+        .map((respuesta, index) =>
+          respuesta.status === "fulfilled"
+            ? normalizarAgenteIA(definiciones[index], respuesta.value)
+            : null
+        )
+        .filter(Boolean);
+
+      const fallas = respuestas.filter((respuesta) => respuesta.status === "rejected")
+        .length;
+
+      setAgentesIA({
+        items,
+        error:
+          fallas > 0
+            ? "Algunos agentes IA no respondieron. El panel sigue en modo seguro."
+            : "",
+        cargando: false,
+        ultimaActualizacion: new Date().toLocaleString("es-CL", {
+          dateStyle: "short",
+          timeStyle: "short",
+        }),
+      });
+    } catch (error) {
+      setAgentesIA({
+        items: [],
+        error: "No se pudo cargar Agentes IA GMTCH.",
+        cargando: false,
+        ultimaActualizacion: null,
+      });
+    }
+  };
+
   const fetchStats = async () => {
     try {
       setCargandoDashboard(true);
@@ -2387,6 +2495,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       crearToastsDesdeAlertas(dashboardCalculado.alertasOperativas);
       if (actualizarNotificaciones) {
         await actualizarNotificaciones();
+      }
+      if (mostrarAgentesIA) {
+        await cargarAgentesIA();
       }
     } catch (err) {
       console.error("Error cargando estadisticas:", err.response?.data || err.message);
@@ -2507,6 +2618,13 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       <PwaIOSInstallSection />
 
       <SemaforoOperativo semaforo={stats.semaforoOperativo} />
+
+      {mostrarAgentesIA && (
+        <AgentesIAGMTCHSection
+          estado={agentesIA}
+          onActualizar={cargarAgentesIA}
+        />
+      )}
 
       <AtencionInmediataSection items={stats.atencionInmediata} />
 
@@ -2690,6 +2808,146 @@ const PwaIOSInstallSection = () => (
     </p>
   </section>
 );
+
+const textoAlertaAgente = (alerta) => {
+  if (typeof alerta === "string") return alerta;
+  return alerta?.texto || alerta?.mensaje || alerta?.titulo || "Alerta operativa";
+};
+
+const nivelAlertaAgente = (alerta) => {
+  const nivel = String(alerta?.nivel || alerta?.severidad || "").toLowerCase();
+  if (nivel.includes("critic")) return "critica";
+  if (nivel.includes("atencion") || nivel.includes("atención")) return "atencion";
+  return "seguimiento";
+};
+
+const claseAlertaAgente = (alerta) => {
+  const nivel = nivelAlertaAgente(alerta);
+  if (nivel === "critica") return "border-red-500 bg-red-950/40 text-red-100";
+  if (nivel === "atencion")
+    return "border-yellow-400 bg-yellow-950/30 text-yellow-100";
+  return "border-blue-400 bg-blue-950/30 text-blue-100";
+};
+
+const AgentesIAGMTCHSection = ({ estado, onActualizar }) => {
+  const items = estado?.items || [];
+
+  return (
+    <section className="rounded-3xl border-4 border-slate-900 bg-slate-950 p-5 text-white shadow-[8px_8px_0px_0px_rgba(37,99,235,0.35)]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-3xl">
+          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-300">
+            Agentes IA GMTCH
+          </p>
+          <h2 className="mt-2 text-3xl font-black uppercase tracking-tight">
+            Lectura operativa y sugerencias
+          </h2>
+          <p className="mt-2 text-xs font-bold uppercase leading-relaxed text-slate-300">
+            V1 solo lectura: analiza datos del sistema, entrega alertas y recomienda
+            acciones. No crea ordenes, no cambia estados, no marca pagos y no borra datos.
+          </p>
+          {estado?.ultimaActualizacion && (
+            <p className="mt-2 text-[11px] font-bold uppercase text-slate-400">
+              Ultima lectura IA: {estado.ultimaActualizacion}
+            </p>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={onActualizar}
+          disabled={estado?.cargando}
+          className="rounded-xl border-2 border-blue-400 bg-blue-500 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-blue-400 disabled:opacity-50"
+        >
+          {estado?.cargando ? "Analizando..." : "Actualizar agentes"}
+        </button>
+      </div>
+
+      {estado?.error && (
+        <div className="mt-4 rounded-xl border-2 border-yellow-400 bg-yellow-950/30 p-3 text-xs font-black uppercase text-yellow-100">
+          {estado.error}
+        </div>
+      )}
+
+      <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-5">
+        {items.length === 0 ? (
+          <div className="xl:col-span-5 rounded-2xl border-2 border-slate-700 bg-slate-900 p-4 text-xs font-black uppercase text-slate-400">
+            Sin lectura de agentes IA disponible para este rol.
+          </div>
+        ) : (
+          items.map((agente) => (
+            <article
+              key={agente.id || agente.titulo}
+              className="flex min-h-[320px] flex-col rounded-2xl border-2 border-slate-700 bg-slate-900 p-4"
+            >
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-300">
+                  {agente.modo || "deterministico_v1"}
+                </p>
+                <h3 className="mt-2 text-lg font-black uppercase text-white">
+                  {agente.titulo}
+                </h3>
+                <p className="mt-3 text-xs font-semibold leading-relaxed text-slate-200">
+                  {agente.resumen}
+                </p>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {(agente.alertas || []).slice(0, 2).map((alerta, index) => (
+                  <div
+                    key={`${agente.id}-alerta-${index}`}
+                    className={`rounded-xl border px-3 py-2 text-[11px] font-bold leading-relaxed ${claseAlertaAgente(
+                      alerta
+                    )}`}
+                  >
+                    {textoAlertaAgente(alerta)}
+                  </div>
+                ))}
+                {(agente.alertas || []).length === 0 && (
+                  <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 text-[11px] font-bold uppercase text-emerald-100">
+                    Sin alertas criticas
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4">
+                <p className="text-[10px] font-black uppercase text-slate-400">
+                  Sugerencias
+                </p>
+                <ul className="mt-2 space-y-1 text-[11px] font-semibold leading-relaxed text-slate-300">
+                  {(agente.sugerencias || []).slice(0, 2).map((sugerencia) => (
+                    <li key={sugerencia}>- {sugerencia}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-blue-400/30 bg-black/30 p-3">
+                <p className="text-[10px] font-black uppercase text-blue-300">
+                  Accion recomendada
+                </p>
+                <p className="mt-1 text-[11px] font-bold leading-relaxed text-white">
+                  {agente.accionRecomendada}
+                </p>
+              </div>
+
+              <div className="mt-auto flex flex-wrap gap-2 pt-4">
+                {(agente.links || []).slice(0, 3).map((item) => (
+                  <Link
+                    key={`${agente.id}-${item.label}-${item.url}`}
+                    to={String(item.url || "/").startsWith("/") ? item.url : "/"}
+                    className="rounded-lg border border-blue-400 px-3 py-2 text-[10px] font-black uppercase text-blue-100 transition hover:bg-blue-500 hover:text-white"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+    </section>
+  );
+};
 
 const AtencionInmediataSection = ({ items = [] }) => (
   <section className="space-y-4">

@@ -37,6 +37,21 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Notificaciones mantienen campana, contador, alerta flotante y polling.
 - Sonido: probar normal, fuerte y boton de prueba sin repeticion infinita.
 
+## 2.1 QA Agentes IA GMTCH V1
+
+- Login como OWNER y confirmar bloque `Agentes IA GMTCH` en dashboard.
+- Login como ADMIN si existe y confirmar acceso al bloque.
+- Login como RECEPCION/OPERADOR_ECU/MECANICO/TUNER y confirmar que el bloque no aparece.
+- Probar `GET /api/ai-agents/gerente-diario` con token OWNER.
+- Probar `GET /api/ai-agents/resumen-operativo` con token OWNER.
+- Probar `GET /api/ai-agents/auditoria-dia` con token OWNER.
+- Probar `GET /api/ai-agents/file-service-alertas` con token OWNER.
+- Probar `GET /api/ai-agents/finanzas-resumen` con token OWNER.
+- Confirmar que cada agente devuelve resumen, alertas, sugerencias, accion recomendada y links.
+- Confirmar que las sugerencias no crean ordenes, no cambian estados, no marcan pagos y no borran datos.
+- Confirmar que si un endpoint falla, el dashboard sigue funcionando.
+- Confirmar que los links de agentes llevan a modulos existentes: ordenes, File Service, Finanzas, Portal admin o bitacora.
+
 ## 3. QA Ordenes
 
 - Crear orden con vehiculo existente.
@@ -182,6 +197,7 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 | Health backend |  |  |  |  |
 | Login interno |  |  |  |  |
 | Dashboard V2 |  |  |  |  |
+| Agentes IA GMTCH V1 |  |  |  |  |
 | Bitacora operativa |  |  |  |  |
 | Ordenes |  |  |  |  |
 | Postventa tecnica |  |  |  |  |
