@@ -449,7 +449,42 @@ flowchart TD
 
 Regla: con base limpia no se ingresan trabajos sin cliente, vehiculo y motivo claro. Si no esta registrado, no existe. Datos demo no deben volver a contaminar dashboard, finanzas ni estadisticas.
 
-## 16. Flujo Dominios
+## 16. Flujo CRM Comercial / Leads V1
+
+```mermaid
+flowchart TD
+  A["Contacto entra por WhatsApp / Instagram / Web / Presencial / Referido"] --> B["Recepcion registra lead manual en /leads"]
+  B --> C["Selecciona servicio de interes"]
+  C --> C1["Backend busca tarifa en /api/tarifas"]
+  C1 --> C2{"Datos minimos completos"}
+  C2 -->|No| E["CALIFICANDO / pedir marca, modelo, año, motor y servicio"]
+  C2 -->|Si| C3{"Presupuesto bajo minimo"}
+  C3 -->|Si| E2["Prioridad BAJA / respuesta educativa"]
+  C3 -->|No| C4["Backend calcula score deterministico"]
+  C4 --> D{"Clasificacion"}
+  D -->|Interes real| F["POTENCIAL_REAL"]
+  D -->|Quiere agenda| G["AGENDADO"]
+  D -->|No corresponde| H["NO_INTERESADO / SPAM"]
+
+  F --> I["Notificacion interna accionable"]
+  G --> I
+  I --> J["/leads?leadId={id}"]
+
+  E --> K["Registrar interaccion"]
+  E2 --> K
+  F --> K
+  G --> K
+  K --> L["Copiar respuesta sugerida con precio desde si existe"]
+  L --> M{"Avanza"}
+  M -->|Si| N["Convertir a cliente"]
+  N --> O["Crear vehiculo si corresponde"]
+  O --> P["Crear orden desde lead con vehiculo existente"]
+  M -->|No| Q["PERDIDO / NO_INTERESADO"]
+```
+
+Regla: CRM Comercial V1 no envia mensajes automaticos, no crea pagos, no entrega vehiculos y no reemplaza el flujo operativo. El tarifario evita cotizaciones inventadas; si faltan datos minimos, primero se piden marca, modelo, año, motor y servicio requerido.
+
+## 17. Flujo Dominios
 
 ```mermaid
 flowchart LR
@@ -461,6 +496,6 @@ flowchart LR
   API --> BE
 ```
 
-## 17. Regla de Mantenimiento
+## 18. Regla de Mantenimiento
 
 Este documento debe actualizarse cada vez que se cambie un flujo operativo, ruta critica, rol, portal, dominio, integracion, estado de File Service, pago, notificacion o arquitectura.

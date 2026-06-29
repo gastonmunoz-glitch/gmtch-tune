@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, Navigate } from "react-router-dom";
 import api from "./services/api";
+import {
+  getPriorityColor,
+  getStatusColor,
+} from "./utils/statusStyles";
 
 import ClientesPage from "./pages/ClientesPage";
 import VehiculosPage from "./pages/VehiculosPage";
@@ -20,6 +24,7 @@ import PortalNuevoArchivoPage from "./pages/PortalNuevoArchivoPage";
 import PortalMisArchivosPage from "./pages/PortalMisArchivosPage";
 import PortalCreditosPage from "./pages/PortalCreditosPage";
 import PortalAdminPage from "./pages/PortalAdminPage";
+import LeadsPage from "./pages/LeadsPage";
 
 const PERMISOS_RUTAS = {
   "/": [
@@ -34,6 +39,14 @@ const PERMISOS_RUTAS = {
   ],
   "/flujo": ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
   "/clientes": ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
+  "/leads": [
+    "OWNER",
+    "ADMIN",
+    "SUPERVISOR",
+    "RECEPCION",
+    "OPERADOR_ECU",
+    "TUNER",
+  ],
   "/vehiculos": [
     "OWNER",
     "ADMIN",
@@ -115,6 +128,11 @@ const MENU = [
     to: "/clientes",
     label: "Clientes",
     roles: PERMISOS_RUTAS["/clientes"],
+  },
+  {
+    to: "/leads",
+    label: "Leads / CRM",
+    roles: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
   },
   {
     to: "/vehiculos",
@@ -904,6 +922,15 @@ function App() {
                 />
 
                 <Route
+                  path="/leads"
+                  element={
+                    <Protegido usuario={usuario} roles={PERMISOS_RUTAS["/leads"]}>
+                      <LeadsPage />
+                    </Protegido>
+                  }
+                />
+
+                <Route
                   path="/vehiculos"
                   element={
                     <Protegido usuario={usuario} roles={PERMISOS_RUTAS["/vehiculos"]}>
@@ -1287,10 +1314,10 @@ const NotificacionesInternas = ({
                       </div>
 
                       <span
-                        className={`shrink-0 border-2 border-black rounded-full px-2 py-1 text-[10px] font-black uppercase ${
+                        className={`shrink-0 border-2 rounded-full px-2 py-1 text-[10px] font-black uppercase ${
                           notificacion.leida
-                            ? "bg-gray-100 text-gray-600"
-                            : "bg-green-100 text-green-800"
+                            ? getStatusColor("ARCHIVADO", "soft")
+                            : getStatusColor("PENDIENTE", "soft")
                         }`}
                       >
                         {notificacion.leida ? "Leida" : "No leida"}
@@ -1431,6 +1458,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const mostrarOperacion = puedeVerOperacion(usuario);
   const mostrarAgentesIA = puedeVerAgentesIA(usuario);
   const mostrarAutomatizaciones = puedeVerAutomatizaciones(usuario);
+  const mostrarCRM = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(
+    String(usuario?.rol || "").toUpperCase()
+  );
   const mostrarChecklistLunes = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
     String(usuario?.rol || "").toUpperCase()
   );
@@ -1473,6 +1503,18 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     postventaPendientesDetalle: [],
     alertasOperativas: [],
     checklistOperativo: [],
+    leads: {
+      total: 0,
+      nuevos: 0,
+      potenciales_reales: 0,
+      sin_responder_30m: 0,
+      cotizados_pendientes: 0,
+      sin_datos_minimos: 0,
+      presupuesto_bajo: 0,
+      ganados_semana: 0,
+      perdidos_semana: 0,
+      tasa_conversion: 0,
+    },
     finanzas: null,
     graficos: {
       ventas: [],
@@ -1653,10 +1695,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   };
 
   const colorAtencion = (nivel) => {
-    if (nivel === "rojo") return "border-red-600 bg-red-50 text-red-950";
-    if (nivel === "ambar") return "border-yellow-500 bg-yellow-50 text-yellow-950";
-    if (nivel === "azul") return "border-blue-500 bg-blue-50 text-blue-950";
-    return "border-green-500 bg-green-50 text-green-950";
+    if (nivel === "rojo") return getStatusColor("ALERTA", "soft");
+    if (nivel === "ambar") return getStatusColor("PENDIENTE", "soft");
+    if (nivel === "azul") return getStatusColor("EN_PROCESO", "soft");
+    if (nivel === "morado") return getStatusColor("REQUIERE_NUEVA_LECTURA", "soft");
+    return getStatusColor("OK", "soft");
   };
 
   const cerrarToast = (id) => {
@@ -1708,7 +1751,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     });
   };
 
-  const calcularDashboard = (ordenes, clientes, vehiculos, archivos, finanzas = null) => {
+  const calcularDashboard = (
+    ordenes,
+    clientes,
+    vehiculos,
+    archivos,
+    finanzas = null,
+    leadsResumen = null
+  ) => {
     const hoy = new Date();
     const desdeSemana = inicioSemana(hoy);
     const pagadasMes = [];
@@ -2345,6 +2395,18 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         crearItemChecklist("Pagos pendientes", pagosPendientes),
         crearItemChecklist("Entregadas hoy", entregadasHoy),
       ],
+      leads: {
+        total: Number(leadsResumen?.total || 0),
+        nuevos: Number(leadsResumen?.nuevos || 0),
+        potenciales_reales: Number(leadsResumen?.potenciales_reales || 0),
+        sin_responder_30m: Number(leadsResumen?.sin_responder_30m || 0),
+        cotizados_pendientes: Number(leadsResumen?.cotizados_pendientes || 0),
+        sin_datos_minimos: Number(leadsResumen?.sin_datos_minimos || 0),
+        presupuesto_bajo: Number(leadsResumen?.presupuesto_bajo || 0),
+        ganados_semana: Number(leadsResumen?.ganados_semana || 0),
+        perdidos_semana: Number(leadsResumen?.perdidos_semana || 0),
+        tasa_conversion: Number(leadsResumen?.tasa_conversion || 0),
+      },
       finanzas,
       graficos,
       clientes: puedeVerBase ? clientesReales.length : "Sin acceso",
@@ -2555,6 +2617,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         mostrarComercial
           ? api.get("/finanzas/resumen")
           : Promise.resolve({ data: null }),
+        mostrarCRM
+          ? api.get("/leads/resumen")
+          : Promise.resolve({ data: null }),
       ]);
 
       const [
@@ -2564,6 +2629,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         archivosRes,
         bitacoraRes,
         finanzasRes,
+        leadsRes,
       ] =
         respuestas;
 
@@ -2579,6 +2645,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         bitacoraRes.status === "fulfilled" ? normalizarArray(bitacoraRes.value) : [];
       const finanzasResumen =
         finanzasRes.status === "fulfilled" ? finanzasRes.value?.data || null : null;
+      const leadsResumen =
+        leadsRes.status === "fulfilled" ? leadsRes.value?.data || null : null;
 
       setBitacoraOperativa({
         items: bitacoraItems,
@@ -2597,7 +2665,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         clientes,
         vehiculos,
         archivos,
-        finanzasResumen
+        finanzasResumen,
+        leadsResumen
       );
 
       setStats(dashboardCalculado);
@@ -2730,6 +2799,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
       <SemaforoOperativo semaforo={stats.semaforoOperativo} />
 
+      {mostrarCRM && <CRMComercialDashboardSection leads={stats.leads} />}
+
       {mostrarAgentesIA && (
         <AgentesIAGMTCHSection
           estado={agentesIA}
@@ -2827,10 +2898,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 }
 
 const nivelClassCentro = (nivel) => {
-  if (nivel === "rojo") return "border-red-600 bg-red-50 text-red-950";
-  if (nivel === "ambar") return "border-yellow-500 bg-yellow-50 text-yellow-950";
-  if (nivel === "azul") return "border-blue-500 bg-blue-50 text-blue-950";
-  return "border-green-500 bg-green-50 text-green-950";
+  if (nivel === "rojo") return getStatusColor("ALERTA", "soft");
+  if (nivel === "ambar") return getStatusColor("PENDIENTE", "soft");
+  if (nivel === "azul") return getStatusColor("EN_PROCESO", "soft");
+  if (nivel === "morado") return getStatusColor("REQUIERE_NUEVA_LECTURA", "soft");
+  return getStatusColor("OK", "soft");
 };
 
 const semaforoClass = (color) => {
@@ -2863,6 +2935,118 @@ const SemaforoOperativo = ({ semaforo }) => (
     </div>
   </section>
 );
+
+const CRMComercialDashboardSection = ({ leads = {} }) => {
+  const cards = [
+    {
+      label: "Leads nuevos",
+      value: leads.nuevos,
+      nivel: leads.nuevos > 0 ? "ambar" : "verde",
+      to: "/leads?estado=NUEVO",
+    },
+    {
+      label: "Potenciales reales",
+      value: leads.potenciales_reales,
+      nivel: leads.potenciales_reales > 0 ? "azul" : "verde",
+      to: "/leads?estado=POTENCIAL_REAL",
+    },
+    {
+      label: "Sin responder +30m",
+      value: leads.sin_responder_30m,
+      nivel: leads.sin_responder_30m > 0 ? "rojo" : "verde",
+      to: "/leads",
+    },
+    {
+      label: "Sin datos mínimos",
+      value: leads.sin_datos_minimos,
+      nivel: leads.sin_datos_minimos > 0 ? "ambar" : "verde",
+      to: "/leads",
+    },
+    {
+      label: "Presupuesto bajo",
+      value: leads.presupuesto_bajo,
+      nivel: leads.presupuesto_bajo > 0 ? "ambar" : "verde",
+      to: "/leads",
+    },
+    {
+      label: "Cotizados sin seguimiento",
+      value: leads.cotizados_pendientes,
+      nivel: leads.cotizados_pendientes > 0 ? "ambar" : "verde",
+      to: "/leads?estado=COTIZADO",
+    },
+    {
+      label: "Ganados semana",
+      value: leads.ganados_semana,
+      nivel: "verde",
+      to: "/leads?estado=GANADO",
+    },
+    {
+      label: "Perdidos semana",
+      value: leads.perdidos_semana,
+      nivel: leads.perdidos_semana > 0 ? "ambar" : "verde",
+      to: "/leads?estado=PERDIDO",
+    },
+  ];
+
+  return (
+    <section className="rounded-3xl border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">
+            CRM comercial
+          </p>
+          <h2 className="mt-2 text-3xl font-black uppercase tracking-tight text-black">
+            Leads y oportunidades
+          </h2>
+          <p className="mt-2 max-w-3xl text-xs font-bold uppercase leading-relaxed text-gray-500">
+            Registro manual y seguimiento de conversaciones comerciales. WhatsApp e
+            Instagram siguen siendo canales de entrada; el lead debe quedar trazado aqui.
+          </p>
+        </div>
+        <Link
+          to="/leads"
+          className="rounded-xl border-2 border-black bg-black px-5 py-3 text-xs font-black uppercase text-white transition hover:bg-blue-700"
+        >
+          Abrir CRM
+        </Link>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {cards.map((card) => (
+          <Link
+            key={card.label}
+            to={card.to}
+            className={`rounded-2xl border-4 p-4 shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] transition hover:-translate-y-0.5 ${nivelClassCentro(
+              card.nivel
+            )}`}
+          >
+            <p className="text-[10px] font-black uppercase opacity-70">
+              {card.label}
+            </p>
+            <p className="mt-2 text-3xl font-black">{Number(card.value || 0)}</p>
+          </Link>
+        ))}
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="rounded-2xl border-2 border-black bg-slate-950 p-4 text-white">
+          <p className="text-[10px] font-black uppercase text-slate-400">
+            Total leads
+          </p>
+          <p className="mt-1 text-2xl font-black">{Number(leads.total || 0)}</p>
+        </div>
+        <div className="rounded-2xl border-2 border-black bg-blue-50 p-4 text-blue-950">
+          <p className="text-[10px] font-black uppercase text-blue-800">
+            Tasa conversion semanal
+          </p>
+          <p className="mt-1 text-2xl font-black">
+            {Number(leads.tasa_conversion || 0)}%
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const PwaIOSInstallSection = () => (
   <section className="rounded-3xl border-4 border-blue-600 bg-slate-950 p-5 text-white shadow-[8px_8px_0px_0px_rgba(37,99,235,0.35)]">
@@ -3140,10 +3324,10 @@ const normalizarResultadoAutomatizacion = (estado = {}) => {
 
 const clasePrioridadAutomatizacion = (prioridad) => {
   const valor = String(prioridad || "").toUpperCase();
-  if (valor === "URGENTE") return "border-red-500 bg-red-950/40 text-red-100";
-  if (valor === "ALTA") return "border-orange-400 bg-orange-950/30 text-orange-100";
-  if (valor === "MEDIA") return "border-yellow-400 bg-yellow-950/30 text-yellow-100";
-  return "border-emerald-400 bg-emerald-950/30 text-emerald-100";
+  if (valor === "URGENTE") return getPriorityColor("URGENTE", "dark");
+  if (valor === "ALTA") return getPriorityColor("ALTA", "dark");
+  if (valor === "MEDIA") return getPriorityColor("MEDIA", "dark");
+  return getPriorityColor("BAJA", "dark");
 };
 
 const AutomatizacionesGMTCHSection = ({
@@ -3531,10 +3715,7 @@ const prioridadesBitacora = [
 ];
 
 const prioridadBitacoraClass = (prioridad) => {
-  if (prioridad === "URGENTE") return "bg-red-700 text-white";
-  if (prioridad === "ALTA") return "bg-red-100 text-red-800";
-  if (prioridad === "MEDIA") return "bg-yellow-100 text-yellow-900";
-  return "bg-blue-100 text-blue-800";
+  return getPriorityColor(prioridad || "MEDIA", "solid");
 };
 
 const formatoFechaCorta = (valor) => {
@@ -3878,10 +4059,10 @@ const ToastStack = ({ toasts = [], onCerrar }) => {
   if (!toasts.length) return null;
 
   const clasesPorTipo = {
-    critico: "border-red-600 bg-red-50 text-red-900",
-    atencion: "border-yellow-500 bg-yellow-50 text-yellow-900",
-    exito: "border-green-500 bg-green-50 text-green-900",
-    informacion: "border-blue-500 bg-blue-50 text-blue-900",
+    critico: getStatusColor("ALERTA", "soft"),
+    atencion: getStatusColor("PENDIENTE", "soft"),
+    exito: getStatusColor("OK", "soft"),
+    informacion: getStatusColor("EN_PROCESO", "soft"),
   };
 
   const labelPorTipo = {
@@ -3946,9 +4127,9 @@ const AlertasOperativasSection = ({ alertas = [] }) => {
   const visibles = alertas.slice(0, 5);
 
   const severidadClass = {
-    critica: "bg-red-100 border-red-600 text-red-900",
-    atencion: "bg-yellow-100 border-yellow-500 text-yellow-900",
-    seguimiento: "bg-blue-50 border-blue-500 text-blue-800",
+    critica: getStatusColor("ALERTA", "soft"),
+    atencion: getStatusColor("PENDIENTE", "soft"),
+    seguimiento: getStatusColor("EN_PROCESO", "soft"),
   };
 
   const severidadLabel = {

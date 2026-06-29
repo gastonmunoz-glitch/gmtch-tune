@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import api from "../services/api";
+import {
+  getOperationalStatusLabel,
+  getPaymentStatusColor,
+  getPriorityColor,
+  getStatusColor,
+} from "../utils/statusStyles";
 
 const DATOS_CUENTA = {
   titular: "Gastón Muñoz",
@@ -166,23 +172,11 @@ const prioridadSugeridaPorCategoria = (categoria) => {
 };
 
 const prioridadClase = (prioridad) => {
-  const p = String(prioridad || "MEDIA").toUpperCase();
-
-  if (p === "URGENTE") return "bg-red-600 text-white border-red-900";
-  if (p === "ALTA") return "bg-orange-500 text-black border-orange-900";
-  if (p === "MEDIA") return "bg-blue-600 text-white border-blue-900";
-  return "bg-gray-300 text-black border-gray-700";
+  return getPriorityColor(prioridad || "MEDIA", "solid");
 };
 
 const estadoClase = (estado) => {
-  const e = String(estado || "").toUpperCase();
-
-  if (e === "ENTREGADO") return "bg-black text-white";
-  if (e === "LISTO_PARA_ENTREGA") return "bg-green-600 text-white";
-  if (e === "EN_MECANICA" || e === "PARA_MECANICA") return "bg-orange-500 text-black";
-  if (e === "EN_PROGRAMACION") return "bg-purple-600 text-white";
-  if (e === "PARA_DIAGNOSTICO") return "bg-blue-600 text-white";
-  return "bg-gray-300 text-black";
+  return getStatusColor(estado || "SIN_ESTADO", "solid");
 };
 
 const puedeCobrarFrontend = () => {
@@ -984,7 +978,7 @@ function OrdenesPage() {
                             o.estado
                           )}`}
                         >
-                          {o.estado}
+                          {getOperationalStatusLabel(o.estado)}
                         </span>
 
                         {vip && (
@@ -1597,20 +1591,20 @@ function OrdenesPage() {
                   </div>
 
                   <div
-                    className={`xl:text-right border-2 border-black p-4 ${
-                      pagoConfirmado ? "bg-green-50" : "bg-yellow-50"
-                    }`}
+                    className={`xl:text-right border-2 p-4 ${getPaymentStatusColor(
+                      o.estado_pago || "PENDIENTE",
+                      "soft"
+                    )}`}
                   >
                     <p className="text-[10px] font-black uppercase text-gray-500">
                       Operación / pago
                     </p>
 
                     <p
-                      className={`inline-block px-3 py-1 text-[10px] font-black uppercase ${
-                        pagoConfirmado
-                          ? "bg-green-600 text-white"
-                          : "bg-yellow-400 text-black"
-                      }`}
+                      className={`inline-block border px-3 py-1 text-[10px] font-black uppercase ${getPaymentStatusColor(
+                        o.estado_pago || "PENDIENTE",
+                        "solid"
+                      )}`}
                     >
                       {o.estado_pago || "PENDIENTE"}
                     </p>
@@ -1620,7 +1614,10 @@ function OrdenesPage() {
                     </p>
 
                     <div className="mt-3 space-y-1 text-[10px] font-bold uppercase text-gray-700">
-                      <p>Estado operativo: {o.estado || "Pendiente"}</p>
+                      <p>
+                        Estado operativo:{" "}
+                        {getOperationalStatusLabel(o.estado || "Pendiente")}
+                      </p>
                       <p>Estado pago: {o.estado_pago || "Pendiente"}</p>
                       <p>Medio de pago: {o.medio_pago || "Pendiente"}</p>
                       <p>Monto total: {formatearMonto(o.monto_total)}</p>

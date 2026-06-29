@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import api from "../services/api";
+import {
+  getOperationalStatusLabel,
+  getStatusColor,
+} from "../utils/statusStyles";
 
 const ESTADOS = {
   ORIGINAL_CARGADO: "Original cargado",
@@ -183,33 +187,11 @@ const limpiar = (valor) => {
 };
 
 const badgeClass = (estado) => {
-  switch (estado) {
-    case "ORIGINAL_CARGADO":
-      return "bg-blue-500/15 text-blue-300 border-blue-500/30";
-    case "NOTIFICADO_MASTER":
-      return "bg-purple-500/15 text-purple-300 border-purple-500/30";
-    case "MODIFICADO_LISTO":
-      return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
-    case "NOTIFICADO_SLAVE":
-      return "bg-cyan-500/15 text-cyan-300 border-cyan-500/30";
-    case "POST_ESCRITURA_PENDIENTE":
-      return "bg-yellow-500/15 text-yellow-300 border-yellow-500/30";
-    case "POST_ESCRITURA_OK":
-      return "bg-green-500/15 text-green-300 border-green-500/30";
-    case "REQUIERE_CORRECCION":
-      return "bg-red-500/15 text-red-300 border-red-500/30";
-    case "FINALIZADO":
-    case "FINALIZADO_TECNICO":
-      return "bg-slate-500/15 text-slate-300 border-slate-500/30";
-    case "ARCHIVADO":
-      return "bg-zinc-500/15 text-zinc-400 border-zinc-500/30";
-    default:
-      return "bg-slate-700 text-slate-200 border-slate-600";
-  }
+  return getStatusColor(estado || "SIN_ESTADO", "dark");
 };
 
 const estadoLabel = (estado) => {
-  return ESTADOS[estado] || estado || "Sin estado";
+  return ESTADOS[estado] || getOperationalStatusLabel(estado) || "Sin estado";
 };
 
 const obtenerResponsablePrincipal = (archivo) => {
@@ -1594,7 +1576,7 @@ export default function ArchivosECUPage() {
 
                         <span
                           className={`text-xs px-3 py-1 rounded-full border ${badgeClass(
-                            archivo.estado
+                            archivo.post_escritura_estado
                           )}`}
                         >
                           {estadoLabel(archivo.estado)}

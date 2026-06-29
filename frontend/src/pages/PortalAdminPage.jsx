@@ -13,6 +13,7 @@ import {
   portalAdminUploadMod,
 } from "../services/portalApi";
 import api from "../services/api";
+import { getOperationalStatusLabel, getStatusColor } from "../utils/statusStyles";
 
 const estados = [
   "RECIBIDO",
@@ -38,6 +39,14 @@ const fecha = (valor) => {
 
 const mensajeError = (err, fallback) =>
   err.response?.data?.error || err.message || fallback;
+
+const estadoPortalClass = (estado) => getStatusColor(estado || "RECIBIDO", "soft");
+const estadoCuentaClass = (item) =>
+  !item?.activo
+    ? getStatusColor("ARCHIVADO", "soft")
+    : item?.aprobado
+      ? getStatusColor("VALIDADO", "soft")
+      : getStatusColor("PENDIENTE", "soft");
 
 function PortalAdminPage() {
   const [searchParams] = useSearchParams();
@@ -617,7 +626,11 @@ function PortalAdminPage() {
                   Contacto: {cuenta.contacto || cuenta.telefono || "Sin contacto"}
                 </p>
                 <p className="mt-2 text-xs font-black uppercase">Saldo: {cuenta.saldo_creditos}</p>
-                <p className="text-xs font-bold uppercase text-gray-500">
+                <p
+                  className={`mt-2 inline-block border px-3 py-1 text-xs font-black uppercase ${estadoCuentaClass(
+                    cuenta
+                  )}`}
+                >
                   {cuenta.activo ? "Activa" : "Inactiva"} / {cuenta.aprobado ? "Aprobada" : "Pendiente"}
                 </p>
                 <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
@@ -700,7 +713,10 @@ function PortalAdminPage() {
                   {usuariosPortal.length > 0 ? (
                     <div className="mt-2 space-y-2">
                       {usuariosPortal.map((usuario) => (
-                        <div key={usuario.id || usuario.email} className="bg-gray-100 p-2">
+                        <div
+                          key={usuario.id || usuario.email}
+                          className={`border p-2 ${estadoCuentaClass(usuario)}`}
+                        >
                           <p className="text-xs font-black uppercase">
                             {usuario.nombre || "Usuario portal"}
                           </p>
@@ -714,7 +730,7 @@ function PortalAdminPage() {
                               "No registrado"
                             )}
                           </p>
-                          <p className="text-[10px] font-bold uppercase text-gray-500">
+                          <p className="text-[10px] font-black uppercase">
                             {usuario.activo ? "Activo" : "Inactivo"} / {usuario.aprobado ? "Aprobado" : "Pendiente"}
                           </p>
                           <p className="text-[10px] font-bold uppercase text-gray-500">
@@ -934,6 +950,19 @@ function PortalAdminPage() {
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
                   <div>
                     <p className="text-sm font-black uppercase">File #{archivo.id} - {archivo.tipo_servicio}</p>
+                    <span
+                      className={`mt-2 inline-block border px-3 py-1 text-[10px] font-black uppercase ${estadoPortalClass(
+                        archivo.requiere_nueva_lectura
+                          ? "REQUIERE_NUEVA_LECTURA"
+                          : archivo.estado
+                      )}`}
+                    >
+                      {getOperationalStatusLabel(
+                        archivo.requiere_nueva_lectura
+                          ? "REQUIERE_NUEVA_LECTURA"
+                          : archivo.estado || "RECIBIDO"
+                      )}
+                    </span>
                     <p className="text-xs font-bold text-gray-500">
                       {archivo.Cuenta?.nombre_taller || "Cuenta no registrada"} / {archivo.Usuario?.email || "Usuario no registrado"}
                     </p>
@@ -971,7 +1000,12 @@ function PortalAdminPage() {
                   </div>
 
                   {archivo.requiere_nueva_lectura && (
-                    <div className="mt-3 border-2 border-yellow-500 bg-yellow-50 p-3 text-xs font-bold text-yellow-900">
+                    <div
+                      className={`mt-3 border-2 p-3 text-xs font-bold ${getStatusColor(
+                        "REQUIERE_NUEVA_LECTURA",
+                        "soft"
+                      )}`}
+                    >
                       <p className="font-black uppercase">
                         Nueva lectura solicitada al portal
                       </p>

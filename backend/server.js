@@ -163,6 +163,8 @@ const bitacoraOperativaRoutes = require("./src/routes/bitacoraOperativaRoutes");
 const finanzasRoutes = require("./src/routes/finanzasRoutes");
 const aiAgentRoutes = require("./src/routes/aiAgentRoutes");
 const automatizacionRoutes = require("./src/routes/automatizacionRoutes");
+const leadRoutes = require("./src/routes/leadRoutes");
+const tarifaRoutes = require("./src/routes/tarifaRoutes");
 const portalAuthRoutes = require("./src/routes/portalAuthRoutes");
 const portalFileRoutes = require("./src/routes/portalFileRoutes");
 const portalAdminRoutes = require("./src/routes/portalAdminRoutes");
@@ -179,6 +181,35 @@ app.use("/api/portal/creditos", autenticarPortal, portalFileRoutes.creditosRoute
 app.use("/api/portal/admin", autenticar, permitirRoles("OWNER"), portalAdminRoutes);
 app.use("/api/ai-agents", autenticar, permitirRoles("OWNER", "ADMIN"), aiAgentRoutes);
 app.use("/api/automatizaciones", autenticar, automatizacionRoutes);
+app.use(
+  "/api/leads",
+  autenticar,
+  permitirRoles(
+    "OWNER",
+    "ADMIN",
+    "RECEPCION",
+    "SUPERVISOR",
+    "OPERADOR_ECU",
+    "TUNER"
+  ),
+  leadRoutes
+);
+
+app.use(
+  "/api/tarifas",
+  autenticar,
+  permitirRoles(
+    "OWNER",
+    "ADMIN",
+    "SUPERVISOR",
+    "RECEPCION",
+    "OPERADOR_SCANNER",
+    "OPERADOR_ECU",
+    "MECANICO",
+    "TUNER"
+  ),
+  tarifaRoutes
+);
 
 app.use(
   "/api/usuarios",

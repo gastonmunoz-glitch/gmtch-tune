@@ -55,6 +55,16 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Notificaciones mantienen campana, contador, alerta flotante y polling.
 - Sonido: probar normal, fuerte y boton de prueba sin repeticion infinita.
 
+## 2.3 QA Sistema Visual de Estados
+
+- Confirmar que rojo se use solo para critico, urgente, bloqueado, vencido, cliente volvio o pago bloqueando entrega.
+- Confirmar que ambar se use para pendiente, requiere atencion o espera de accion interna.
+- Confirmar que azul se use para procesos en curso.
+- Confirmar que morado se use para espera de tercero: master, slave, cliente, proveedor o nueva lectura.
+- Confirmar que verde se use para listo, completado, pagado o validado.
+- Confirmar que gris se use para archivado, cancelado, perdido, spam o sin accion.
+- Revisar Dashboard, Ordenes, File Service, Portal Admin, Finanzas, Leads y Notificaciones.
+
 ## 2.1 QA Agentes IA GMTCH V1
 
 - Login como OWNER y confirmar bloque `Agentes IA GMTCH` en dashboard.
@@ -94,6 +104,28 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Marcar LISTO_PARA_ENTREGA.
 - Confirmar pago y entregar solo si corresponde.
 - Validar que roles sin permisos comerciales no vean caja, ventas ni ticket promedio.
+
+## 3.1 QA CRM Comercial / Leads V1
+
+- Login como OWNER/ADMIN/RECEPCION/SUPERVISOR y confirmar acceso a `/leads`.
+- Login como OPERADOR_ECU/TUNER y confirmar que solo ve leads asignados.
+- Crear lead manual desde WhatsApp con nombre, telefono, servicio y mensaje inicial.
+- Confirmar que se calcula score, estado, prioridad y proxima accion.
+- Crear/editar tarifa como OWNER o ADMIN desde `/leads`.
+- Confirmar que RECEPCION/SUPERVISOR ven tarifas activas.
+- Confirmar que OPERADOR_ECU/TUNER no ven notas internas de tarifas.
+- Crear lead que solo pregunta precio sin marca/modelo/año/motor y confirmar `Sin datos minimos`.
+- Crear lead con presupuesto bajo el minimo del tarifario y confirmar prioridad BAJA o alerta de presupuesto bajo.
+- Crear lead con datos completos y presupuesto compatible y confirmar mejora de score.
+- Confirmar que el Dashboard muestra Leads nuevos, Potenciales reales, Sin datos minimos, Presupuesto bajo, Sin responder +30m y Cotizados sin seguimiento.
+- Registrar interaccion saliente y confirmar que el estado puede pasar a CONTACTADO.
+- Copiar sugerencia de respuesta y confirmar que usa precio desde solo si hay tarifa cargada.
+- Confirmar que la respuesta pide marca/modelo/año/motor cuando faltan datos.
+- Confirmar que no se envia automaticamente.
+- Convertir lead a cliente y confirmar que queda vinculado.
+- Crear orden desde lead usando un vehiculo existente.
+- Confirmar que notificaciones de lead llevan a `/leads?leadId={id}`.
+- Confirmar que no se crean pagos, entregas ni cierres comerciales desde CRM.
 
 ## 4. QA Postventa Tecnica
 

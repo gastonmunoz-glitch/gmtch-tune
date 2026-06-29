@@ -13,6 +13,9 @@ const MovimientoFinanciero = require("./MovimientoFinanciero");
 const FondoReservaMovimiento = require("./FondoReservaMovimiento");
 const CierreSemanal = require("./CierreSemanal");
 const ComprobantePago = require("./ComprobantePago");
+const LeadComercial = require("./LeadComercial");
+const LeadInteraccion = require("./LeadInteraccion");
+const TarifaServicio = require("./TarifaServicio");
 const PortalCuenta = require("./PortalCuenta");
 const PortalUsuario = require("./PortalUsuario");
 const PortalFileService = require("./PortalFileService");
@@ -170,6 +173,37 @@ ComprobantePago.belongsTo(MovimientoFinanciero, {
   constraints: false,
 });
 
+// CRM comercial / leads
+LeadComercial.hasMany(LeadInteraccion, {
+  foreignKey: "leadId",
+  constraints: false,
+});
+
+LeadInteraccion.belongsTo(LeadComercial, {
+  foreignKey: "leadId",
+  constraints: false,
+});
+
+Cliente.hasMany(LeadComercial, {
+  foreignKey: "convertido_cliente_id",
+  constraints: false,
+});
+
+LeadComercial.belongsTo(Cliente, {
+  foreignKey: "convertido_cliente_id",
+  constraints: false,
+});
+
+OrdenTrabajo.hasMany(LeadComercial, {
+  foreignKey: "convertido_orden_id",
+  constraints: false,
+});
+
+LeadComercial.belongsTo(OrdenTrabajo, {
+  foreignKey: "convertido_orden_id",
+  constraints: false,
+});
+
 // FileService opcional
 if (FileService) {
   OrdenTrabajo.hasMany(FileService, {
@@ -260,6 +294,9 @@ module.exports = {
   FondoReservaMovimiento,
   CierreSemanal,
   ComprobantePago,
+  LeadComercial,
+  LeadInteraccion,
+  TarifaServicio,
   PortalCuenta,
   PortalUsuario,
   PortalFileService,

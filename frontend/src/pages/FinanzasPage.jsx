@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import api from "../services/api";
+import {
+  getPaymentStatusColor,
+  getStatusColor,
+} from "../utils/statusStyles";
 
 const TABS = [
   ["resumen", "Resumen"],
@@ -70,9 +74,9 @@ const texto = (valor, fallback = "No registrado") =>
 
 const alertaClase = (alerta) => {
   const valor = String(alerta || "OK").toUpperCase();
-  if (valor === "ALERTA") return "bg-red-700 text-white border-red-950";
-  if (valor === "REVISAR") return "bg-yellow-300 text-black border-yellow-800";
-  return "bg-green-600 text-white border-green-900";
+  if (valor === "ALERTA") return getStatusColor("ALERTA", "solid");
+  if (valor === "REVISAR") return getStatusColor("REVISAR", "solid");
+  return getStatusColor("OK", "solid");
 };
 
 const porcentajeSeguro = (valor, total) => {
@@ -91,7 +95,7 @@ const estadoFinanciero = (resumen) => {
     return {
       label: "Atencion financiera",
       detalle: "La utilidad distribuible semanal esta negativa. Revisar gastos y sueldos.",
-      className: "border-red-600 bg-red-50 text-red-900",
+      className: getStatusColor("ALERTA", "soft"),
     };
   }
 
@@ -99,14 +103,14 @@ const estadoFinanciero = (resumen) => {
     return {
       label: "Cobranza pendiente",
       detalle: "Hay comprobantes o pagos por revisar antes de considerar caja cerrada.",
-      className: "border-yellow-500 bg-yellow-50 text-yellow-900",
+      className: getPaymentStatusColor("PENDIENTE", "soft"),
     };
   }
 
   return {
     label: "Finanzas en orden",
     detalle: "Caja pagada, gastos y fondo reserva sin alertas visibles.",
-    className: "border-emerald-600 bg-emerald-50 text-emerald-900",
+    className: getStatusColor("OK", "soft"),
   };
 };
 
@@ -1314,7 +1318,10 @@ const ComprobantesTab = ({ form, setForm, ordenes, comprobantes, onSubmit, valid
     </details>
     <div className="mt-5 space-y-2">
       {comprobantes.map((item) => (
-        <details key={item.id} className="border-2 border-black bg-slate-50 p-3">
+        <details
+          key={item.id}
+          className={`border-2 p-3 ${getStatusColor(item.estado, "soft")}`}
+        >
           <summary className="cursor-pointer list-none">
           <p className="text-xs font-black uppercase">Comprobante #{item.id} / {item.estado} / {formatearMonto(item.monto)}</p>
           <p className="text-[10px] font-bold uppercase text-gray-500">Orden #{item.ordenId || "S/O"} / {formatearFecha(item.fecha_pago)} / {item.metodo_pago}</p>
