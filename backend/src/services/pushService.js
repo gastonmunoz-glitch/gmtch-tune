@@ -70,7 +70,7 @@ const configurarVapid = () => {
   if (vapidConfigurado) return true;
 
   const subject =
-    process.env.VAPID_SUBJECT || "mailto:gaston.munoz@usach.cl";
+    process.env.VAPID_SUBJECT || "mailto:contacto@gmtchtune.com";
 
   webPush.setVapidDetails(
     subject,

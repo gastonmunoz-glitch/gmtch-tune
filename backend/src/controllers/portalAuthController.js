@@ -9,6 +9,11 @@ const limpiarTexto = (valor) => {
   return String(valor).trim();
 };
 
+const mensajeErrorServidor = (error) =>
+  process.env.NODE_ENV === "production"
+    ? "Error interno del servidor"
+    : error.message || "Error interno del servidor";
+
 const sanitizarMetadata = (metadata = {}) => {
   const copia = { ...metadata };
   delete copia.password;
@@ -226,7 +231,7 @@ const loginPortal = async (req, res) => {
     console.error("ERROR LOGIN PORTAL:", error);
 
     res.status(500).json({
-      error: error.message,
+      error: mensajeErrorServidor(error),
     });
   }
 };
@@ -253,7 +258,7 @@ const mePortal = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({
-      error: error.message,
+      error: mensajeErrorServidor(error),
     });
   }
 };

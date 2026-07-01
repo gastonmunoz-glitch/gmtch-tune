@@ -2,7 +2,22 @@ const jwt = require("jsonwebtoken");
 const { PortalUsuario, PortalCuenta, PortalAuditoriaEvento } = require("../models");
 
 const PORTAL_JWT_SECRET =
-  process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET || "gmtch_secret_2026";
+  process.env.PORTAL_JWT_SECRET ||
+  (process.env.NODE_ENV !== "production"
+    ? process.env.JWT_SECRET || "gmtch_dev_portal_jwt_secret_local"
+    : "");
+
+if (!PORTAL_JWT_SECRET) {
+  throw new Error("PORTAL_JWT_SECRET es obligatorio en produccion.");
+}
+
+if (
+  process.env.NODE_ENV === "production" &&
+  process.env.JWT_SECRET &&
+  PORTAL_JWT_SECRET === process.env.JWT_SECRET
+) {
+  throw new Error("PORTAL_JWT_SECRET debe ser distinto a JWT_SECRET en produccion.");
+}
 
 const registrarAccesoDenegado = async (req, descripcion, metadata = {}) => {
   try {

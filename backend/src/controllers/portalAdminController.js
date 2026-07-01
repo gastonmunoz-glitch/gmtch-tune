@@ -23,6 +23,7 @@ const ESTADOS_VALIDOS = [
   "ENTREGADO",
   "RECHAZADO",
 ];
+const PORTAL_UPLOADS_DIR = path.resolve(__dirname, "..", "portal_uploads");
 let columnasNuevaLecturaPreparadas = false;
 
 const limpiarTexto = (valor) => {
@@ -45,8 +46,52 @@ const archivoExiste = (ruta) => {
   }
 };
 
-const descargarArchivoSeguro = (res, ruta, nombre) => {
+const mensajeErrorServidor = (error, fallback = "Error interno del servidor") =>
+  process.env.NODE_ENV === "production"
+    ? fallback
+    : error.message || fallback;
+
+const responderError = (res, error, fallback) => {
+  const status = error.status || error.statusCode || 500;
+  return res.status(status).json({
+    error: status >= 500 ? mensajeErrorServidor(error, fallback) : error.message,
+  });
+};
+
+const resolverRutaPortalSegura = (ruta) => {
+  if (!ruta) return null;
   const rutaAbsoluta = path.resolve(ruta);
+  const relativa = path.relative(PORTAL_UPLOADS_DIR, rutaAbsoluta);
+
+  if (relativa.startsWith("..") || path.isAbsolute(relativa)) {
+    return null;
+  }
+
+  return rutaAbsoluta;
+};
+
+const descargarArchivoSeguro = async (req, res, ruta, nombre, audit = {}) => {
+  const rutaAbsoluta = resolverRutaPortalSegura(ruta);
+
+  if (!rutaAbsoluta) {
+    await registrarEventoPortal({
+      req,
+      cuentaId: audit.cuentaId || null,
+      usuarioId: audit.usuarioId || null,
+      tipo: "INTENTO_SOSPECHOSO",
+      resultado: "ERROR",
+      descripcion: "Intento de descarga fuera de carpeta permitida",
+      metadata: {
+        fileId: audit.fileId || null,
+      },
+      creado_por: usuarioInternoActual(req),
+    });
+
+    return res.status(403).json({
+      error: "Descarga no autorizada",
+    });
+  }
+
   const nombreDescarga = nombre || path.basename(rutaAbsoluta);
 
   res.setHeader("Content-Type", "application/octet-stream");
@@ -323,9 +368,7 @@ const crearCuenta = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR CREANDO CUENTA PORTAL:", error);
-    res.status(error.status || 500).json({
-      error: error.message,
-    });
+    responderError(res, error);
   }
 };
 
@@ -376,7 +419,7 @@ const listarCuentas = async (req, res) => {
     res.json(cuentasMapeadas);
   } catch (error) {
     console.error("ERROR LISTANDO CUENTAS PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -442,7 +485,7 @@ const editarCuenta = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR EDITANDO CUENTA PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -504,7 +547,7 @@ const crearUsuarioCuenta = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR CREANDO USUARIO PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -579,7 +622,7 @@ const editarUsuarioPortal = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR EDITANDO USUARIO PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -622,7 +665,7 @@ const resetPasswordUsuario = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR RESET PASSWORD PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -670,7 +713,7 @@ const actualizarEstadoCuenta = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR ACTUALIZANDO ESTADO CUENTA PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -717,7 +760,7 @@ const actualizarEstadoUsuario = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR ACTUALIZANDO ESTADO USUARIO PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -767,7 +810,7 @@ const eliminarCuentaPrueba = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR ELIMINANDO CUENTA PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -801,7 +844,7 @@ const listarFilesAdmin = async (req, res) => {
     res.json(archivos.map(mapearFileAdmin));
   } catch (error) {
     console.error("ERROR LISTANDO FILES PORTAL ADMIN:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -840,7 +883,7 @@ const obtenerFileAdmin = async (req, res) => {
     res.json(mapearFileAdmin(archivo));
   } catch (error) {
     console.error("ERROR DETALLE FILE PORTAL ADMIN:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -877,13 +920,19 @@ const descargarOriginalAdmin = async (req, res) => {
     });
 
     return descargarArchivoSeguro(
+      req,
       res,
       archivo.archivo_original,
-      archivo.nombre_original
+      archivo.nombre_original,
+      {
+        cuentaId: archivo.cuentaId,
+        usuarioId: archivo.usuarioId,
+        fileId: archivo.id,
+      }
     );
   } catch (error) {
     console.error("ERROR DESCARGANDO ORIGINAL PORTAL ADMIN:", error);
-    return res.status(500).json({ error: error.message });
+    return responderError(res, error, "No se pudo descargar el archivo");
   }
 };
 
@@ -923,13 +972,19 @@ const descargarNuevaLecturaAdmin = async (req, res) => {
     });
 
     return descargarArchivoSeguro(
+      req,
       res,
       archivo.archivo_nueva_lectura,
-      archivo.nombre_nueva_lectura
+      archivo.nombre_nueva_lectura,
+      {
+        cuentaId: archivo.cuentaId,
+        usuarioId: archivo.usuarioId,
+        fileId: archivo.id,
+      }
     );
   } catch (error) {
     console.error("ERROR DESCARGANDO NUEVA LECTURA PORTAL ADMIN:", error);
-    return res.status(500).json({ error: error.message });
+    return responderError(res, error, "No se pudo descargar el archivo");
   }
 };
 
@@ -981,7 +1036,7 @@ const actualizarFileAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR ACTUALIZANDO FILE PORTAL ADMIN:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -1054,7 +1109,7 @@ const solicitarNuevaLecturaAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR SOLICITANDO NUEVA LECTURA PORTAL ADMIN:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -1104,7 +1159,7 @@ const subirModAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR SUBIENDO MOD PORTAL ADMIN:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -1178,9 +1233,7 @@ const cargarCreditos = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR CARGANDO CREDITOS PORTAL:", error);
-    res.status(error.status || 500).json({
-      error: error.message,
-    });
+    responderError(res, error);
   }
 };
 
@@ -1207,7 +1260,7 @@ const listarMovimientosCuenta = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR LISTANDO MOVIMIENTOS PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -1223,7 +1276,7 @@ const listarAuditoria = async (req, res) => {
     res.json(eventos.map(mapearEventoAuditoria));
   } catch (error) {
     console.error("ERROR LISTANDO AUDITORIA PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -1243,7 +1296,7 @@ const listarAuditoriaUsuario = async (req, res) => {
     res.json(eventos.map(mapearEventoAuditoria));
   } catch (error) {
     console.error("ERROR AUDITORIA USUARIO PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -1263,7 +1316,7 @@ const listarAuditoriaCuenta = async (req, res) => {
     res.json(eventos.map(mapearEventoAuditoria));
   } catch (error) {
     console.error("ERROR AUDITORIA CUENTA PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 

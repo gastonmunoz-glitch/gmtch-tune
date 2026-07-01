@@ -3,7 +3,18 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { prepararColumnasPresencia } = require("./usuarioController");
 
-const JWT_SECRET = process.env.JWT_SECRET || "gmtch_secret_2026";
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  (process.env.NODE_ENV !== "production" ? "gmtch_dev_jwt_secret_local" : "");
+
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET es obligatorio en produccion.");
+}
+
+const mensajeErrorServidor = (error) =>
+  process.env.NODE_ENV === "production"
+    ? "Error interno del servidor"
+    : error.message || "Error interno del servidor";
 
 const login = async (req, res) => {
   try {
@@ -81,7 +92,7 @@ const login = async (req, res) => {
     console.error("ERROR LOGIN:", error);
 
     res.status(500).json({
-      error: error.message,
+      error: mensajeErrorServidor(error),
     });
   }
 };
@@ -97,7 +108,7 @@ const me = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({
-      error: error.message,
+      error: mensajeErrorServidor(error),
     });
   }
 };

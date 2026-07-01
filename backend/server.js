@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const path = require("path");
 const fs = require("fs");
 const bcrypt = require("bcryptjs");
@@ -12,7 +14,34 @@ dotenv.config();
 
 console.log("SERVER VERSION: GARAGE-FILA-PAGOS-VEHICULOS-DIRECT-V6-2026-06-22");
 
+// Railway/prod required envs:
+// NODE_ENV=production, JWT_SECRET, PORTAL_JWT_SECRET, FRONTEND_URL,
+// FRONTEND_URLS, ENABLE_WEB_PUSH=false, ENABLE_INTERNAL_AUTOMATIONS=false,
+// VAPID_SUBJECT=mailto:contacto@gmtchtune.com, PORTAL_UPLOAD_MAX_MB=50.
+const validarSecretosProduccion = () => {
+  if (process.env.NODE_ENV !== "production") return;
+
+  const jwtSecret = String(process.env.JWT_SECRET || "").trim();
+  const portalJwtSecret = String(process.env.PORTAL_JWT_SECRET || "").trim();
+
+  if (!jwtSecret) {
+    throw new Error("JWT_SECRET es obligatorio en produccion.");
+  }
+
+  if (!portalJwtSecret) {
+    throw new Error("PORTAL_JWT_SECRET es obligatorio en produccion.");
+  }
+
+  if (jwtSecret === portalJwtSecret) {
+    throw new Error("JWT_SECRET y PORTAL_JWT_SECRET deben ser distintos en produccion.");
+  }
+};
+
+validarSecretosProduccion();
+
 const app = express();
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
 
 // ====================== CARPETAS UPLOADS ======================
 
@@ -96,6 +125,38 @@ app.use((req, res, next) => {
 
 app.use(cors(corsOptions));
 
+app.use(
+  helmet({
+    hidePoweredBy: true,
+    frameguard: { action: "deny" },
+    noSniff: true,
+    referrerPolicy: { policy: "no-referrer" },
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "default-src": ["'self'"],
+        "base-uri": ["'self'"],
+        "frame-ancestors": ["'none'"],
+        "form-action": ["'self'"],
+        "img-src": ["'self'", "data:", "blob:"],
+        "font-src": ["'self'", "data:"],
+        "object-src": ["'none'"],
+        "script-src": ["'self'"],
+        "script-src-attr": ["'none'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "connect-src": [
+          "'self'",
+          "https://gmtchtune.com",
+          "https://www.gmtchtune.com",
+          "https://api.gmtchtune.com",
+          ...allowedOrigins.filter((origin) => origin.startsWith("http")),
+        ],
+      },
+    },
+    crossOriginResourcePolicy: false,
+  })
+);
+
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
@@ -112,6 +173,8 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
+// Riesgo controlado V1: /uploads se mantiene publico por compatibilidad interna.
+// Portal Masters usa portal_uploads y no debe montarse como static publico.
 app.use(
   "/uploads",
   express.static(uploadsPath, {
@@ -122,6 +185,53 @@ app.use(
     },
   })
 );
+
+const crearRateLimiter = ({ windowMs, limit, mensaje }) =>
+  rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      error: mensaje || "Demasiadas solicitudes. Intenta nuevamente mas tarde.",
+    },
+  });
+
+const loginRateLimiter = crearRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  mensaje: "Demasiados intentos de login. Intenta nuevamente mas tarde.",
+});
+
+const portalLoginRateLimiter = crearRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  mensaje: "Demasiados intentos de login portal. Intenta nuevamente mas tarde.",
+});
+
+const portalAdminSensitiveRateLimiter = crearRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  mensaje: "Demasiadas operaciones administrativas sensibles. Intenta mas tarde.",
+});
+
+const portalUploadRateLimiter = crearRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  limit: 60,
+  mensaje: "Demasiadas subidas de archivos. Intenta nuevamente mas tarde.",
+});
+
+const portalDownloadRateLimiter = crearRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  limit: 120,
+  mensaje: "Demasiadas descargas. Intenta nuevamente mas tarde.",
+});
+
+app.post("/api/auth/login", loginRateLimiter);
+app.post("/api/portal/auth/login", portalLoginRateLimiter);
+app.post("/api/portal/admin/usuarios/:id/reset-password", portalAdminSensitiveRateLimiter);
+app.post("/api/portal/files", portalUploadRateLimiter);
+app.get("/api/portal/files/:id/descargar-mod", portalDownloadRateLimiter);
 
 // ====================== MODELOS ======================
 
@@ -1332,7 +1442,10 @@ app.use((err, req, res, next) => {
   console.error("ERROR GENERAL BACKEND:", err);
 
   res.status(err.status || 500).json({
-    error: err.message || "Error interno del servidor",
+    error:
+      process.env.NODE_ENV === "production"
+        ? "Error interno del servidor"
+        : err.message || "Error interno del servidor",
   });
 });
 

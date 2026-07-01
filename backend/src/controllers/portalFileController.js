@@ -11,6 +11,7 @@ const { crearNotificacionesInternas } = require("./notificacionController");
 
 const ESTADOS_DESCARGABLES = ["MOD_LISTO", "CORREGIDO", "ENTREGADO"];
 const ROLES_NOTIFICACION_PORTAL = ["OWNER", "ADMIN", "OPERADOR_ECU", "TUNER"];
+const PORTAL_UPLOADS_DIR = path.resolve(__dirname, "..", "portal_uploads");
 let columnasNuevaLecturaPreparadas = false;
 
 const limpiarTexto = (valor) => {
@@ -28,6 +29,18 @@ const crearError = (status, message) => {
   const error = new Error(message);
   error.status = status;
   return error;
+};
+
+const mensajeErrorServidor = (error, fallback = "Error interno del servidor") =>
+  process.env.NODE_ENV === "production"
+    ? fallback
+    : error.message || fallback;
+
+const responderError = (res, error, fallback) => {
+  const status = error.status || error.statusCode || 500;
+  return res.status(status).json({
+    error: status >= 500 ? mensajeErrorServidor(error, fallback) : error.message,
+  });
 };
 
 const crearNotificacionPortalInterna = async ({
@@ -106,13 +119,21 @@ const normalizarHistorialNuevaLectura = (valor) => {
   return [];
 };
 
-const archivoExiste = (ruta) => {
-  if (!ruta) return false;
-  try {
-    return fs.existsSync(path.resolve(ruta));
-  } catch {
-    return false;
+const resolverRutaPortalSegura = (ruta) => {
+  if (!ruta) return null;
+  const rutaAbsoluta = path.resolve(ruta);
+  const relativa = path.relative(PORTAL_UPLOADS_DIR, rutaAbsoluta);
+
+  if (relativa.startsWith("..") || path.isAbsolute(relativa)) {
+    return null;
   }
+
+  return rutaAbsoluta;
+};
+
+const archivoPortalExiste = (ruta) => {
+  const rutaSegura = resolverRutaPortalSegura(ruta);
+  return Boolean(rutaSegura && fs.existsSync(rutaSegura));
 };
 
 const calcularPuedeDescargar = (archivo, cuenta) => {
@@ -188,7 +209,7 @@ const obtenerCreditos = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR PORTAL CREDITOS:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -206,7 +227,7 @@ const obtenerPortalFiles = async (req, res) => {
     res.json(archivos.map((archivo) => mapearArchivoPortal(archivo, req.portal.cuenta)));
   } catch (error) {
     console.error("ERROR LISTANDO PORTAL FILES:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -272,7 +293,7 @@ const crearPortalFile = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR CREANDO PORTAL FILE:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -296,7 +317,7 @@ const obtenerPortalFilePorId = async (req, res) => {
     res.json(mapearArchivoPortal(archivo, req.portal.cuenta));
   } catch (error) {
     console.error("ERROR DETALLE PORTAL FILE:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -349,7 +370,7 @@ const solicitarCorreccionPortal = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR SOLICITANDO CORRECCION PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -441,7 +462,7 @@ const subirNuevaLecturaPortal = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR SUBIENDO NUEVA LECTURA PORTAL:", error);
-    res.status(500).json({ error: error.message });
+    responderError(res, error);
   }
 };
 
@@ -464,7 +485,28 @@ const descargarModPortal = async (req, res) => {
 
     const estado = String(archivo.estado || "").toUpperCase();
 
-    if (!archivo.archivo_modificado || !archivoExiste(archivo.archivo_modificado)) {
+    const rutaSegura = resolverRutaPortalSegura(archivo.archivo_modificado);
+
+    if (!rutaSegura) {
+      await registrarEventoPortal({
+        req,
+        cuentaId: req.portal.cuenta.id,
+        usuarioId: req.portal.usuario.id,
+        tipo: "INTENTO_SOSPECHOSO",
+        resultado: "ERROR",
+        descripcion: "Ruta de descarga MOD fuera de carpeta permitida",
+        metadata: {
+          fileId: archivo.id,
+        },
+        creado_por: req.portal.usuario.email,
+      });
+
+      return res.status(403).json({
+        error: "Descarga no autorizada",
+      });
+    }
+
+    if (!archivo.archivo_modificado || !archivoPortalExiste(archivo.archivo_modificado)) {
       return res.status(404).json({
         error: "MOD no disponible",
       });
@@ -592,10 +634,9 @@ const descargarModPortal = async (req, res) => {
       creado_por: req.portal.usuario.email,
     });
 
-    const ruta = path.resolve(archivo.archivo_modificado);
-    const nombre = archivo.nombre_modificado || path.basename(ruta);
+    const nombre = archivo.nombre_modificado || path.basename(rutaSegura);
 
-    return res.download(ruta, nombre, (error) => {
+    return res.download(rutaSegura, nombre, (error) => {
       if (error && !res.headersSent) {
         res.status(500).json({
           error: "No se pudo descargar el MOD",
@@ -604,9 +645,7 @@ const descargarModPortal = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR DESCARGANDO MOD PORTAL:", error);
-    res.status(error.status || 500).json({
-      error: error.message,
-    });
+    responderError(res, error, "No se pudo descargar el MOD");
   }
 };
 
