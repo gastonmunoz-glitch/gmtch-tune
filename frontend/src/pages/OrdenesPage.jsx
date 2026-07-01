@@ -480,6 +480,14 @@ function OrdenesPage() {
   };
 
   const cambiarEstado = async (orden, estado) => {
+    if (estado === "LISTO_PARA_ENTREGA" && ordenTieneProcessGuardCritico(orden)) {
+      const continuar = window.confirm(
+        "Esta orden tiene un proceso técnico crítico sin cierre. Registra post escritura, corrección o cierre técnico antes de entregar. ¿Quieres continuar solo con advertencia?"
+      );
+
+      if (!continuar) return;
+    }
+
     try {
       await api.patch(`/ordenes/${orden.id}`, {
         estado,
@@ -530,6 +538,36 @@ function OrdenesPage() {
       (usuario) => usuario.activo !== false && roles.includes(usuario.rol)
     );
   };
+
+  const archivosOrdenSinCierreTecnico = (orden) => {
+    const archivosOrden = Array.isArray(orden.ArchivoECUs)
+      ? orden.ArchivoECUs
+      : Array.isArray(orden.ArchivosECU)
+      ? orden.ArchivosECU
+      : [];
+
+    return archivosOrden.filter((archivo) => {
+      const estado = String(archivo.estado || "").toUpperCase();
+      const cerrado =
+        archivo.cierre_tecnico_at ||
+        ["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(estado) ||
+        String(archivo.proceso_guard_estado || "").toUpperCase() === "CERRADO";
+
+      return (
+        !archivo.archivado &&
+        archivo.archivo_modificado &&
+        !cerrado &&
+        archivo.cierre_tecnico_obligatorio !== false
+      );
+    });
+  };
+
+  const ordenTieneProcessGuardCritico = (orden) =>
+    archivosOrdenSinCierreTecnico(orden).some((archivo) =>
+      ["CRITICO", "ESCALADO"].includes(
+        String(archivo.proceso_guard_estado || "").toUpperCase()
+      )
+    );
 
   const feedbackActual = (orden) =>
     feedbackOrdenes[orden.id] || {
@@ -912,6 +950,8 @@ function OrdenesPage() {
               : Array.isArray(o.ArchivosECU)
               ? o.ArchivosECU
               : [];
+            const procesosSinCierre = archivosOrdenSinCierreTecnico(o);
+            const procesoGuardCritico = ordenTieneProcessGuardCritico(o);
             const historialCorreccion = Array.isArray(o.correccion_historial)
               ? o.correccion_historial
               : [];
@@ -992,6 +1032,18 @@ function OrdenesPage() {
                             No cuenta en estadísticas
                           </span>
                         )}
+
+                        {procesosSinCierre.length > 0 && (
+                          <span
+                            className={`px-3 py-1 text-[10px] font-black uppercase border-2 ${
+                              procesoGuardCritico
+                                ? "bg-red-700 text-white border-red-900"
+                                : "bg-yellow-300 text-black border-black"
+                            }`}
+                          >
+                            File Service sin cierre tecnico ({procesosSinCierre.length})
+                          </span>
+                        )}
                       </div>
 
                       <h3 className="text-2xl font-black uppercase leading-tight">
@@ -1044,6 +1096,34 @@ function OrdenesPage() {
                           </span>
                         )}
                       </div>
+
+                      {procesosSinCierre.length > 0 && (
+                        <div
+                          className={`mt-4 border-2 p-3 text-[10px] font-black uppercase ${
+                            procesoGuardCritico
+                              ? "border-red-800 bg-red-50 text-red-900"
+                              : "border-yellow-600 bg-yellow-50 text-yellow-900"
+                          }`}
+                        >
+                          <p>
+                            Esta orden tiene File Service con cierre tecnico pendiente.
+                            No debe quedar como lista final sin post escritura,
+                            resultado tecnico o correccion registrada.
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {procesosSinCierre.slice(0, 3).map((archivo) => (
+                              <Link
+                                key={archivo.id}
+                                to={`/archivos-ecu?archivoId=${archivo.id}#post-escritura`}
+                                className="border-2 border-current px-2 py-1"
+                              >
+                                File #{archivo.id} -{" "}
+                                {archivo.proceso_guard_estado || "PENDIENTE"}
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="mt-4 border-2 border-black bg-white p-3">
                         <p className="text-[10px] font-black uppercase text-gray-500 mb-2">

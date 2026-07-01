@@ -101,12 +101,19 @@ self.addEventListener("push", (event) => {
   }
 
   const title = payload.title || "GMTCH Tune OS";
+  const targetUrl = payload.url || payload.data?.url || "/login";
   const options = {
     body: payload.body || "Nueva alerta operativa",
     icon: payload.icon || "/pwa/icon-192.png",
     badge: payload.badge || "/pwa/icon-192.png",
+    tag: payload.tag || `gmtch-${payload.entidad_tipo || "alerta"}-${payload.entidad_id || "general"}`,
+    renotify: true,
+    requireInteraction: payload.prioridad === "URGENTE",
     data: {
-      url: payload.url || payload.data?.url || "/login"
+      url: targetUrl,
+      prioridad: payload.prioridad || "MEDIA",
+      entidad_tipo: payload.entidad_tipo || null,
+      entidad_id: payload.entidad_id || null
     }
   };
 

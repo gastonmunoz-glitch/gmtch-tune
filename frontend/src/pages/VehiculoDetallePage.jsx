@@ -870,7 +870,21 @@ function VehiculoDetallePage() {
                               <Info label="DTC post" value={archivo.post_escritura_dtc || "Pendiente"} />
                               <Info label="Post por" value={archivo.post_escritura_por} />
                               <Info label="Fecha post" value={formatearFecha(archivo.post_escritura_at)} />
+                              <Info label="Process Guard" value={archivo.proceso_guard_estado || "Sin riesgo"} />
+                              <Info label="Cierre tecnico" value={archivo.cierre_tecnico_at ? formatearFecha(archivo.cierre_tecnico_at) : "Pendiente"} />
                             </div>
+
+                            {archivo.archivo_modificado &&
+                              !archivo.cierre_tecnico_at &&
+                              !["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(
+                                String(archivo.estado || "").toUpperCase()
+                              ) && (
+                                <div className="mt-3 border-2 border-red-700 bg-red-50 p-3 text-xs font-black uppercase text-red-900">
+                                  File Service sin cierre tecnico. Revisar post
+                                  escritura, resultado tecnico o correccion antes de
+                                  considerar la orden lista.
+                                </div>
+                              )}
 
                             <div className="flex flex-wrap gap-3 mt-3">
                               {original && (

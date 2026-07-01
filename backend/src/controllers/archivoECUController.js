@@ -32,6 +32,187 @@ const NOTIFICACIONES_RESPONSABLES_FILE = {
   },
 };
 
+const PROCESS_GUARD_ESTADOS = [
+  "SIN_RIESGO",
+  "EN_ESPERA_POST_ESCRITURA",
+  "ADVERTENCIA",
+  "CRITICO",
+  "ESCALADO",
+  "CERRADO",
+];
+
+const RESULTADOS_TECNICOS = [
+  "OK",
+  "FALLO",
+  "REQUIERE_CORRECCION",
+  "REQUIERE_NUEVA_LECTURA",
+  "PENDIENTE",
+];
+
+const normalizarProcessGuardEstado = (valor) => {
+  const estado = limpiarTexto(valor || "SIN_RIESGO").toUpperCase();
+  return PROCESS_GUARD_ESTADOS.includes(estado) ? estado : "SIN_RIESGO";
+};
+
+const normalizarResultadoTecnico = (valor) => {
+  const resultado = limpiarTexto(valor || "PENDIENTE").toUpperCase();
+  if (resultado === "FALLO_ESCRITURA") return "FALLO";
+  return RESULTADOS_TECNICOS.includes(resultado) ? resultado : "PENDIENTE";
+};
+
+const resultadoTecnicoDesdePost = (resultadoPost) => {
+  const resultado = limpiarTexto(resultadoPost).toUpperCase();
+  if (resultado === "OK") return "OK";
+  if (resultado === "REQUIERE_CORRECCION") return "REQUIERE_CORRECCION";
+  if (resultado === "FALLO_ESCRITURA") return "FALLO";
+  return "PENDIENTE";
+};
+
+const archivoRequiereProcessGuard = (archivo) => {
+  if (!archivo) return false;
+  const estado = limpiarTexto(archivo.estado).toUpperCase();
+  if (archivo.archivado || ["ARCHIVADO", "FINALIZADO", "FINALIZADO_TECNICO"].includes(estado)) {
+    return false;
+  }
+
+  return Boolean(
+    archivo.archivo_modificado ||
+      ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(estado)
+  );
+};
+
+const fechaInicioProcessGuard = (archivo) => {
+  return (
+    archivo.mod_descargado_at ||
+    archivo.proceso_guard_started_at ||
+    archivo.post_escritura_at ||
+    archivo.updatedAt ||
+    archivo.createdAt ||
+    new Date()
+  );
+};
+
+const minutosDesde = (fecha, ahora = new Date()) => {
+  const inicio = fecha ? new Date(fecha) : null;
+  if (!inicio || Number.isNaN(inicio.getTime())) return 0;
+  return Math.max(0, (ahora.getTime() - inicio.getTime()) / 60000);
+};
+
+const calcularProcessGuardArchivo = (archivo, ahora = new Date()) => {
+  if (!archivo) {
+    return {
+      estado: "SIN_RIESGO",
+      minutos: 0,
+      prioridad: "BAJA",
+      motivo: "Sin archivo",
+    };
+  }
+
+  const estadoArchivo = limpiarTexto(archivo.estado).toUpperCase();
+  const postOk = limpiarTexto(archivo.post_escritura_estado).toUpperCase() === "OK";
+  const cierreAt = archivo.cierre_tecnico_at;
+
+  if (
+    archivo.archivado ||
+    estadoArchivo === "ARCHIVADO" ||
+    cierreAt ||
+    normalizarProcessGuardEstado(archivo.proceso_guard_estado) === "CERRADO"
+  ) {
+    return {
+      estado: "CERRADO",
+      minutos: 0,
+      prioridad: "BAJA",
+      motivo: "Proceso técnico cerrado",
+    };
+  }
+
+  if (!archivoRequiereProcessGuard(archivo)) {
+    return {
+      estado: "SIN_RIESGO",
+      minutos: 0,
+      prioridad: "BAJA",
+      motivo: "Aún no requiere cierre técnico",
+    };
+  }
+
+  const minutos = minutosDesde(fechaInicioProcessGuard(archivo), ahora);
+  const correccion =
+    archivo.correccion_pendiente === true || estadoArchivo === "REQUIERE_CORRECCION";
+  const nuevaLectura = estadoArchivo === "REQUIERE_NUEVA_LECTURA";
+  const sinPost = !postOk;
+
+  if (nuevaLectura) {
+    return {
+      estado: minutos >= 180 ? "ESCALADO" : "ADVERTENCIA",
+      minutos,
+      prioridad: minutos >= 180 ? "URGENTE" : "ALTA",
+      motivo: "Nueva lectura requerida sin respuesta",
+    };
+  }
+
+  if (correccion) {
+    return {
+      estado: minutos >= 120 ? "CRITICO" : "ADVERTENCIA",
+      minutos,
+      prioridad: minutos >= 120 ? "URGENTE" : "ALTA",
+      motivo: "Corrección pendiente",
+    };
+  }
+
+  if (minutos >= 180) {
+    return {
+      estado: "ESCALADO",
+      minutos,
+      prioridad: "URGENTE",
+      motivo: sinPost
+        ? "MOD sin post escritura ni cierre técnico por más de 180 min"
+        : "Post escritura OK sin cierre técnico por más de 180 min",
+    };
+  }
+
+  if (minutos >= 120) {
+    return {
+      estado: "CRITICO",
+      minutos,
+      prioridad: "URGENTE",
+      motivo: sinPost
+        ? "MOD sin post escritura por más de 120 min"
+        : "Post escritura OK sin cierre técnico por más de 120 min",
+    };
+  }
+
+  if (minutos >= 60) {
+    return {
+      estado: "ADVERTENCIA",
+      minutos,
+      prioridad: "ALTA",
+      motivo: sinPost
+        ? "MOD sin post escritura por más de 60 min"
+        : "Post escritura OK sin cierre técnico por más de 60 min",
+    };
+  }
+
+  if (minutos >= 30) {
+    return {
+      estado: "EN_ESPERA_POST_ESCRITURA",
+      minutos,
+      prioridad: "MEDIA",
+      motivo: sinPost
+        ? "MOD listo esperando post escritura"
+        : "Post escritura OK esperando cierre técnico",
+    };
+  }
+
+  return {
+    estado: "EN_ESPERA_POST_ESCRITURA",
+    minutos,
+    prioridad: "MEDIA",
+    motivo: sinPost
+      ? "MOD listo esperando post escritura"
+      : "Post escritura OK esperando cierre técnico",
+  };
+};
+
 const obtenerOrdenId = (body = {}) => {
   return body.ordenId || body.orden_id || body.ordenTrabajoId || body.orden_trabajo_id;
 };
@@ -164,6 +345,45 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "archivos_ecu"
     ADD COLUMN IF NOT EXISTS "post_escritura_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "mod_descargado_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "proceso_guard_estado" VARCHAR(60) DEFAULT 'SIN_RIESGO';
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "proceso_guard_started_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "proceso_guard_last_alert_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "proceso_guard_escalado_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "proceso_guard_responsable_id" VARCHAR(100);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "cierre_tecnico_obligatorio" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "cierre_tecnico_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "cierre_tecnico_por" VARCHAR(100);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "resultado_tecnico" VARCHAR(60) DEFAULT 'PENDIENTE';
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "observacion_cierre_tecnico" TEXT;
+
+    UPDATE "archivos_ecu"
+    SET
+      "proceso_guard_estado" = COALESCE("proceso_guard_estado", 'SIN_RIESGO'),
+      "cierre_tecnico_obligatorio" = COALESCE("cierre_tecnico_obligatorio", false),
+      "resultado_tecnico" = COALESCE("resultado_tecnico", 'PENDIENTE');
 
     ALTER TABLE "archivos_ecu"
     ADD COLUMN IF NOT EXISTS "archivado" BOOLEAN DEFAULT false;
@@ -305,6 +525,18 @@ const mapearArchivoRow = (row) => {
     post_escritura_observacion: row.post_escritura_observacion,
     post_escritura_por: row.post_escritura_por,
     post_escritura_at: row.post_escritura_at,
+
+    mod_descargado_at: row.mod_descargado_at,
+    proceso_guard_estado: normalizarProcessGuardEstado(row.proceso_guard_estado),
+    proceso_guard_started_at: row.proceso_guard_started_at,
+    proceso_guard_last_alert_at: row.proceso_guard_last_alert_at,
+    proceso_guard_escalado_at: row.proceso_guard_escalado_at,
+    proceso_guard_responsable_id: row.proceso_guard_responsable_id,
+    cierre_tecnico_obligatorio: row.cierre_tecnico_obligatorio,
+    cierre_tecnico_at: row.cierre_tecnico_at,
+    cierre_tecnico_por: row.cierre_tecnico_por,
+    resultado_tecnico: normalizarResultadoTecnico(row.resultado_tecnico),
+    observacion_cierre_tecnico: row.observacion_cierre_tecnico,
 
     archivado: row.archivado,
     archivado_motivo: row.archivado_motivo,
@@ -512,6 +744,18 @@ const crearArchivoECU = async (req, res) => {
       post_escritura_por: null,
       post_escritura_at: null,
 
+      mod_descargado_at: null,
+      proceso_guard_estado: "SIN_RIESGO",
+      proceso_guard_started_at: null,
+      proceso_guard_last_alert_at: null,
+      proceso_guard_escalado_at: null,
+      proceso_guard_responsable_id: null,
+      cierre_tecnico_obligatorio: false,
+      cierre_tecnico_at: null,
+      cierre_tecnico_por: null,
+      resultado_tecnico: "PENDIENTE",
+      observacion_cierre_tecnico: null,
+
       archivado: false,
     });
 
@@ -611,6 +855,7 @@ const subirArchivoModificado = async (req, res) => {
     };
 
     const versionesActualizadas = [...versionesActuales, nuevaVersion];
+    const inicioGuard = archivo.proceso_guard_started_at || new Date();
 
     await archivo.update({
       archivo_modificado: rutaArchivo,
@@ -628,6 +873,20 @@ const subirArchivoModificado = async (req, res) => {
       post_escritura_observacion: null,
       post_escritura_por: null,
       post_escritura_at: null,
+
+      mod_descargado_at: null,
+      proceso_guard_estado: "EN_ESPERA_POST_ESCRITURA",
+      proceso_guard_started_at: inicioGuard,
+      proceso_guard_responsable_id:
+        archivo.operador_ecu_asignado_a ||
+        archivo.tuner_asignado_a ||
+        archivo.slave_asignado_a ||
+        null,
+      cierre_tecnico_obligatorio: true,
+      cierre_tecnico_at: null,
+      cierre_tecnico_por: null,
+      resultado_tecnico: "PENDIENTE",
+      observacion_cierre_tecnico: null,
     });
 
     await crearNotificacionesInternas({
@@ -637,6 +896,14 @@ const subirArchivoModificado = async (req, res) => {
       mensaje: `Se cargo ${nuevaVersion.etiqueta} para el File Service #${archivo.id}.`,
       ordenId: archivo.ordenId,
       archivoECUId: archivo.id,
+      accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+      accion_tipo: "ABRIR_POST_ESCRITURA",
+      entidad_tipo: "ARCHIVO_ECU",
+      entidad_id: archivo.id,
+      metadata: {
+        prioridad: "ALTA",
+        proceso_guard: true,
+      },
     });
 
     res.json({
@@ -820,6 +1087,19 @@ const notificarSlave = async (req, res) => {
       estado: "NOTIFICADO_SLAVE",
       notificado_slave_at: new Date(),
       notificado_slave_por: usuarioActual(req),
+      mod_descargado_at: archivo.mod_descargado_at || new Date(),
+      proceso_guard_estado:
+        normalizarProcessGuardEstado(archivo.proceso_guard_estado) === "SIN_RIESGO"
+          ? "EN_ESPERA_POST_ESCRITURA"
+          : normalizarProcessGuardEstado(archivo.proceso_guard_estado),
+      proceso_guard_started_at: archivo.proceso_guard_started_at || new Date(),
+      proceso_guard_responsable_id:
+        archivo.operador_ecu_asignado_a ||
+        archivo.slave_asignado_a ||
+        archivo.tuner_asignado_a ||
+        null,
+      cierre_tecnico_obligatorio: true,
+      resultado_tecnico: normalizarResultadoTecnico(archivo.resultado_tecnico),
     });
 
     res.json({
@@ -867,6 +1147,10 @@ const solicitarCorreccion = async (req, res) => {
       correccion_pendiente: true,
       dtc_post_escritura: dtcPost,
       observacion_correccion: observacion,
+      proceso_guard_estado: "CRITICO",
+      proceso_guard_started_at: archivo.proceso_guard_started_at || new Date(),
+      cierre_tecnico_obligatorio: true,
+      resultado_tecnico: "REQUIERE_CORRECCION",
     });
 
     await crearNotificacionesInternas({
@@ -876,6 +1160,14 @@ const solicitarCorreccion = async (req, res) => {
       mensaje: `El File Service #${archivo.id} requiere correccion.`,
       ordenId: archivo.ordenId,
       archivoECUId: archivo.id,
+      accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+      accion_tipo: "ABRIR_CORRECCION_FILE_SERVICE",
+      entidad_tipo: "ARCHIVO_ECU",
+      entidad_id: archivo.id,
+      metadata: {
+        prioridad: "URGENTE",
+        proceso_guard: true,
+      },
     });
 
     res.json({
@@ -976,6 +1268,13 @@ const registrarPostEscritura = async (req, res) => {
 
     const rutaScanner = obtenerRutaPublicaArchivo(req.file);
     const textoDtc = sinDtc ? "SIN DTC POST ESCRITURA" : dtc;
+    const resultadoTecnico = resultadoTecnicoDesdePost(resultado);
+    const procesoGuardEstado =
+      resultado === "OK"
+        ? "EN_ESPERA_POST_ESCRITURA"
+        : resultado === "EN_PRUEBA"
+        ? "ADVERTENCIA"
+        : "CRITICO";
 
     await archivo.update({
       estado: nuevoEstado,
@@ -991,6 +1290,15 @@ const registrarPostEscritura = async (req, res) => {
       correccion_pendiente: correccionPendiente,
 
       dtc_post_escritura: textoDtc,
+      proceso_guard_estado: procesoGuardEstado,
+      proceso_guard_started_at: archivo.proceso_guard_started_at || new Date(),
+      proceso_guard_responsable_id:
+        archivo.operador_ecu_asignado_a ||
+        archivo.tuner_asignado_a ||
+        archivo.slave_asignado_a ||
+        null,
+      cierre_tecnico_obligatorio: true,
+      resultado_tecnico: resultadoTecnico,
 
       observacion_correccion:
         resultado === "REQUIERE_CORRECCION" || resultado === "FALLO_ESCRITURA"
@@ -1007,6 +1315,267 @@ const registrarPostEscritura = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR REGISTRANDO POST ESCRITURA:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const marcarModDescargado = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const archivo = await ArchivoECU.findByPk(req.params.id);
+
+    if (!archivo) {
+      return res.status(404).json({
+        error: "Archivo ECU no encontrado",
+      });
+    }
+
+    if (archivo.archivado) {
+      return res.status(400).json({
+        error: "No puedes marcar MOD descargado en un archivo archivado",
+      });
+    }
+
+    if (!archivo.archivo_modificado) {
+      return res.status(400).json({
+        error: "No puedes marcar MOD descargado sin archivo modificado cargado",
+      });
+    }
+
+    const fecha = new Date();
+    const evaluacion = calcularProcessGuardArchivo({
+      ...archivo.get({ plain: true }),
+      mod_descargado_at: archivo.mod_descargado_at || fecha,
+      proceso_guard_started_at: archivo.proceso_guard_started_at || fecha,
+      cierre_tecnico_obligatorio: true,
+    });
+
+    await archivo.update({
+      mod_descargado_at: archivo.mod_descargado_at || fecha,
+      proceso_guard_started_at: archivo.proceso_guard_started_at || fecha,
+      proceso_guard_estado:
+        evaluacion.estado === "CERRADO" ? "EN_ESPERA_POST_ESCRITURA" : evaluacion.estado,
+      proceso_guard_responsable_id:
+        archivo.operador_ecu_asignado_a ||
+        archivo.slave_asignado_a ||
+        archivo.tuner_asignado_a ||
+        null,
+      cierre_tecnico_obligatorio: true,
+      resultado_tecnico: normalizarResultadoTecnico(archivo.resultado_tecnico),
+    });
+
+    res.json({
+      mensaje:
+        "MOD marcado como descargado/aplicado. Se mantiene contador de cierre técnico.",
+      archivo,
+      process_guard: evaluacion,
+    });
+  } catch (error) {
+    console.error("ERROR MARCANDO MOD DESCARGADO:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const registrarCierreTecnico = async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    await prepararColumnas();
+
+    const archivo = await ArchivoECU.findByPk(req.params.id, { transaction });
+
+    if (!archivo) {
+      await transaction.rollback();
+      return res.status(404).json({
+        error: "Archivo ECU no encontrado",
+      });
+    }
+
+    if (archivo.archivado) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: "No puedes cerrar técnicamente un archivo archivado",
+      });
+    }
+
+    const resultado = normalizarResultadoTecnico(
+      req.body.resultado_tecnico || req.body.resultado
+    );
+    const observacion =
+      limpiarTexto(req.body.observacion_cierre_tecnico) ||
+      limpiarTexto(req.body.observacion) ||
+      "";
+
+    if (!RESULTADOS_TECNICOS.includes(resultado)) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: "Resultado técnico inválido",
+        permitidos: RESULTADOS_TECNICOS,
+      });
+    }
+
+    if (resultado === "OK") {
+      const faltantes = [];
+
+      if (archivo.post_escritura_estado !== "OK") {
+        faltantes.push("Post escritura OK");
+      }
+
+      if (!limpiarTexto(archivo.post_escritura_scanner)) {
+        faltantes.push("Foto/captura scanner post escritura");
+      }
+
+      if (!limpiarTexto(archivo.post_escritura_dtc)) {
+        faltantes.push("DTC post escritura o SIN DTC POST ESCRITURA");
+      }
+
+      if (faltantes.length > 0) {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: "No puedes cerrar OK sin evidencia post escritura completa",
+          faltantes,
+        });
+      }
+    }
+
+    const fecha = new Date();
+    const payload = {
+      resultado_tecnico: resultado,
+      observacion_cierre_tecnico: observacion,
+      proceso_guard_started_at: archivo.proceso_guard_started_at || fecha,
+      cierre_tecnico_obligatorio: true,
+    };
+
+    if (resultado === "OK") {
+      payload.estado = "FINALIZADO_TECNICO";
+      payload.correccion_pendiente = false;
+      payload.proceso_guard_estado = "CERRADO";
+      payload.cierre_tecnico_obligatorio = false;
+      payload.cierre_tecnico_at = fecha;
+      payload.cierre_tecnico_por = usuarioActual(req);
+    }
+
+    if (resultado === "FALLO") {
+      payload.estado = "POST_ESCRITURA_PENDIENTE";
+      payload.proceso_guard_estado = "CRITICO";
+      payload.correccion_pendiente = false;
+    }
+
+    if (resultado === "REQUIERE_CORRECCION") {
+      payload.estado = "REQUIERE_CORRECCION";
+      payload.proceso_guard_estado = "CRITICO";
+      payload.correccion_pendiente = true;
+      payload.observacion_correccion = observacion || archivo.observacion_correccion;
+    }
+
+    if (resultado === "REQUIERE_NUEVA_LECTURA") {
+      payload.estado = "REQUIERE_NUEVA_LECTURA";
+      payload.proceso_guard_estado = "ESCALADO";
+      payload.correccion_pendiente = false;
+    }
+
+    if (resultado === "PENDIENTE") {
+      payload.estado = archivo.post_escritura_estado === "OK"
+        ? "POST_ESCRITURA_OK"
+        : "POST_ESCRITURA_PENDIENTE";
+      payload.proceso_guard_estado = "EN_ESPERA_POST_ESCRITURA";
+    }
+
+    await archivo.update(payload, { transaction });
+
+    if (resultado === "OK") {
+      const [resultadoOrden] = await sequelize.query(
+        `
+        UPDATE "ordenes_trabajo"
+        SET
+          "estado" = 'LISTO_PARA_ENTREGA',
+          "tecnico_finalizado_por" = :usuario,
+          "tecnico_finalizado_at" = NOW(),
+          "updatedAt" = NOW()
+        WHERE "id" = :ordenId
+        RETURNING "id";
+        `,
+        {
+          replacements: {
+            ordenId: archivo.ordenId,
+            usuario: usuarioActual(req),
+          },
+          transaction,
+        }
+      );
+
+      if (!resultadoOrden || resultadoOrden.length === 0) {
+        await transaction.rollback();
+        return res.status(404).json({
+          error:
+            "Cierre técnico válido, pero no se encontró la orden asociada. No se aplicaron cambios.",
+        });
+      }
+    }
+
+    await transaction.commit();
+
+    const archivoActualizado = await ArchivoECU.findByPk(req.params.id);
+
+    if (resultado === "OK") {
+      await crearNotificacionesInternas({
+        rolesDestino: ["RECEPCION", "ADMIN", "OWNER"],
+        tipo: "ORDEN_LISTA_ENTREGA",
+        titulo: "Orden lista para entrega",
+        mensaje: `La orden #${archivo.ordenId} esta lista para entrega comercial.`,
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        accion_url: `/ordenes?ordenId=${archivo.ordenId}#entrega`,
+        accion_tipo: "ABRIR_ENTREGA",
+        entidad_tipo: "ORDEN_TRABAJO",
+        entidad_id: archivo.ordenId,
+        metadata: {
+          proceso_guard: true,
+          prioridad: "ALTA",
+        },
+      });
+    } else {
+      await crearNotificacionesInternas({
+        rolesDestino: ["OWNER", "SUPERVISOR", "TUNER", "OPERADOR_ECU"],
+        tipo: "PROCESS_GUARD_CIERRE_NO_OK",
+        titulo: "Cierre técnico requiere acción",
+        mensaje: `File Service #${archivo.id} quedó con resultado técnico ${resultado}.`,
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+        accion_tipo: "ABRIR_PROCESS_GUARD",
+        entidad_tipo: "ARCHIVO_ECU",
+        entidad_id: archivo.id,
+        metadata: {
+          proceso_guard: true,
+          resultado_tecnico: resultado,
+          prioridad: ["REQUIERE_CORRECCION", "REQUIERE_NUEVA_LECTURA", "FALLO"].includes(
+            resultado
+          )
+            ? "URGENTE"
+            : "ALTA",
+        },
+      });
+    }
+
+    res.json({
+      mensaje:
+        resultado === "OK"
+          ? "Cierre técnico registrado. Orden lista para entrega comercial."
+          : "Resultado técnico registrado. El proceso sigue pendiente hasta resolver.",
+      archivo: archivoActualizado,
+    });
+  } catch (error) {
+    await transaction.rollback();
+
+    console.error("ERROR REGISTRANDO CIERRE TECNICO:", error);
 
     res.status(500).json({
       error: error.message,
@@ -1060,6 +1629,8 @@ const archivarArchivoECU = async (req, res) => {
       archivado_comentario: comentario,
       archivado_por: usuarioActual(req),
       archivado_at: new Date(),
+      proceso_guard_estado: "CERRADO",
+      cierre_tecnico_obligatorio: false,
     });
 
     res.json({
@@ -1202,6 +1773,16 @@ const actualizarArchivoECU = async (req, res) => {
     if (quiereFinalizarTecnico) {
       payload.estado = "FINALIZADO_TECNICO";
       payload.correccion_pendiente = false;
+      payload.proceso_guard_estado = "CERRADO";
+      payload.cierre_tecnico_obligatorio = false;
+      payload.cierre_tecnico_at = new Date();
+      payload.cierre_tecnico_por = usuarioActual(req);
+      payload.resultado_tecnico = "OK";
+      payload.observacion_cierre_tecnico =
+        limpiarTexto(req.body.observacion_cierre_tecnico) ||
+        limpiarTexto(req.body.observacion) ||
+        archivo.observacion_cierre_tecnico ||
+        "Cierre técnico registrado al finalizar File Service.";
     }
 
     const responsablesPrevios = {
@@ -1332,6 +1913,8 @@ const eliminarArchivoECU = async (req, res) => {
         "Este registro fue archivado usando la ruta antigua DELETE. No fue eliminado físicamente.",
       archivado_por: usuarioActual(req),
       archivado_at: new Date(),
+      proceso_guard_estado: "CERRADO",
+      cierre_tecnico_obligatorio: false,
     });
 
     res.json({
@@ -1359,6 +1942,10 @@ module.exports = {
   notificarSlave,
   solicitarCorreccion,
   registrarPostEscritura,
+  marcarModDescargado,
+  registrarCierreTecnico,
   archivarArchivoECU,
   eliminarArchivoECU,
+  prepararColumnasArchivoECU: prepararColumnas,
+  calcularProcessGuardArchivo,
 };

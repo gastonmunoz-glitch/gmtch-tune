@@ -209,6 +209,9 @@ const puedeVerAutomatizaciones = (usuario) =>
     "TUNER",
   ].includes(String(usuario?.rol || "").toUpperCase());
 
+const puedeVerSchedulerInterno = (usuario) =>
+  ["OWNER", "ADMIN"].includes(String(usuario?.rol || "").toUpperCase());
+
 const limpiarSesion = () => {
   localStorage.removeItem("token");
   localStorage.removeItem("rol");
@@ -305,6 +308,24 @@ const reproducirSonidoNotificacion = async ({ modo = "normal" } = {}) => {
   }
 };
 
+const soportaWebPush = () =>
+  typeof window !== "undefined" &&
+  "serviceWorker" in navigator &&
+  "PushManager" in window &&
+  "Notification" in window;
+
+const permissionNotificaciones = () => {
+  if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
+  return Notification.permission;
+};
+
+const urlBase64ToUint8Array = (base64String) => {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = `${base64String}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+};
+
 function App() {
   const [usuario, setUsuario] = useState(() => leerUsuarioLocal());
   const [auth, setAuth] = useState(localStorage.getItem("token") ? true : false);
@@ -322,6 +343,18 @@ function App() {
     return ["normal", "fuerte", "tsunami"].includes(guardado) ? guardado : "normal";
   });
   const [sonidoNotificacionesError, setSonidoNotificacionesError] = useState("");
+  const [pushDevice, setPushDevice] = useState({
+    supported: soportaWebPush(),
+    permission: permissionNotificaciones(),
+    backendEnabled: false,
+    configured: false,
+    registered: false,
+    misDispositivos: 0,
+    totalActivas: null,
+    loading: "",
+    message: "",
+    error: "",
+  });
   const [logoOk, setLogoOk] = useState(true);
   const notificacionesInicializadasRef = useRef(false);
   const notificacionesNoLeidasRef = useRef(new Set());
@@ -357,6 +390,212 @@ function App() {
     window.addEventListener("load", registrarServiceWorker, { once: true });
     return () => window.removeEventListener("load", registrarServiceWorker);
   }, []);
+
+  const obtenerServiceWorkerPush = async () => {
+    if (!soportaWebPush()) {
+      throw new Error("Web Push no soportado en este navegador");
+    }
+
+    try {
+      await navigator.serviceWorker.register("/sw.js");
+    } catch {
+      // Si ya esta registrado o el navegador demora, navigator.serviceWorker.ready decide.
+    }
+
+    return navigator.serviceWorker.ready;
+  };
+
+  const cargarPushStatus = async () => {
+    if (!auth || !localStorage.getItem("token")) return;
+
+    const supported = soportaWebPush();
+    const permission = permissionNotificaciones();
+    let registered = false;
+
+    try {
+      if (supported) {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        registered = Boolean(subscription);
+      }
+    } catch {
+      registered = false;
+    }
+
+    try {
+      const respuesta = await api.get("/push/status");
+      const data = respuesta.data || {};
+      setPushDevice((actual) => ({
+        ...actual,
+        supported,
+        permission,
+        registered,
+        backendEnabled: Boolean(data.enabled),
+        configured: Boolean(data.configured),
+        misDispositivos: Number(data.misDispositivos || 0),
+        totalActivas:
+          data.totalActivas === undefined || data.totalActivas === null
+            ? null
+            : Number(data.totalActivas || 0),
+        error: "",
+      }));
+    } catch (error) {
+      setPushDevice((actual) => ({
+        ...actual,
+        supported,
+        permission,
+        registered,
+        error: "No se pudo cargar estado Web Push.",
+      }));
+    }
+  };
+
+  const activarPushDispositivo = async () => {
+    setPushDevice((actual) => ({ ...actual, loading: "activar", error: "", message: "" }));
+
+    try {
+      if (!soportaWebPush()) {
+        throw new Error("Este navegador no soporta notificaciones push.");
+      }
+
+      const permiso = await Notification.requestPermission();
+      if (permiso !== "granted") {
+        setPushDevice((actual) => ({
+          ...actual,
+          permission: permiso,
+          loading: "",
+          error:
+            permiso === "denied"
+              ? "Permiso denegado. Activalo desde ajustes del navegador o sistema."
+              : "Permiso pendiente. Debes permitir notificaciones para este sitio.",
+        }));
+        return;
+      }
+
+      const clave = await api.get("/push/vapid-public-key");
+      const { publicKey, enabled } = clave.data || {};
+      if (!enabled || !publicKey) {
+        throw new Error("Web Push esta desactivado en backend.");
+      }
+
+      const registration = await obtenerServiceWorkerPush();
+      const existente = await registration.pushManager.getSubscription();
+      const subscription =
+        existente ||
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        }));
+
+      await api.post("/push/subscribe", {
+        subscription: subscription.toJSON(),
+        deviceLabel: navigator.userAgent?.includes("iPhone")
+          ? "iPhone / PWA"
+          : navigator.platform || "Dispositivo",
+        platform: navigator.platform || "web",
+      });
+
+      setPushDevice((actual) => ({
+        ...actual,
+        permission: "granted",
+        registered: true,
+        loading: "",
+        message: "Dispositivo registrado para Web Push.",
+        error: "",
+      }));
+      await cargarPushStatus();
+    } catch (error) {
+      setPushDevice((actual) => ({
+        ...actual,
+        loading: "",
+        error:
+          error.response?.data?.error ||
+          error.message ||
+          "No se pudo activar Web Push en este dispositivo.",
+      }));
+    }
+  };
+
+  const desactivarPushDispositivo = async () => {
+    setPushDevice((actual) => ({ ...actual, loading: "desactivar", error: "", message: "" }));
+
+    try {
+      const registration = await obtenerServiceWorkerPush();
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        await api.post("/push/unsubscribe", {
+          subscription: subscription.toJSON(),
+        });
+        await subscription.unsubscribe();
+      } else {
+        await api.post("/push/unsubscribe", {});
+      }
+
+      setPushDevice((actual) => ({
+        ...actual,
+        registered: false,
+        loading: "",
+        message: "Dispositivo desregistrado.",
+      }));
+      await cargarPushStatus();
+    } catch (error) {
+      setPushDevice((actual) => ({
+        ...actual,
+        loading: "",
+        error:
+          error.response?.data?.error ||
+          error.message ||
+          "No se pudo desactivar Web Push.",
+      }));
+    }
+  };
+
+  const probarPushDispositivo = async () => {
+    setPushDevice((actual) => ({ ...actual, loading: "test", error: "", message: "" }));
+
+    try {
+      const respuesta = await api.post("/push/test");
+      setPushDevice((actual) => ({
+        ...actual,
+        loading: "",
+        message: respuesta.data?.mensaje || "Prueba Web Push enviada.",
+      }));
+      await cargarPushStatus();
+    } catch (error) {
+      setPushDevice((actual) => ({
+        ...actual,
+        loading: "",
+        error: error.response?.data?.error || "No se pudo enviar prueba Web Push.",
+      }));
+    }
+  };
+
+  const probarPushCritico = async () => {
+    setPushDevice((actual) => ({
+      ...actual,
+      loading: "test-critical",
+      error: "",
+      message: "",
+    }));
+
+    try {
+      const respuesta = await api.post("/push/test-critical");
+      setPushDevice((actual) => ({
+        ...actual,
+        loading: "",
+        message: respuesta.data?.mensaje || "Prueba critica Web Push enviada.",
+      }));
+      await cargarPushStatus();
+    } catch (error) {
+      setPushDevice((actual) => ({
+        ...actual,
+        loading: "",
+        error:
+          error.response?.data?.error ||
+          "No se pudo enviar prueba critica Web Push.",
+      }));
+    }
+  };
 
   const mostrarAlertaNotificacion = (notificacion) => {
     if (!notificacion) return;
@@ -486,6 +725,15 @@ function App() {
     setNotificaciones([]);
     setNotificacionesNoLeidas(0);
     setAlertaNotificacion(null);
+    setPushDevice((actual) => ({
+      ...actual,
+      permission: permissionNotificaciones(),
+      registered: false,
+      misDispositivos: 0,
+      totalActivas: null,
+      message: "",
+      error: "",
+    }));
     notificacionesInicializadasRef.current = false;
     notificacionesNoLeidasRef.current = new Set();
   };
@@ -655,6 +903,22 @@ function App() {
     sonidoNotificacionesActivo,
     sonidoNotificacionesModo,
   ]);
+
+  useEffect(() => {
+    if (!auth || !usuario?.id) return undefined;
+
+    let cancelado = false;
+    const cargar = async () => {
+      if (cancelado) return;
+      await cargarPushStatus();
+    };
+
+    cargar();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [auth, usuario?.id, usuario?.rol]);
 
   useEffect(
     () => () => {
@@ -874,6 +1138,8 @@ function App() {
                 sonidoActivo={sonidoNotificacionesActivo}
                 sonidoModo={sonidoNotificacionesModo}
                 sonidoError={sonidoNotificacionesError}
+                usuario={usuario}
+                pushDevice={pushDevice}
                 onActualizar={cargarNotificaciones}
                 onMarcarLeida={marcarNotificacionLeida}
                 onMarcarTodas={marcarTodasNotificacionesLeidas}
@@ -881,6 +1147,11 @@ function App() {
                 onAlternarSonido={alternarSonidoNotificaciones}
                 onCambiarModoSonido={cambiarModoSonidoNotificaciones}
                 onProbarSonido={probarSonidoNotificaciones}
+                onActualizarPush={cargarPushStatus}
+                onActivarPush={activarPushDispositivo}
+                onDesactivarPush={desactivarPushDispositivo}
+                onProbarPush={probarPushDispositivo}
+                onProbarPushCritico={probarPushCritico}
               />
 
               <AlertaNotificacionFlotante
@@ -1154,6 +1425,8 @@ const NotificacionesInternas = ({
   sonidoActivo,
   sonidoModo,
   sonidoError,
+  usuario,
+  pushDevice,
   onActualizar,
   onMarcarLeida,
   onMarcarTodas,
@@ -1161,8 +1434,16 @@ const NotificacionesInternas = ({
   onAlternarSonido,
   onCambiarModoSonido,
   onProbarSonido,
+  onActualizarPush,
+  onActivarPush,
+  onDesactivarPush,
+  onProbarPush,
+  onProbarPushCritico,
 }) => {
   const ultimas = notificaciones.slice(0, 5);
+  const puedeProbarCritico = ["OWNER", "ADMIN"].includes(
+    String(usuario?.rol || "").toUpperCase()
+  );
 
   return (
     <section className="mb-6 flex justify-end">
@@ -1277,6 +1558,130 @@ const NotificacionesInternas = ({
                 {error}
               </div>
             )}
+
+            <div className="border-b-4 border-black bg-slate-950 p-4 text-white">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">
+                    Notificaciones del dispositivo
+                  </p>
+                  <p className="mt-1 text-xs font-bold leading-relaxed text-slate-300">
+                    Activa Web Push para recibir alertas criticas fuera de pantalla. En
+                    iPhone usa la app instalada desde Safari en pantalla de inicio.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[10px] font-black uppercase sm:grid-cols-4 lg:min-w-[420px]">
+                  <div className="rounded-lg border border-white/10 bg-white/10 p-2">
+                    <p className="text-slate-400">Soporte</p>
+                    <p className={pushDevice?.supported ? "text-emerald-300" : "text-red-300"}>
+                      {pushDevice?.supported ? "Disponible" : "No disponible"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/10 p-2">
+                    <p className="text-slate-400">Permiso</p>
+                    <p>{pushDevice?.permission || "default"}</p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/10 p-2">
+                    <p className="text-slate-400">Backend</p>
+                    <p
+                      className={
+                        pushDevice?.backendEnabled ? "text-emerald-300" : "text-amber-300"
+                      }
+                    >
+                      {pushDevice?.backendEnabled ? "Activo" : "Inactivo"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/10 p-2">
+                    <p className="text-slate-400">Dispositivo</p>
+                    <p className={pushDevice?.registered ? "text-emerald-300" : "text-amber-300"}>
+                      {pushDevice?.registered ? "Registrado" : "Sin registrar"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {pushDevice?.error && (
+                <div className="mt-3 rounded-lg border border-red-400 bg-red-950/50 p-2 text-[10px] font-black uppercase text-red-100">
+                  {pushDevice.error}
+                </div>
+              )}
+
+              {pushDevice?.message && (
+                <div className="mt-3 rounded-lg border border-emerald-400 bg-emerald-950/40 p-2 text-[10px] font-black uppercase text-emerald-100">
+                  {pushDevice.message}
+                </div>
+              )}
+
+              {pushDevice?.permission === "denied" && (
+                <p className="mt-3 text-[10px] font-bold uppercase text-amber-200">
+                  Permiso denegado: debes habilitar notificaciones desde ajustes del
+                  navegador o del sistema.
+                </p>
+              )}
+
+              {puedeProbarCritico && pushDevice?.totalActivas !== null && (
+                <p className="mt-3 text-[10px] font-bold uppercase text-slate-400">
+                  Suscripciones activas globales: {pushDevice.totalActivas}
+                </p>
+              )}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onActualizarPush}
+                  className="rounded-lg border-2 border-white bg-white px-3 py-2 text-[10px] font-black uppercase text-black hover:bg-blue-100 transition"
+                >
+                  Actualizar estado
+                </button>
+
+                {!pushDevice?.registered ? (
+                  <button
+                    type="button"
+                    onClick={onActivarPush}
+                    disabled={pushDevice?.loading === "activar"}
+                    className="rounded-lg border-2 border-emerald-300 bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-emerald-500 disabled:opacity-50 transition"
+                  >
+                    {pushDevice?.loading === "activar"
+                      ? "Activando..."
+                      : "Activar notificaciones en este dispositivo"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onDesactivarPush}
+                    disabled={pushDevice?.loading === "desactivar"}
+                    className="rounded-lg border-2 border-amber-300 bg-amber-500 px-3 py-2 text-[10px] font-black uppercase text-black hover:bg-amber-400 disabled:opacity-50 transition"
+                  >
+                    {pushDevice?.loading === "desactivar"
+                      ? "Desactivando..."
+                      : "Desactivar este dispositivo"}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={onProbarPush}
+                  disabled={pushDevice?.loading === "test"}
+                  className="rounded-lg border-2 border-blue-300 bg-blue-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-blue-500 disabled:opacity-50 transition"
+                >
+                  {pushDevice?.loading === "test" ? "Enviando..." : "Enviar prueba"}
+                </button>
+
+                {puedeProbarCritico && (
+                  <button
+                    type="button"
+                    onClick={onProbarPushCritico}
+                    disabled={pushDevice?.loading === "test-critical"}
+                    className="rounded-lg border-2 border-red-300 bg-red-700 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-red-800 disabled:opacity-50 transition"
+                  >
+                    {pushDevice?.loading === "test-critical"
+                      ? "Enviando..."
+                      : "Enviar prueba critica"}
+                  </button>
+                )}
+              </div>
+            </div>
 
             {ultimas.length === 0 ? (
               <div className="p-5 text-sm font-black uppercase text-gray-400">
@@ -1458,6 +1863,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const mostrarOperacion = puedeVerOperacion(usuario);
   const mostrarAgentesIA = puedeVerAgentesIA(usuario);
   const mostrarAutomatizaciones = puedeVerAutomatizaciones(usuario);
+  const mostrarScheduler = puedeVerSchedulerInterno(usuario);
   const mostrarCRM = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(
     String(usuario?.rol || "").toUpperCase()
   );
@@ -1491,6 +1897,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     fileServiceActivos: 0,
     fileServicePostPendiente: 0,
     fileServiceCorrecciones: 0,
+    processGuard: {
+      total: 0,
+      criticos: 0,
+      porResponsable: {},
+    },
     correccionesTecnicasPendientes: 0,
     atencionInmediata: [],
     semaforoOperativo: {
@@ -1511,6 +1922,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       cotizados_pendientes: 0,
       sin_datos_minimos: 0,
       presupuesto_bajo: 0,
+      leads_calientes: 0,
+      leads_por_campania: 0,
+      campania_top_potenciales: null,
       ganados_semana: 0,
       perdidos_semana: 0,
       tasa_conversion: 0,
@@ -1545,6 +1959,17 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     error: "",
     cargando: "",
     ultimaEjecucion: null,
+    scheduler: {
+      enabled: false,
+      intervalMinutes: 10,
+      startDelaySeconds: 30,
+      startedAt: null,
+      lastRunAt: null,
+      lastRunSummary: null,
+      nextRunEstimate: null,
+      running: false,
+      error: "",
+    },
   });
   const [bitacoraForm, setBitacoraForm] = useState({
     tipo: "OPERACION",
@@ -1898,6 +2323,42 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         String(archivo.post_escritura_estado || "").toUpperCase() !== "OK"
     ).length;
 
+    const archivosSinCierreTecnico = archivos.filter((archivo) => {
+      const estado = String(archivo.estado || "").toUpperCase();
+      const guard = String(archivo.proceso_guard_estado || "").toUpperCase();
+      const cerrado =
+        archivo.cierre_tecnico_at ||
+        ["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(estado) ||
+        guard === "CERRADO";
+
+      return (
+        archivo.archivo_modificado &&
+        !archivo.archivado &&
+        !cerrado &&
+        archivo.cierre_tecnico_obligatorio !== false
+      );
+    });
+
+    const processGuardCriticos = archivosSinCierreTecnico.filter((archivo) =>
+      ["CRITICO", "ESCALADO"].includes(
+        String(archivo.proceso_guard_estado || "").toUpperCase()
+      )
+    );
+
+    const processGuardPorResponsable = archivosSinCierreTecnico.reduce(
+      (acc, archivo) => {
+        const responsable =
+          archivo.proceso_guard_responsable_id ||
+          archivo.operador_ecu_asignado_a ||
+          archivo.tuner_asignado_a ||
+          archivo.slave_asignado_a ||
+          "Sin responsable";
+        acc[responsable] = (acc[responsable] || 0) + 1;
+        return acc;
+      },
+      {}
+    );
+
     const correccionesPendientes = archivos.filter(
       (archivo) =>
         archivo.correccion_pendiente === true ||
@@ -2023,16 +2484,18 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     const semaforoOperativo =
       correccionesUrgentes > 0 ||
       clientesVolvieronPostventa > 0 ||
-      pagosBloqueandoEntrega > 0
+      pagosBloqueandoEntrega > 0 ||
+      processGuardCriticos.length > 0
         ? {
             estado: "Bloqueo operativo",
             color: "rojo",
             detalle:
-              "Hay postventa urgente, cliente que volvio o pago bloqueando entrega.",
+              "Hay postventa urgente, Process Guard critico, cliente que volvio o pago bloqueando entrega.",
           }
         : archivosPendienteRevision > 0 ||
           archivosNuevaLectura > 0 ||
           fileServiceSinPostOk > 0 ||
+          archivosSinCierreTecnico.length > 0 ||
           mecanicaAsociadaCurso > 0 ||
           mecanicaIndependiente > 0
         ? {
@@ -2074,6 +2537,18 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         nivel: fileServiceSinPostOk > 0 ? "rojo" : "verde",
         to: "/archivos-ecu",
         detalle: "Trabajo tecnico inconcluso",
+      },
+      {
+        label: "Procesos sin cierre",
+        valor: archivosSinCierreTecnico.length,
+        nivel:
+          processGuardCriticos.length > 0
+            ? "rojo"
+            : archivosSinCierreTecnico.length > 0
+            ? "ambar"
+            : "verde",
+        to: "/archivos-ecu#post-escritura",
+        detalle: "Process Guard activo",
       },
       {
         label: "Nueva lectura requerida",
@@ -2126,6 +2601,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       { label: "Correccion pendiente", valor: correccionesPendientes, nivel: "rojo" },
       { label: "Nueva lectura requerida", valor: archivosNuevaLectura, nivel: "rojo" },
       { label: "Post escritura pendiente", valor: fileServiceSinPostOk, nivel: "ambar" },
+      {
+        label: "Procesos sin cierre",
+        valor: archivosSinCierreTecnico.length,
+        nivel: processGuardCriticos.length > 0 ? "rojo" : "ambar",
+      },
     ];
 
     const pesoPrioridad = {
@@ -2283,6 +2763,25 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         });
       }
 
+      if (
+        archivo.archivo_modificado &&
+        !archivo.cierre_tecnico_at &&
+        archivo.cierre_tecnico_obligatorio !== false
+      ) {
+        const guard = String(archivo.proceso_guard_estado || "").toUpperCase();
+        agregarAlerta({
+          id: `file-${archivo.id}-process-guard`,
+          severidad: ["CRITICO", "ESCALADO"].includes(guard)
+            ? "critica"
+            : "atencion",
+          tipo: "Process Guard sin cierre tecnico",
+          referencia: `File #${archivo.id}`,
+          tiempo: formatoTiempo(horas),
+          estado: guard || "PENDIENTE",
+          horas,
+        });
+      }
+
       if (estado === "REQUIERE_CORRECCION" || archivo.correccion_pendiente === true) {
         agregarAlerta({
           id: `file-${archivo.id}-correccion`,
@@ -2377,6 +2876,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           archivo.correccion_pendiente === true ||
           String(archivo.estado || "").toUpperCase() === "REQUIERE_CORRECCION"
       ).length,
+      processGuard: {
+        total: archivosSinCierreTecnico.length,
+        criticos: processGuardCriticos.length,
+        porResponsable: processGuardPorResponsable,
+      },
       correccionesTecnicasPendientes,
       atencionInmediata,
       semaforoOperativo,
@@ -2387,6 +2891,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       checklistOperativo: [
         crearItemChecklist("Órdenes sin diagnóstico", ordenesSinDiagnostico),
         crearItemChecklist("File Service sin post escritura OK", fileServiceSinPostOk),
+        crearItemChecklist("Procesos tecnicos sin cierre", archivosSinCierreTecnico.length),
         crearItemChecklist("File Service con corrección pendiente", correccionesPendientes),
         crearItemChecklist("Órdenes listas para entrega", listasEntrega),
         crearItemChecklist("Correcciones técnicas pendientes", correccionesTecnicasPendientes),
@@ -2403,6 +2908,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         cotizados_pendientes: Number(leadsResumen?.cotizados_pendientes || 0),
         sin_datos_minimos: Number(leadsResumen?.sin_datos_minimos || 0),
         presupuesto_bajo: Number(leadsResumen?.presupuesto_bajo || 0),
+        leads_calientes: Number(leadsResumen?.leads_calientes || 0),
+        leads_por_campania: Number(leadsResumen?.leads_por_campania || 0),
+        campania_top_potenciales: leadsResumen?.campania_top_potenciales || null,
         ganados_semana: Number(leadsResumen?.ganados_semana || 0),
         perdidos_semana: Number(leadsResumen?.perdidos_semana || 0),
         tasa_conversion: Number(leadsResumen?.tasa_conversion || 0),
@@ -2517,6 +3025,30 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     }
   };
 
+  const cargarSchedulerStatus = async () => {
+    if (!mostrarScheduler) return;
+
+    try {
+      const respuesta = await api.get("/automatizaciones/scheduler/status");
+      setAutomatizaciones((actual) => ({
+        ...actual,
+        scheduler: {
+          ...actual.scheduler,
+          ...(respuesta.data || {}),
+          error: "",
+        },
+      }));
+    } catch (error) {
+      setAutomatizaciones((actual) => ({
+        ...actual,
+        scheduler: {
+          ...actual.scheduler,
+          error: "No se pudo cargar el estado del scheduler interno.",
+        },
+      }));
+    }
+  };
+
   const ejecutarAutomatizacion = async (tipo) => {
     const acciones = {
       revision: {
@@ -2534,6 +3066,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       fileService: {
         label: "Revision File Service",
         request: () => api.get("/automatizaciones/file-service"),
+      },
+      processGuard: {
+        label: "Revisar Process Guard",
+        request: () => api.post("/automatizaciones/process-guard/revisar"),
       },
       finanzas: {
         label: "Revision Finanzas",
@@ -2586,12 +3122,80 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       if (actualizarNotificaciones) {
         await actualizarNotificaciones();
       }
+      if (tipo === "processGuard") {
+        await fetchStats();
+      }
     } catch (error) {
       setAutomatizaciones((actual) => ({
         ...actual,
         error:
           error.response?.data?.error ||
           "No se pudo ejecutar la automatizacion seleccionada.",
+        cargando: "",
+      }));
+    }
+  };
+
+  const ejecutarSchedulerAhora = async () => {
+    if (!mostrarScheduler) return;
+
+    setAutomatizaciones((actual) => ({
+      ...actual,
+      cargando: "scheduler",
+      error: "",
+      scheduler: {
+        ...actual.scheduler,
+        error: "",
+      },
+    }));
+
+    try {
+      const respuesta = await api.post("/automatizaciones/scheduler/run-once");
+      const data = respuesta.data || {};
+      const summary = data.summary || data.status?.lastRunSummary || null;
+
+      setAutomatizaciones((actual) => ({
+        ...actual,
+        resultado: summary
+          ? {
+              ...summary,
+              titulo: "Scheduler interno GMTCH",
+              alertas: [],
+              sugerencias: [
+                "Revisar notificaciones accionables creadas por el scheduler.",
+                "Toda accion operativa requiere validacion humana.",
+              ],
+            }
+          : actual.resultado,
+        scheduler: {
+          ...actual.scheduler,
+          ...(data.status || {}),
+          lastRunSummary: summary || data.status?.lastRunSummary || null,
+          error: "",
+        },
+        cargando: "",
+        ultimaEjecucion: new Date().toLocaleString("es-CL", {
+          dateStyle: "short",
+          timeStyle: "short",
+        }),
+      }));
+
+      await fetchStats();
+      if (actualizarNotificaciones) {
+        await actualizarNotificaciones();
+      }
+    } catch (error) {
+      setAutomatizaciones((actual) => ({
+        ...actual,
+        error:
+          error.response?.data?.error ||
+          "No se pudo ejecutar el scheduler interno.",
+        scheduler: {
+          ...actual.scheduler,
+          error:
+            error.response?.data?.error ||
+            "No se pudo ejecutar el scheduler interno.",
+        },
         cargando: "",
       }));
     }
@@ -2676,6 +3280,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       }
       if (mostrarAgentesIA) {
         await cargarAgentesIA();
+      }
+      if (mostrarScheduler) {
+        await cargarSchedulerStatus();
       }
     } catch (err) {
       console.error("Error cargando estadisticas:", err.response?.data || err.message);
@@ -2814,7 +3421,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           puedeGenerarReportes={puedeGenerarReportesAutomatizacion}
           puedeVerFinanzas={puedeVerFinanzasAutomatizacion}
           puedeVerMaterial={puedeVerMaterialAutomatizacion}
+          puedeVerScheduler={mostrarScheduler}
           onEjecutar={ejecutarAutomatizacion}
+          onSchedulerRunOnce={ejecutarSchedulerAhora}
         />
       )}
 
@@ -2825,6 +3434,13 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {puedeVerFileService && (
           <FileServiceCentroMandoSection items={stats.fileServiceResumen} />
+        )}
+        {puedeVerFileService && (
+          <ProcessGuardDashboardSection
+            resumen={stats.processGuard}
+            cargando={automatizaciones.cargando === "processGuard"}
+            onRevisar={() => ejecutarAutomatizacion("processGuard")}
+          />
         )}
         <PostventaCentroMandoSection items={stats.postventaPendientesDetalle} />
       </div>
@@ -2969,6 +3585,18 @@ const CRMComercialDashboardSection = ({ leads = {} }) => {
       to: "/leads",
     },
     {
+      label: "Leads calientes",
+      value: leads.leads_calientes,
+      nivel: leads.leads_calientes > 0 ? "rojo" : "verde",
+      to: "/leads?es_lead_caliente=true",
+    },
+    {
+      label: "Leads por campaña",
+      value: leads.leads_por_campania,
+      nivel: leads.leads_por_campania > 0 ? "azul" : "verde",
+      to: "/leads",
+    },
+    {
       label: "Cotizados sin seguimiento",
       value: leads.cotizados_pendientes,
       nivel: leads.cotizados_pendientes > 0 ? "ambar" : "verde",
@@ -3044,6 +3672,19 @@ const CRMComercialDashboardSection = ({ leads = {} }) => {
           </p>
         </div>
       </div>
+      {leads.campania_top_potenciales && (
+        <div className="mt-4 rounded-2xl border-2 border-black bg-emerald-50 p-4 text-emerald-950">
+          <p className="text-[10px] font-black uppercase text-emerald-800">
+            Campaña con más potenciales reales
+          </p>
+          <p className="mt-1 text-lg font-black uppercase">
+            {leads.campania_top_potenciales.nombre}
+          </p>
+          <p className="mt-1 text-xs font-bold uppercase text-emerald-800">
+            {Number(leads.campania_top_potenciales.potenciales_reales || 0)} potenciales reales
+          </p>
+        </div>
+      )}
     </section>
   );
 };
@@ -3060,8 +3701,8 @@ const PwaIOSInstallSection = () => (
         </h2>
         <p className="mt-2 text-sm font-bold text-slate-200">
           Instala GMTCH Tune OS en tu iPhone para acceso rapido y mejor experiencia
-          de alertas. Las notificaciones push reales quedan preparadas para una fase
-          posterior; por ahora se mantienen campana, sonido y polling interno.
+          de alertas. Web Push V1 permite registrar el dispositivo cuando el backend
+          este activo con VAPID.
         </p>
       </div>
 
@@ -3335,14 +3976,18 @@ const AutomatizacionesGMTCHSection = ({
   puedeGenerarReportes,
   puedeVerFinanzas,
   puedeVerMaterial,
+  puedeVerScheduler,
   onEjecutar,
+  onSchedulerRunOnce,
 }) => {
   const resultado = normalizarResultadoAutomatizacion(estado);
+  const scheduler = estado?.scheduler || {};
   const acciones = [
     ["revision", "Ejecutar revision", true],
     ["apertura", "Generar reporte apertura", puedeGenerarReportes],
     ["cierre", "Generar reporte cierre", puedeGenerarReportes],
     ["fileService", "File Service", true],
+    ["processGuard", "Process Guard", true],
     ["finanzas", "Finanzas", puedeVerFinanzas],
     ["material", "Material recuperado", puedeVerMaterial],
     ["ultimoReporte", "Ver ultimo reporte", puedeGenerarReportes || puedeVerMaterial],
@@ -3386,6 +4031,87 @@ const AutomatizacionesGMTCHSection = ({
             ))}
         </div>
       </div>
+
+      {puedeVerScheduler && (
+        <div className="mt-5 rounded-2xl border-4 border-black bg-slate-950 p-4 text-white">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-300">
+                Scheduler interno V1
+              </p>
+              <h3 className="mt-1 text-xl font-black uppercase">
+                Automatizacion periodica segura
+              </h3>
+              <p className="mt-2 text-xs font-bold leading-relaxed text-slate-300">
+                Solo revisa datos y crea notificaciones accionables. No cambia estados,
+                no marca pagos y no cierra procesos tecnicos.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-[10px] font-black uppercase sm:grid-cols-4 lg:min-w-[520px]">
+              <div className="rounded-xl border border-white/10 bg-white/10 p-3">
+                <p className="text-slate-400">Estado</p>
+                <p className={scheduler.enabled ? "text-emerald-300" : "text-amber-300"}>
+                  {scheduler.enabled ? "Activo" : "Desactivado"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/10 p-3">
+                <p className="text-slate-400">Intervalo</p>
+                <p>{scheduler.intervalMinutes || 10} min</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/10 p-3">
+                <p className="text-slate-400">Ultima</p>
+                <p>{formatoFechaCorta(scheduler.lastRunAt)}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/10 p-3">
+                <p className="text-slate-400">Proxima</p>
+                <p>{formatoFechaCorta(scheduler.nextRunEstimate)}</p>
+              </div>
+            </div>
+          </div>
+
+          {!scheduler.enabled && (
+            <div className="mt-4 rounded-xl border border-amber-400/60 bg-amber-500/10 p-3 text-xs font-black uppercase text-amber-100">
+              Scheduler interno desactivado. Activa ENABLE_INTERNAL_AUTOMATIONS=true
+              en Railway cuando este probado.
+            </div>
+          )}
+
+          {scheduler.error && (
+            <div className="mt-4 rounded-xl border border-red-400/60 bg-red-500/10 p-3 text-xs font-black uppercase text-red-100">
+              {scheduler.error}
+            </div>
+          )}
+
+          <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <p className="text-[11px] font-bold uppercase text-slate-400">
+              Run-once ejecuta una revision completa con anti-spam y notificaciones
+              accionables, sin modificar datos operativos.
+            </p>
+            <button
+              type="button"
+              onClick={onSchedulerRunOnce}
+              disabled={estado?.cargando === "scheduler" || scheduler.running}
+              className="rounded-xl border-2 border-blue-300 bg-blue-600 px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-blue-500 disabled:opacity-50"
+            >
+              {estado?.cargando === "scheduler" || scheduler.running
+                ? "Revisando..."
+                : "Ejecutar revision ahora"}
+            </button>
+          </div>
+
+          {scheduler.lastRunSummary && (
+            <div className="mt-4 rounded-xl border border-blue-400/40 bg-black/30 p-3">
+              <p className="text-[10px] font-black uppercase text-blue-300">
+                Ultimo resumen scheduler
+              </p>
+              <p className="mt-1 text-xs font-bold leading-relaxed text-white">
+                {scheduler.lastRunSummary.resumen || "Sin resumen disponible."}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {estado?.error && (
         <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-50 p-3 text-xs font-black uppercase text-red-800">
@@ -3629,6 +4355,72 @@ const FileServiceCentroMandoSection = ({ items = [] }) => (
     </div>
   </section>
 );
+
+const ProcessGuardDashboardSection = ({ resumen = {}, cargando, onRevisar }) => {
+  const total = numeroDashboard(resumen?.total);
+  const criticos = numeroDashboard(resumen?.criticos);
+  const responsables = Object.entries(resumen?.porResponsable || {}).slice(0, 5);
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
+            Procesos sin cierre
+          </h2>
+          <p className="mt-1 text-[11px] font-bold uppercase text-gray-400">
+            Cierre tecnico obligatorio despues de MOD listo/descargado
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRevisar}
+          disabled={cargando}
+          className="rounded-xl border-4 border-black bg-red-700 px-4 py-3 text-[10px] font-black uppercase text-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition hover:bg-red-600 disabled:opacity-50"
+        >
+          {cargando ? "Revisando..." : "Revisar Process Guard"}
+        </button>
+      </div>
+
+      <div className="rounded-2xl border-4 border-black bg-white p-4 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+        <div className="grid grid-cols-2 gap-3">
+          <div className={nivelClassCentro(total > 0 ? "ambar" : "verde") + " border-4 rounded-xl p-4"}>
+            <p className="text-[10px] font-black uppercase">Total abiertos</p>
+            <p className="mt-2 text-4xl font-black">{total}</p>
+          </div>
+          <div className={nivelClassCentro(criticos > 0 ? "rojo" : "verde") + " border-4 rounded-xl p-4"}>
+            <p className="text-[10px] font-black uppercase">Criticos</p>
+            <p className="mt-2 text-4xl font-black">{criticos}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 border-t-4 border-black pt-3">
+          <p className="text-[10px] font-black uppercase text-gray-500">
+            Por responsable
+          </p>
+          {responsables.length === 0 ? (
+            <p className="mt-2 text-xs font-black uppercase text-gray-400">
+              Sin procesos abiertos
+            </p>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {responsables.map(([responsable, cantidad]) => (
+                <Link
+                  key={responsable}
+                  to="/archivos-ecu#post-escritura"
+                  className="flex items-center justify-between border-2 border-black px-3 py-2 text-xs font-black uppercase hover:bg-blue-50"
+                >
+                  <span>{responsable}</span>
+                  <span>{cantidad}</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const PostventaCentroMandoSection = ({ items = [] }) => (
   <section className="space-y-4">

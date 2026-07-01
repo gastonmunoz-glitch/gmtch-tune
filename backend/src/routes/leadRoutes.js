@@ -10,11 +10,13 @@ const {
   convertirCliente,
   convertirOrden,
   obtenerResumenLeads,
+  obtenerResumenCampaniasLeads,
 } = require("../controllers/leadController");
 
 const router = express.Router();
 
 router.get("/resumen", obtenerResumenLeads);
+router.get("/resumen-campanias", obtenerResumenCampaniasLeads);
 router.get("/", obtenerLeads);
 router.post("/", crearLead);
 router.get("/:id", obtenerLeadPorId);

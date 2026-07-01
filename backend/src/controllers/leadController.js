@@ -6,6 +6,7 @@ const {
   OrdenTrabajo,
   Vehiculo,
   Notificacion,
+  CampaniaComercial,
 } = require("../models");
 const { crearNotificacionesInternas } = require("./notificacionController");
 const { buscarTarifaParaServicio } = require("./tarifaController");
@@ -15,6 +16,9 @@ let tablasPreparadas = false;
 const CANALES = [
   "WHATSAPP",
   "INSTAGRAM",
+  "INSTAGRAM_ADS",
+  "FACEBOOK_ADS",
+  "GRUPO_FACEBOOK",
   "WEB",
   "FACEBOOK",
   "PRESENCIAL",
@@ -90,7 +94,17 @@ const prepararTablasLeads = async () => {
       ADD COLUMN IF NOT EXISTS "datos_minimos_completos" BOOLEAN DEFAULT false,
       ADD COLUMN IF NOT EXISTS "tarifa_servicio_id" INTEGER,
       ADD COLUMN IF NOT EXISTS "precio_desde_sugerido" INTEGER,
-      ADD COLUMN IF NOT EXISTS "precio_referencia_sugerido" INTEGER
+      ADD COLUMN IF NOT EXISTS "precio_referencia_sugerido" INTEGER,
+      ADD COLUMN IF NOT EXISTS "campaniaId" INTEGER,
+      ADD COLUMN IF NOT EXISTS "utm_source" VARCHAR(120),
+      ADD COLUMN IF NOT EXISTS "utm_campaign" VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS "utm_content" VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS "primer_contacto_at" TIMESTAMP WITH TIME ZONE,
+      ADD COLUMN IF NOT EXISTS "ultimo_contacto_at" TIMESTAMP WITH TIME ZONE,
+      ADD COLUMN IF NOT EXISTS "respondido_at" TIMESTAMP WITH TIME ZONE,
+      ADD COLUMN IF NOT EXISTS "tiempo_respuesta_minutos" INTEGER,
+      ADD COLUMN IF NOT EXISTS "es_lead_caliente" BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS "requiere_contacto_humano" BOOLEAN DEFAULT true
   `);
 
   await LeadInteraccion.sequelize.query(`
@@ -176,6 +190,31 @@ const enriquecerLeadComercial = async (lead) => {
     precioDesde: Number(tarifa?.precio_desde || 0),
     precioReferencia: Number(tarifa?.precio_referencia || 0),
   };
+};
+
+const esLeadCaliente = (lead, calificacion = null) => {
+  const texto = textoLead(lead);
+  const score = Number(calificacion?.score || lead.score_interes || 0);
+  return Boolean(
+    score >= 70 ||
+      String(lead.estado || calificacion?.estado || "").toUpperCase() ===
+        "POTENCIAL_REAL" ||
+      texto.includes("AGENDAR") ||
+      texto.includes("AGENDA") ||
+      texto.includes("HORA") ||
+      texto.includes("HOY")
+  );
+};
+
+const requiereContactoHumano = (lead, calificacion = null) => {
+  const estado = String(lead.estado || calificacion?.estado || "").toUpperCase();
+  if (["GANADO", "PERDIDO", "NO_INTERESADO", "SPAM"].includes(estado)) return false;
+  return Boolean(
+    esLeadCaliente(lead, calificacion) ||
+      estado === "NUEVO" ||
+      estado === "CALIFICANDO" ||
+      !lead.respondido_at
+  );
 };
 
 const normalizarFechaOpcional = (valor) => {
@@ -431,7 +470,11 @@ const payloadLead = (body = {}) => ({
   telefono: limpiarTexto(body.telefono) || null,
   email: limpiarTexto(body.email).toLowerCase() || null,
   canal: normalizarEnum(body.canal, CANALES, "OTRO"),
+  campaniaId: normalizarEnteroOpcional(body.campaniaId || body.campania_id),
   origen_detalle: limpiarTexto(body.origen_detalle) || null,
+  utm_source: limpiarTexto(body.utm_source) || null,
+  utm_campaign: limpiarTexto(body.utm_campaign) || null,
+  utm_content: limpiarTexto(body.utm_content) || null,
   estado: normalizarEnum(body.estado, ESTADOS, "NUEVO"),
   prioridad: normalizarEnum(body.prioridad, PRIORIDADES, "MEDIA"),
   vehiculo_marca: limpiarTexto(body.vehiculo_marca) || null,
@@ -456,9 +499,41 @@ const payloadLead = (body = {}) => ({
   resumen_ai: limpiarTexto(body.resumen_ai) || null,
   proxima_accion: limpiarTexto(body.proxima_accion) || null,
   proximo_contacto_at: normalizarFechaOpcional(body.proximo_contacto_at),
+  primer_contacto_at: normalizarFechaOpcional(body.primer_contacto_at),
+  ultimo_contacto_at: normalizarFechaOpcional(body.ultimo_contacto_at),
+  respondido_at: normalizarFechaOpcional(body.respondido_at),
+  tiempo_respuesta_minutos: normalizarEnteroOpcional(body.tiempo_respuesta_minutos),
+  es_lead_caliente:
+    body.es_lead_caliente === undefined ? false : Boolean(body.es_lead_caliente),
+  requiere_contacto_humano:
+    body.requiere_contacto_humano === undefined
+      ? true
+      : Boolean(body.requiere_contacto_humano),
   asignado_a: limpiarTexto(body.asignado_a) || null,
   perdido_motivo: limpiarTexto(body.perdido_motivo) || null,
 });
+
+const aplicarDatosCampania = async (payload, req = null) => {
+  if (!payload.campaniaId) return payload;
+
+  const campania = await CampaniaComercial.findByPk(payload.campaniaId);
+  if (!campania) return payload;
+
+  if (rolActual(req || {}) === "RECEPCION" && campania.estado !== "ACTIVA") {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    canal:
+      payload.canal === "OTRO" && CANALES.includes(campania.canal)
+        ? campania.canal
+        : payload.canal,
+    utm_source: payload.utm_source || campania.utm_source || null,
+    utm_campaign: payload.utm_campaign || campania.utm_campaign || null,
+    utm_content: payload.utm_content || campania.utm_content || null,
+  };
+};
 
 const notificarLead = async (lead, tipo, titulo, mensaje, extra = {}) => {
   try {
@@ -527,6 +602,68 @@ const evaluarNotificacionesLead = async (lead, calificacion = null) => {
   }
 };
 
+const resumenCampaniasDesdeLeads = (leads, campanias = []) => {
+  const mapaCampanias = new Map(
+    campanias.map((campania) => [String(campania.id), campania])
+  );
+  const grupos = new Map();
+
+  const obtenerGrupo = (lead) => {
+    const id = lead.campaniaId ? String(lead.campaniaId) : "SIN_CAMPANIA";
+    if (!grupos.has(id)) {
+      const campania = mapaCampanias.get(id);
+      grupos.set(id, {
+        campaniaId: campania?.id || null,
+        nombre: campania?.nombre || "Sin campaña / orgánico",
+        canal: campania?.canal || lead.canal || "OTRO",
+        estado: campania?.estado || "ORGANICO",
+        presupuesto: Number(campania?.presupuesto || 0),
+        leads_totales: 0,
+        leads_sin_datos_minimos: 0,
+        potenciales_reales: 0,
+        cotizados: 0,
+        agendados: 0,
+        ganados: 0,
+        perdidos: 0,
+        leads_calientes: 0,
+      });
+    }
+    return grupos.get(id);
+  };
+
+  leads.forEach((lead) => {
+    const grupo = obtenerGrupo(lead);
+    grupo.leads_totales += 1;
+    if (!lead.datos_minimos_completos) grupo.leads_sin_datos_minimos += 1;
+    if (lead.estado === "POTENCIAL_REAL") grupo.potenciales_reales += 1;
+    if (lead.estado === "COTIZADO") grupo.cotizados += 1;
+    if (lead.estado === "AGENDADO") grupo.agendados += 1;
+    if (lead.estado === "GANADO") grupo.ganados += 1;
+    if (["PERDIDO", "NO_INTERESADO", "SPAM"].includes(lead.estado)) {
+      grupo.perdidos += 1;
+    }
+    if (lead.es_lead_caliente) grupo.leads_calientes += 1;
+  });
+
+  return Array.from(grupos.values())
+    .map((grupo) => ({
+      ...grupo,
+      costo_estimado_por_lead:
+        grupo.leads_totales > 0
+          ? Math.round(grupo.presupuesto / grupo.leads_totales)
+          : 0,
+      costo_estimado_por_lead_real:
+        grupo.potenciales_reales > 0
+          ? Math.round(grupo.presupuesto / grupo.potenciales_reales)
+          : 0,
+      conversion_simple:
+        grupo.leads_totales > 0
+          ? Math.round((grupo.ganados / grupo.leads_totales) * 100)
+          : 0,
+    }))
+    .sort((a, b) => b.potenciales_reales - a.potenciales_reales);
+};
+
 const obtenerLeads = async (req, res) => {
   try {
     await prepararTablasLeads();
@@ -540,6 +677,14 @@ const obtenerLeads = async (req, res) => {
         }
       }
     );
+    if (normalizarEnteroOpcional(req.query.campaniaId || req.query.campania_id)) {
+      filtros.campaniaId = normalizarEnteroOpcional(
+        req.query.campaniaId || req.query.campania_id
+      );
+    }
+    if (req.query.es_lead_caliente !== undefined) {
+      filtros.es_lead_caliente = String(req.query.es_lead_caliente) === "true";
+    }
 
     const leads = await LeadComercial.findAll({
       where: { ...where, ...filtros },
@@ -584,7 +729,7 @@ const crearLead = async (req, res) => {
       return res.status(403).json({ error: "No tienes permiso para crear leads" });
     }
 
-    const payload = payloadLead(req.body);
+    const payload = await aplicarDatosCampania(payloadLead(req.body), req);
     if (!payload.telefono && !payload.email && !payload.mensaje_inicial) {
       return res.status(400).json({
         error: "Debes registrar telefono, email o mensaje inicial del lead.",
@@ -593,10 +738,15 @@ const crearLead = async (req, res) => {
 
     const contexto = await enriquecerLeadComercial(payload);
     const calificacion = calcularScoreLead(payload, contexto);
+    const primerContacto = payload.primer_contacto_at || new Date();
     const lead = await LeadComercial.create({
       ...payload,
+      primer_contacto_at: primerContacto,
+      ultimo_contacto_at: payload.ultimo_contacto_at || primerContacto,
       score_interes: calificacion.score,
       motivo_score: calificacion.motivo,
+      es_lead_caliente: esLeadCaliente(payload, calificacion),
+      requiere_contacto_humano: requiereContactoHumano(payload, calificacion),
       datos_minimos_completos: contexto.datosMinimosCompletos,
       presupuesto_bajo: contexto.presupuestoBajo,
       tarifa_servicio_id: contexto.tarifa?.id || null,
@@ -653,7 +803,10 @@ const actualizarLead = async (req, res) => {
 
     if (!lead) return res.status(404).json({ error: "Lead no encontrado" });
 
-    const payload = payloadLead({ ...lead.toJSON(), ...req.body });
+    const payload = await aplicarDatosCampania(
+      payloadLead({ ...lead.toJSON(), ...req.body }),
+      req
+    );
     const campos = {};
     Object.keys(payload).forEach((campo) => {
       if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
@@ -682,6 +835,8 @@ const actualizarLead = async (req, res) => {
       campos.precio_referencia_sugerido = contexto.precioReferencia || null;
       campos.score_interes = calificacion.score;
       campos.motivo_score = calificacion.motivo;
+      campos.es_lead_caliente = esLeadCaliente(payload, calificacion);
+      campos.requiere_contacto_humano = requiereContactoHumano(payload, calificacion);
       if (!Object.prototype.hasOwnProperty.call(req.body, "resumen_ai")) {
         campos.resumen_ai = respuestaSugerida(payload, contexto);
       }
@@ -700,6 +855,18 @@ const actualizarLead = async (req, res) => {
           ? "Contactar, confirmar datos y proponer agenda"
           : "Pedir datos faltantes antes de cotizar";
       }
+    }
+
+    if (
+      !recalcularComercial &&
+      (Object.prototype.hasOwnProperty.call(req.body, "estado") ||
+        Object.prototype.hasOwnProperty.call(req.body, "prioridad"))
+    ) {
+      campos.es_lead_caliente = esLeadCaliente({ ...lead.toJSON(), ...payload });
+      campos.requiere_contacto_humano = requiereContactoHumano({
+        ...lead.toJSON(),
+        ...payload,
+      });
     }
 
     await lead.update(campos);
@@ -744,11 +911,26 @@ const agregarInteraccion = async (req, res) => {
       metadata: normalizarMetadata(req.body.metadata),
     });
 
-    if (lead.estado === "NUEVO" && interaccion.direccion === "SALIENTE") {
-      await lead.update({ estado: "CONTACTADO" });
-    } else {
-      await lead.update({ updatedAt: new Date() });
+    const actualizacionLead = { ultimo_contacto_at: new Date() };
+    if (interaccion.direccion === "SALIENTE" && !lead.respondido_at) {
+      actualizacionLead.respondido_at = new Date();
+      const inicio = new Date(lead.primer_contacto_at || lead.createdAt);
+      actualizacionLead.tiempo_respuesta_minutos = Math.max(
+        0,
+        Math.round((actualizacionLead.respondido_at.getTime() - inicio.getTime()) / 60000)
+      );
     }
+
+    if (lead.estado === "NUEVO" && interaccion.direccion === "SALIENTE") {
+      actualizacionLead.estado = "CONTACTADO";
+    }
+
+    actualizacionLead.requiere_contacto_humano = requiereContactoHumano({
+      ...lead.toJSON(),
+      ...actualizacionLead,
+    });
+
+    await lead.update(actualizacionLead);
 
     res.status(201).json({ mensaje: "Interaccion registrada", interaccion });
   } catch (error) {
@@ -781,6 +963,8 @@ const calificarLead = async (req, res) => {
       estado: calificacion.estado,
       prioridad: calificacion.prioridad,
       resumen_ai: respuestaSugerida(base, contexto),
+      es_lead_caliente: esLeadCaliente(base, calificacion),
+      requiere_contacto_humano: requiereContactoHumano(base, calificacion),
       datos_minimos_completos: contexto.datosMinimosCompletos,
       presupuesto_bajo: contexto.presupuestoBajo,
       tarifa_servicio_id: contexto.tarifa?.id || null,
@@ -959,6 +1143,7 @@ const obtenerResumenLeads = async (req, res) => {
     const cotizadosPendientes = [];
     const sinDatosMinimos = [];
     const presupuestoBajo = [];
+    const leadsCalientes = [];
 
     leads.forEach((lead) => {
       const interacciones =
@@ -998,6 +1183,13 @@ const obtenerResumenLeads = async (req, res) => {
       ) {
         presupuestoBajo.push(lead);
       }
+
+      if (
+        !["GANADO", "PERDIDO", "NO_INTERESADO", "SPAM"].includes(lead.estado) &&
+        lead.es_lead_caliente
+      ) {
+        leadsCalientes.push(lead);
+      }
     });
 
     for (const lead of sinResponder.slice(0, 5)) {
@@ -1029,6 +1221,12 @@ const obtenerResumenLeads = async (req, res) => {
         new Date(lead.updatedAt) >= semanaInicio
     ).length;
     const totalCerrados = ganadosSemana + perdidosSemana;
+    const campanias = await CampaniaComercial.findAll({ limit: 400 });
+    const resumenCampanias = resumenCampaniasDesdeLeads(leads, campanias);
+    const campaniaTop =
+      resumenCampanias.find((item) => item.campaniaId && item.potenciales_reales > 0) ||
+      resumenCampanias.find((item) => item.campaniaId) ||
+      null;
 
     res.json({
       total: leads.length,
@@ -1040,6 +1238,15 @@ const obtenerResumenLeads = async (req, res) => {
       cotizados_pendientes: cotizadosPendientes.length,
       sin_datos_minimos: sinDatosMinimos.length,
       presupuesto_bajo: presupuestoBajo.length,
+      leads_calientes: leadsCalientes.length,
+      leads_por_campania: resumenCampanias.length,
+      campania_top_potenciales: campaniaTop
+        ? {
+            campaniaId: campaniaTop.campaniaId,
+            nombre: campaniaTop.nombre,
+            potenciales_reales: campaniaTop.potenciales_reales,
+          }
+        : null,
       ganados_semana: ganadosSemana,
       perdidos_semana: perdidosSemana,
       tasa_conversion:
@@ -1048,6 +1255,34 @@ const obtenerResumenLeads = async (req, res) => {
   } catch (error) {
     console.error("ERROR RESUMEN LEADS:", error);
     res.status(500).json({ error: "No se pudo obtener resumen de leads" });
+  }
+};
+
+const obtenerResumenCampaniasLeads = async (req, res) => {
+  try {
+    await prepararTablasLeads();
+
+    const leads = await LeadComercial.findAll({
+      where: whereVisible(req),
+      order: [["updatedAt", "DESC"]],
+      limit: 1000,
+    });
+    const campanias = await CampaniaComercial.findAll({ limit: 400 });
+    const puedeVerCostos = ["OWNER", "ADMIN", "SUPERVISOR"].includes(rolActual(req));
+
+    const resumen = resumenCampaniasDesdeLeads(leads, campanias).map((item) => {
+      if (puedeVerCostos) return item;
+      const limpio = { ...item };
+      delete limpio.presupuesto;
+      delete limpio.costo_estimado_por_lead;
+      delete limpio.costo_estimado_por_lead_real;
+      return limpio;
+    });
+
+    res.json({ campanias: resumen });
+  } catch (error) {
+    console.error("ERROR RESUMEN CAMPANIAS LEADS:", error);
+    res.status(500).json({ error: "No se pudo obtener resumen por campañas" });
   }
 };
 
@@ -1061,4 +1296,5 @@ module.exports = {
   convertirCliente,
   convertirOrden,
   obtenerResumenLeads,
+  obtenerResumenCampaniasLeads,
 };

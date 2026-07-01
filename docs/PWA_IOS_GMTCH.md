@@ -5,7 +5,7 @@ Fecha: 2026-06-28
 
 ## Objetivo
 
-GMTCH Tune OS puede instalarse como PWA en iPhone/iPad desde Safari para abrir la plataforma como app de pantalla completa, con icono GMTCH, branding propio y base tecnica preparada para futuras notificaciones web push.
+GMTCH Tune OS puede instalarse como PWA en iPhone/iPad desde Safari para abrir la plataforma como app de pantalla completa, con icono GMTCH, branding propio y Web Push V1 habilitable mediante VAPID.
 
 ## Instalacion en iPhone
 
@@ -70,9 +70,9 @@ Limitaciones iOS:
 - Los permisos de notificacion dependen de iOS/Safari.
 - Algunas versiones de iOS pueden tener comportamiento distinto.
 - El sonido siempre requiere una accion previa del usuario.
-- Push real requiere backend web push y permisos del navegador.
+- Web Push requiere backend activo con VAPID y permisos del navegador.
 
-## Base preparada para push
+## Web Push V1
 
 El service worker incluye handlers para:
 
@@ -80,23 +80,31 @@ El service worker incluye handlers para:
 - `notificationclick`
 - apertura o foco de `data.url`
 
-Esto deja lista la base tecnica, pero falta implementar:
+Backend y frontend incluyen:
 
-- claves VAPID
-- suscripcion push por usuario
-- endpoints backend para guardar subscriptions
-- envio de push desde backend
-- permisos UI por usuario/dispositivo
+- claves VAPID por variables de entorno
+- suscripcion push por usuario interno
+- endpoints `/api/push/*`
+- envio Web Push desde notificaciones internas criticas
+- panel `Notificaciones del dispositivo` dentro de la campana
+
+Para usarlo:
+
+1. Activar `ENABLE_WEB_PUSH=true` en Railway.
+2. Configurar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y `VAPID_SUBJECT`.
+3. Abrir la PWA instalada.
+4. Entrar a la campana.
+5. Presionar **Activar notificaciones en este dispositivo**.
+6. Usar **Enviar prueba**.
 
 ## Fase 2 recomendada
 
 Para una experiencia tipo app real:
 
-1. Implementar Web Push completo.
-2. Agregar administracion de dispositivos por usuario.
-3. Evaluar Capacitor iOS.
-4. Crear cuenta Apple Developer.
-5. Preparar build iOS para TestFlight/App Store si se requiere push nativo mas robusto.
+1. Agregar administracion avanzada de dispositivos por usuario.
+2. Evaluar Capacitor iOS.
+3. Crear cuenta Apple Developer.
+4. Preparar build iOS para TestFlight/App Store si se requiere push nativo mas robusto.
 
 ## Regla operativa
 

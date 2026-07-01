@@ -358,6 +358,35 @@ flowchart TD
 
 Regla: toda notificacion nueva debe incluir una accion directa cuando conozca la orden, archivo ECU, solicitud portal, cliente, vehiculo, bitacora o postventa relacionada. Las notificaciones antiguas usan fallback por `ordenId`, `archivoECUId` o metadata disponible.
 
+## 12.2 Flujo Web Push PWA V1
+
+```mermaid
+flowchart TD
+  A["Usuario interno autenticado"] --> B["Campana: Notificaciones del dispositivo"]
+  B --> C{"Navegador soporta Push API"}
+  C -->|No| D["Mostrar no disponible"]
+  C -->|Si| E["Solicitar permiso Notification"]
+  E -->|Denegado| F["Indicar activar desde ajustes"]
+  E -->|Permitido| G["Obtener VAPID public key"]
+  G --> H["Service Worker crea PushSubscription"]
+  H --> I["POST /api/push/subscribe"]
+  I --> J["Guardar push_subscriptions por usuario"]
+
+  K["Backend crea Notificacion interna"] --> L{"Prioridad >= PUSH_MIN_PRIORITY"}
+  L -->|No| M["Solo campana / polling"]
+  L -->|Si| N["pushService busca usuarios destino"]
+  N --> O{"URGENTE"}
+  O -->|Si| P["Agregar OWNER / ADMIN"]
+  O -->|No| Q["Mantener destinos originales"]
+  P --> R["Anti-spam 5 min por usuario + tag"]
+  Q --> R
+  R --> S["Enviar Web Push con web-push VAPID"]
+  S --> T["Service Worker muestra notification"]
+  T --> U["Click abre accion_url"]
+```
+
+Regla: Web Push V1 solo alerta. No cambia estados, no marca pagos, no cierra ordenes, no envia mensajes externos y no expone la clave privada VAPID. Portal Masters externo no registra dispositivos en esta V1.
+
 ## 13. Flujo Agentes IA V1
 
 ```mermaid
@@ -424,7 +453,7 @@ flowchart TD
   N --> S
 ```
 
-Regla: Automatizaciones V1 es manual y no destructiva. No borra datos, no cambia estados criticos, no marca pagos, no cierra ordenes y no envia mensajes externos. `ENABLE_INTERNAL_AUTOMATIONS=false` debe mantenerse como base hasta una fase futura con cron controlado.
+Regla: Automatizaciones V1 es no destructiva. No borra datos, no cambia estados criticos, no marca pagos, no cierra ordenes y no envia mensajes externos. La ejecucion manual se mantiene disponible y el scheduler interno solo se activa con variable de entorno controlada.
 
 ## 15. Puesta en marcha lunes / operacion con base limpia
 
@@ -454,7 +483,11 @@ Regla: con base limpia no se ingresan trabajos sin cliente, vehiculo y motivo cl
 ```mermaid
 flowchart TD
   A["Contacto entra por WhatsApp / Instagram / Web / Presencial / Referido"] --> B["Recepcion registra lead manual en /leads"]
-  B --> C["Selecciona servicio de interes"]
+  B --> B1{"Origen conocido"}
+  B1 -->|Si| B2["Asignar campaña activa / UTM"]
+  B1 -->|No| B3["Sin campaña / orgánico"]
+  B2 --> C["Selecciona servicio de interes"]
+  B3 --> C
   C --> C1["Backend busca tarifa en /api/tarifas"]
   C1 --> C2{"Datos minimos completos"}
   C2 -->|No| E["CALIFICANDO / pedir marca, modelo, año, motor y servicio"]
@@ -480,11 +513,75 @@ flowchart TD
   N --> O["Crear vehiculo si corresponde"]
   O --> P["Crear orden desde lead con vehiculo existente"]
   M -->|No| Q["PERDIDO / NO_INTERESADO"]
+  B2 --> R["Resumen por campaña"]
+  R --> S["Costo lead / costo lead real / conversión simple"]
 ```
 
-Regla: CRM Comercial V1 no envia mensajes automaticos, no crea pagos, no entrega vehiculos y no reemplaza el flujo operativo. El tarifario evita cotizaciones inventadas; si faltan datos minimos, primero se piden marca, modelo, año, motor y servicio requerido.
+Regla: CRM Comercial V1 no envia mensajes automaticos, no crea pagos, no entrega vehiculos y no reemplaza el flujo operativo. El tarifario evita cotizaciones inventadas; campañas mide origen, potencial real y conversion antes de conectar Meta/WhatsApp API.
 
-## 17. Flujo Dominios
+## 17. Flujo Process Guard V1
+
+```mermaid
+flowchart TD
+  A["Archivo original cargado"] --> B["MOD listo / cargado"]
+  B --> C["Process Guard inicia contador"]
+  C --> D{"MOD descargado o aplicado"}
+  D -->|Si| E["mod_descargado_at registrado"]
+  D -->|No| F["contador desde MOD listo"]
+  E --> G["Registrar post escritura"]
+  F --> G
+  G --> H{"Resultado tecnico"}
+  H -->|OK| I["Cierre tecnico OK"]
+  H -->|Fallo| J["Resultado FALLO / proceso critico"]
+  H -->|Correccion| K["Requiere correccion"]
+  H -->|Nueva lectura| L["Requiere nueva lectura"]
+  I --> M["Orden pasa a LISTO_PARA_ENTREGA"]
+  J --> N["Notificacion accionable"]
+  K --> N
+  L --> N
+  N --> O["/archivos-ecu?archivoId=:id#post-escritura"]
+  C --> P{"SLA"}
+  P -->|30 min| P1["Aviso suave"]
+  P -->|60 min| P2["Advertencia"]
+  P -->|120 min| P3["Critico"]
+  P -->|180 min| P4["Escalado OWNER/SUPERVISOR"]
+```
+
+Regla: despues de MOD listo, descargado o aplicado, ningun File Service debe quedar sin post escritura, resultado tecnico y cierre. Process Guard no cierra pagos ni entrega comercial; solo fuerza trazabilidad tecnica y alertas accionables.
+
+## 18. Flujo Scheduler Interno V1
+
+```mermaid
+flowchart TD
+  A["Servidor backend inicia"] --> B{"ENABLE_INTERNAL_AUTOMATIONS=true"}
+  B -->|No| C["Scheduler desactivado"]
+  B -->|Si| D["Esperar AUTOMATION_START_DELAY_SECONDS"]
+  D --> E["Ejecutar ciclo cada AUTOMATION_INTERVAL_MINUTES"]
+  E --> F["Leer ordenes, archivos ECU, bitacora y comprobantes"]
+  F --> G["Revisar Process Guard"]
+  F --> H["Revisar File Service pendiente"]
+  F --> I["Revisar postventa tecnica abierta"]
+  F --> J["Revisar bitacoras ALTA / URGENTE"]
+  F --> K["Revisar pagos bloqueando entrega"]
+  F --> L["Revisar comprobantes pendientes"]
+  G --> M["Consolidar alertas"]
+  H --> M
+  I --> M
+  J --> M
+  K --> M
+  L --> M
+  M --> N{"Anti-spam 2h / nivel Process Guard"}
+  N -->|Pasa filtro| O["Crear notificacion accionable"]
+  N -->|Duplicada reciente| P["No crear duplicado"]
+  O --> Q["Guardar resumen AutomatizacionReporte si aplica"]
+  P --> Q
+  Q --> R["Dashboard consulta status"]
+  R --> S["OWNER / ADMIN puede ejecutar run-once"]
+```
+
+Regla: Scheduler Interno V1 solo lee datos, crea notificaciones accionables y reportes. No cambia estados, no marca pagos, no cierra procesos y no envia mensajes externos. Si un modulo falla, los demas continuan.
+
+## 19. Flujo Dominios
 
 ```mermaid
 flowchart LR
@@ -496,6 +593,6 @@ flowchart LR
   API --> BE
 ```
 
-## 18. Regla de Mantenimiento
+## 20. Regla de Mantenimiento
 
 Este documento debe actualizarse cada vez que se cambie un flujo operativo, ruta critica, rol, portal, dominio, integracion, estado de File Service, pago, notificacion o arquitectura.

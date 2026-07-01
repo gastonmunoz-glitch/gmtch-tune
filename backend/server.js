@@ -159,15 +159,18 @@ const diagnosticoRoutes = require("./src/routes/diagnosticoRoutes");
 const archivoECURoutes = require("./src/routes/archivoECURoutes");
 const fotoVehiculoRoutes = require("./src/routes/fotoVehiculoRoutes");
 const notificacionRoutes = require("./src/routes/notificacionRoutes");
+const pushRoutes = require("./src/routes/pushRoutes");
 const bitacoraOperativaRoutes = require("./src/routes/bitacoraOperativaRoutes");
 const finanzasRoutes = require("./src/routes/finanzasRoutes");
 const aiAgentRoutes = require("./src/routes/aiAgentRoutes");
 const automatizacionRoutes = require("./src/routes/automatizacionRoutes");
 const leadRoutes = require("./src/routes/leadRoutes");
 const tarifaRoutes = require("./src/routes/tarifaRoutes");
+const campaniaRoutes = require("./src/routes/campaniaRoutes");
 const portalAuthRoutes = require("./src/routes/portalAuthRoutes");
 const portalFileRoutes = require("./src/routes/portalFileRoutes");
 const portalAdminRoutes = require("./src/routes/portalAdminRoutes");
+const { iniciarSchedulerInterno } = require("./src/services/internalScheduler");
 
 // ====================== RUTAS PÚBLICAS ======================
 
@@ -181,6 +184,7 @@ app.use("/api/portal/creditos", autenticarPortal, portalFileRoutes.creditosRoute
 app.use("/api/portal/admin", autenticar, permitirRoles("OWNER"), portalAdminRoutes);
 app.use("/api/ai-agents", autenticar, permitirRoles("OWNER", "ADMIN"), aiAgentRoutes);
 app.use("/api/automatizaciones", autenticar, automatizacionRoutes);
+app.use("/api/push", autenticar, pushRoutes);
 app.use(
   "/api/leads",
   autenticar,
@@ -209,6 +213,13 @@ app.use(
     "TUNER"
   ),
   tarifaRoutes
+);
+
+app.use(
+  "/api/campanias",
+  autenticar,
+  permitirRoles("OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"),
+  campaniaRoutes
 );
 
 app.use(
@@ -1636,6 +1647,10 @@ const startServer = async () => {
       console.log("   /api/archivos-ecu");
       console.log("   /api/fotos");
       console.log("   /api/notificaciones");
+      console.log("   /api/push");
+      console.log("   /api/automatizaciones/scheduler/status");
+
+      iniciarSchedulerInterno();
     });
   } catch (error) {
     console.error("ERROR AL ARRANCAR:", error);

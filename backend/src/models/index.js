@@ -6,6 +6,7 @@ const ArchivoECU = require("./ArchivoECU");
 const FotoVehiculo = require("./FotoVehiculo");
 const Usuario = require("./Usuario");
 const Notificacion = require("./Notificacion");
+const PushSubscription = require("./PushSubscription");
 const BitacoraOperativa = require("./BitacoraOperativa");
 const AutomatizacionReporte = require("./AutomatizacionReporte");
 const MaterialRecuperado = require("./MaterialRecuperado");
@@ -16,6 +17,7 @@ const ComprobantePago = require("./ComprobantePago");
 const LeadComercial = require("./LeadComercial");
 const LeadInteraccion = require("./LeadInteraccion");
 const TarifaServicio = require("./TarifaServicio");
+const CampaniaComercial = require("./CampaniaComercial");
 const PortalCuenta = require("./PortalCuenta");
 const PortalUsuario = require("./PortalUsuario");
 const PortalFileService = require("./PortalFileService");
@@ -174,6 +176,17 @@ ComprobantePago.belongsTo(MovimientoFinanciero, {
 });
 
 // CRM comercial / leads
+Usuario.hasMany(PushSubscription, {
+  foreignKey: "usuarioId",
+  constraints: false,
+});
+
+PushSubscription.belongsTo(Usuario, {
+  foreignKey: "usuarioId",
+  constraints: false,
+});
+
+// CRM comercial / leads
 LeadComercial.hasMany(LeadInteraccion, {
   foreignKey: "leadId",
   constraints: false,
@@ -201,6 +214,16 @@ OrdenTrabajo.hasMany(LeadComercial, {
 
 LeadComercial.belongsTo(OrdenTrabajo, {
   foreignKey: "convertido_orden_id",
+  constraints: false,
+});
+
+CampaniaComercial.hasMany(LeadComercial, {
+  foreignKey: "campaniaId",
+  constraints: false,
+});
+
+LeadComercial.belongsTo(CampaniaComercial, {
+  foreignKey: "campaniaId",
   constraints: false,
 });
 
@@ -287,6 +310,7 @@ module.exports = {
   FotoVehiculo,
   Usuario,
   Notificacion,
+  PushSubscription,
   BitacoraOperativa,
   AutomatizacionReporte,
   MaterialRecuperado,
@@ -297,6 +321,7 @@ module.exports = {
   LeadComercial,
   LeadInteraccion,
   TarifaServicio,
+  CampaniaComercial,
   PortalCuenta,
   PortalUsuario,
   PortalFileService,

@@ -26,6 +26,14 @@ const RESULTADOS_POST_ESCRITURA = [
   { value: "EN_PRUEBA", label: "Vehículo en prueba" },
 ];
 
+const RESULTADOS_TECNICOS_CIERRE = [
+  { value: "OK", label: "OK - Listo para entrega" },
+  { value: "FALLO", label: "Fallo / pendiente de prueba" },
+  { value: "REQUIERE_CORRECCION", label: "Requiere correccion" },
+  { value: "REQUIERE_NUEVA_LECTURA", label: "Requiere nueva lectura" },
+  { value: "PENDIENTE", label: "Pendiente" },
+];
+
 const MOTIVOS_ARCHIVO = [
   { value: "CLIENTE_DESISTE", label: "Cliente desistió" },
   { value: "SIN_FACTIBILIDAD_TECNICA", label: "Sin factibilidad técnica" },
@@ -190,6 +198,70 @@ const badgeClass = (estado) => {
   return getStatusColor(estado || "SIN_ESTADO", "dark");
 };
 
+const minutosDesde = (fecha) => {
+  if (!fecha) return 0;
+  const inicio = new Date(fecha);
+  if (Number.isNaN(inicio.getTime())) return 0;
+  return Math.max(0, Math.round((Date.now() - inicio.getTime()) / 60000));
+};
+
+const formatearDuracionMinutos = (minutos) => {
+  if (!minutos || minutos < 1) return "Menos de 1 min";
+  if (minutos < 60) return `${minutos} min`;
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto ? `${horas}h ${resto}m` : `${horas}h`;
+};
+
+const processGuardClass = (estado) => {
+  const valor = String(estado || "").toUpperCase();
+  if (valor === "CERRADO") {
+    return "border-emerald-500/40 bg-emerald-500/15 text-emerald-100";
+  }
+  if (valor === "CRITICO" || valor === "ESCALADO") {
+    return "border-red-500/60 bg-red-500/20 text-red-100";
+  }
+  if (valor === "ADVERTENCIA" || valor === "EN_ESPERA_POST_ESCRITURA") {
+    return "border-yellow-500/50 bg-yellow-500/15 text-yellow-100";
+  }
+  if (valor === "REQUIERE_NUEVA_LECTURA") {
+    return "border-purple-500/50 bg-purple-500/15 text-purple-100";
+  }
+  return "border-blue-500/40 bg-blue-500/15 text-blue-100";
+};
+
+const processGuardLabel = (estado) => {
+  const valor = String(estado || "SIN_RIESGO").toUpperCase();
+  const labels = {
+    SIN_RIESGO: "Sin riesgo",
+    EN_ESPERA_POST_ESCRITURA: "Esperando post escritura/cierre",
+    ADVERTENCIA: "Advertencia",
+    CRITICO: "Critico",
+    ESCALADO: "Escalado",
+    CERRADO: "Cerrado",
+  };
+  return labels[valor] || valor;
+};
+
+const procesoGuardInicio = (archivo) =>
+  archivo.mod_descargado_at ||
+  archivo.proceso_guard_started_at ||
+  archivo.post_escritura_at ||
+  archivo.updatedAt ||
+  archivo.createdAt;
+
+const procesoTecnicoAbierto = (archivo) => {
+  const estado = String(archivo.estado || "").toUpperCase();
+  const guard = String(archivo.proceso_guard_estado || "").toUpperCase();
+  return (
+    archivo.archivo_modificado &&
+    !archivo.archivado &&
+    !archivo.cierre_tecnico_at &&
+    !["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(estado) &&
+    guard !== "CERRADO"
+  );
+};
+
 const estadoLabel = (estado) => {
   return ESTADOS[estado] || getOperationalStatusLabel(estado) || "Sin estado";
 };
@@ -212,6 +284,9 @@ const obtenerProximaAccion = (archivo) => {
     return "Resolver corrección";
   }
   if (!archivo.archivo_original) return "Subir archivo original";
+  if (archivo.post_escritura_estado === "OK" && !archivo.cierre_tecnico_at) {
+    return "Cerrar proceso tecnico";
+  }
   if (archivo.post_escritura_estado === "OK") return "Finalizar técnico";
   if (archivo.archivo_modificado && archivo.estado === "MODIFICADO_LISTO") {
     return "Notificar operador ECU";
@@ -293,6 +368,7 @@ export default function ArchivosECUPage() {
   const [postForms, setPostForms] = useState({});
   const [correccionForms, setCorreccionForms] = useState({});
   const [archivarForms, setArchivarForms] = useState({});
+  const [cierreTecnicoForms, setCierreTecnicoForms] = useState({});
 
   const obtenerDatos = useCallback(async () => {
     const [archivosRes, ordenesRes, usuariosRes] = await Promise.allSettled([
@@ -662,6 +738,18 @@ export default function ArchivosECUPage() {
     }));
   };
 
+  const actualizarCierreTecnicoForm = (archivoId, campo, valor) => {
+    setCierreTecnicoForms((prev) => ({
+      ...prev,
+      [archivoId]: {
+        resultado_tecnico: "OK",
+        observacion_cierre_tecnico: "",
+        ...(prev[archivoId] || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
   const actualizarCorreccionForm = (archivoId, campo, valor) => {
     setCorreccionForms((prev) => ({
       ...prev,
@@ -961,6 +1049,63 @@ export default function ArchivosECUPage() {
       await cargarDatos();
     } catch (err) {
       mostrarError(err, "Error registrando post escritura");
+    }
+  };
+
+  const marcarModDescargado = async (archivo) => {
+    limpiarMensajes();
+
+    if (!archivo.archivo_modificado) {
+      setError("No puedes marcar MOD descargado sin MOD cargado.");
+      return;
+    }
+
+    try {
+      await api.post(`/archivos-ecu/${archivo.id}/mod-descargado`);
+      setMensaje("MOD marcado como descargado/aplicado. Process Guard activado.");
+      await cargarDatos();
+    } catch (err) {
+      mostrarError(err, "Error marcando MOD descargado");
+    }
+  };
+
+  const registrarCierreTecnico = async (archivo) => {
+    limpiarMensajes();
+
+    const form = {
+      resultado_tecnico: "OK",
+      observacion_cierre_tecnico: "",
+      ...(cierreTecnicoForms[archivo.id] || {}),
+    };
+
+    if (!form.resultado_tecnico) {
+      setError("Debes seleccionar resultado técnico.");
+      return;
+    }
+
+    if (form.resultado_tecnico === "OK" && archivo.post_escritura_estado !== "OK") {
+      setError("Para cerrar OK debes registrar post escritura OK primero.");
+      return;
+    }
+
+    const confirmar = window.confirm(
+      form.resultado_tecnico === "OK"
+        ? "¿Confirmas cierre técnico OK? La orden quedará lista para entrega comercial, pero no se marcará pagada ni entregada."
+        : "¿Confirmas registrar resultado técnico no OK? El proceso seguirá pendiente hasta resolver."
+    );
+
+    if (!confirmar) return;
+
+    try {
+      await api.post(`/archivos-ecu/${archivo.id}/cierre-tecnico`, form);
+      setMensaje("Resultado de cierre técnico registrado.");
+      setCierreTecnicoForms((prev) => ({
+        ...prev,
+        [archivo.id]: {},
+      }));
+      await cargarDatos();
+    } catch (err) {
+      mostrarError(err, "Error registrando cierre técnico");
     }
   };
 
@@ -1558,9 +1703,22 @@ export default function ArchivosECUPage() {
                 ...(archivarForms[archivo.id] || {}),
               };
 
+              const cierreForm = {
+                resultado_tecnico: archivo.resultado_tecnico || "OK",
+                observacion_cierre_tecnico:
+                  archivo.observacion_cierre_tecnico || "",
+                ...(cierreTecnicoForms[archivo.id] || {}),
+              };
+
               const puedeFinalizar = archivo.post_escritura_estado === "OK";
               const responsablePrincipal = obtenerResponsablePrincipal(archivo);
               const proximaAccion = obtenerProximaAccion(archivo);
+              const guardEstado = archivo.proceso_guard_estado || "SIN_RIESGO";
+              const guardAbierto = procesoTecnicoAbierto(archivo);
+              const guardMinutos = minutosDesde(procesoGuardInicio(archivo));
+              const guardCritico = ["CRITICO", "ESCALADO"].includes(
+                String(guardEstado || "").toUpperCase()
+              );
 
               return (
                 <article
@@ -1580,6 +1738,14 @@ export default function ArchivosECUPage() {
                           )}`}
                         >
                           {estadoLabel(archivo.estado)}
+                        </span>
+
+                        <span
+                          className={`text-xs px-3 py-1 rounded-full border ${processGuardClass(
+                            guardEstado
+                          )}`}
+                        >
+                          Process Guard: {processGuardLabel(guardEstado)}
                         </span>
 
                         {archivo.correccion_pendiente && (
@@ -1685,6 +1851,19 @@ export default function ArchivosECUPage() {
                       </div>
                     </div>
                   </div>
+
+                  {guardCritico && (
+                    <div className="rounded-2xl border border-red-500 bg-red-500/15 p-4 text-red-100">
+                      <p className="text-sm font-bold uppercase">
+                        Este proceso no puede quedar inconcluso.
+                      </p>
+                      <p className="mt-1 text-xs text-red-100/90">
+                        Registra post escritura, correccion, nueva lectura o cierre
+                        tecnico. Tiempo abierto:{" "}
+                        {formatearDuracionMinutos(guardMinutos)}.
+                      </p>
+                    </div>
+                  )}
 
                   <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
                     <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-300">
@@ -1806,6 +1985,16 @@ export default function ArchivosECUPage() {
                       >
                         Descargar último MOD
                       </a>
+                    )}
+
+                    {archivo.archivo_modificado && !archivo.cierre_tecnico_at && (
+                      <button
+                        type="button"
+                        onClick={() => marcarModDescargado(archivo)}
+                        className="px-4 py-2 rounded-xl bg-yellow-600 hover:bg-yellow-500 text-sm text-white"
+                      >
+                        Marcar MOD descargado/aplicado
+                      </button>
                     )}
 
                     {archivo.post_escritura_scanner && (
@@ -2432,6 +2621,91 @@ export default function ArchivosECUPage() {
                       rows={2}
                       className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
                     />
+
+                    <div
+                      id="post-escritura"
+                      className={`rounded-2xl border p-4 ${processGuardClass(
+                        guardEstado
+                      )}`}
+                    >
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <p className="text-sm font-bold uppercase">
+                            Cierre tecnico obligatorio
+                          </p>
+                          <p className="mt-1 text-xs opacity-90">
+                            Tiempo desde MOD listo/descargado:{" "}
+                            {formatearDuracionMinutos(guardMinutos)}. SLA:
+                            30/60/120/180 min.
+                          </p>
+                          <p className="mt-1 text-xs opacity-90">
+                            Estado: {processGuardLabel(guardEstado)} - Resultado:{" "}
+                            {archivo.resultado_tecnico || "PENDIENTE"}
+                          </p>
+                          {archivo.cierre_tecnico_at && (
+                            <p className="mt-1 text-xs opacity-90">
+                              Cerrado por {archivo.cierre_tecnico_por || "-"} -{" "}
+                              {formatearFecha(archivo.cierre_tecnico_at)}
+                            </p>
+                          )}
+                        </div>
+                        <span className="rounded-full border border-current px-3 py-1 text-[10px] font-bold uppercase">
+                          {guardAbierto ? "Abierto" : "Cerrado / sin riesgo"}
+                        </span>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <label className="text-xs font-semibold uppercase">
+                          Resultado tecnico
+                          <select
+                            value={cierreForm.resultado_tecnico}
+                            onChange={(e) =>
+                              actualizarCierreTecnicoForm(
+                                archivo.id,
+                                "resultado_tecnico",
+                                e.target.value
+                              )
+                            }
+                            className="mt-1 w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                          >
+                            {RESULTADOS_TECNICOS_CIERRE.map((item) => (
+                              <option key={item.value} value={item.value}>
+                                {item.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="text-xs font-semibold uppercase">
+                          Observacion cierre tecnico
+                          <textarea
+                            value={cierreForm.observacion_cierre_tecnico}
+                            onChange={(e) =>
+                              actualizarCierreTecnicoForm(
+                                archivo.id,
+                                "observacion_cierre_tecnico",
+                                e.target.value
+                              )
+                            }
+                            rows={2}
+                            className="mt-1 w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                            placeholder="Resultado aplicado, prueba, pendiente, correccion o nueva lectura."
+                          />
+                        </label>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => registrarCierreTecnico(archivo)}
+                        disabled={
+                          cierreForm.resultado_tecnico === "OK" &&
+                          archivo.post_escritura_estado !== "OK"
+                        }
+                        className="mt-3 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Cerrar proceso tecnico
+                      </button>
+                    </div>
 
                     <div className="flex flex-col md:flex-row gap-2">
                       <button

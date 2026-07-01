@@ -72,6 +72,45 @@ Cuando se crea o califica un lead, el backend busca la tarifa asociada al `servi
 - La respuesta sugerida puede incluir “precio desde” cuando exista tarifa cargada.
 - No se envia mensaje automaticamente; solo se copia para responder manualmente.
 
+## Campañas y Origen de Leads V1
+
+Campañas V1 permite medir de donde vienen los leads antes de conectar APIs reales de Meta.
+
+Canales recomendados:
+
+- `WHATSAPP`
+- `INSTAGRAM_ADS`
+- `FACEBOOK_ADS`
+- `GRUPO_FACEBOOK`
+- `WEB`
+- `REFERIDO`
+- `PRESENCIAL`
+- `OTRO`
+
+Reglas:
+
+- Cada lead puede tener `campaniaId` o quedar como “Sin campaña / orgánico”.
+- Las campañas activas se pueden seleccionar al crear o editar lead.
+- Si el lead hereda campaña, tambien puede heredar UTM source/campaign/content.
+- OWNER/ADMIN crean y editan campañas.
+- RECEPCION asigna leads a campañas activas.
+- SUPERVISOR revisa resumen.
+- Operadores no ven presupuesto ni métricas comerciales sensibles.
+
+Métricas por campaña:
+
+- leads totales.
+- leads sin datos minimos.
+- potenciales reales.
+- cotizados.
+- agendados.
+- ganados/perdidos.
+- costo estimado por lead.
+- costo estimado por lead real.
+- conversion simple.
+
+Recomendación operativa: iniciar con campañas Click-to-WhatsApp usando el WhatsApp oficial `+56 9 6226 7642`, registrar todo lead en CRM y medir potencial real antes de automatizar mensajes.
+
 ## Notificaciones
 
 Se crean notificaciones internas cuando:
@@ -101,8 +140,10 @@ Desde `/leads` se puede:
 5. Crear lead que solo pregunta precio sin datos y confirmar baja de score.
 6. Crear lead con presupuesto menor al minimo y confirmar alerta de presupuesto bajo.
 7. Crear lead con datos completos y servicio con tarifa, confirmar respuesta sugerida.
-8. Registrar interaccion saliente.
-9. Convertir a cliente.
-10. Crear orden desde lead con vehiculo existente.
-11. Ver resumen CRM en Dashboard.
-12. Confirmar que roles operativos no ven leads no asignados.
+8. Crear campaña activa y asignarla a un lead.
+9. Confirmar resumen por campaña y campaña con más potenciales reales.
+10. Registrar interaccion saliente.
+11. Convertir a cliente.
+12. Crear orden desde lead con vehiculo existente.
+13. Ver resumen CRM en Dashboard.
+14. Confirmar que roles operativos no ven leads no asignados.

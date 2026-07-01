@@ -2,6 +2,14 @@ const { Op, QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
 const { AutomatizacionReporte, Notificacion } = require("../models");
 const { crearNotificacionesInternas } = require("./notificacionController");
+const {
+  prepararColumnasArchivoECU,
+  calcularProcessGuardArchivo,
+} = require("./archivoECUController");
+const {
+  obtenerEstadoScheduler,
+  ejecutarRevisionInterna,
+} = require("../services/internalScheduler");
 
 const TABLAS = {
   ordenes: "ordenes_trabajo",
@@ -365,8 +373,135 @@ const crearRevisionBase = (ctx) => {
   };
 };
 
+const estadoProcessGuardVisible = (estado) =>
+  !["SIN_RIESGO", "CERRADO"].includes(upper(estado));
+
+const responsableProcessGuard = (archivo) =>
+  limpiarTexto(
+    archivo.proceso_guard_responsable_id ||
+      archivo.operador_ecu_asignado_a ||
+      archivo.tuner_asignado_a ||
+      archivo.slave_asignado_a ||
+      "Sin responsable"
+  );
+
+const generarItemsProcessGuard = (ctx) => {
+  const ahora = new Date();
+
+  return ctx.archivos
+    .map((archivo) => {
+      const evaluacion = calcularProcessGuardArchivo(archivo, ahora);
+      const estadoArchivo = upper(archivo.estado);
+      const cierrePendiente =
+        booleano(archivo.cierre_tecnico_obligatorio) &&
+        !fechaValida(archivo.cierre_tecnico_at);
+      const visible =
+        estadoProcessGuardVisible(evaluacion.estado) ||
+        cierrePendiente ||
+        ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
+          estadoArchivo
+        );
+
+      if (!visible) return null;
+
+      const orden = archivo._orden || {};
+      const vehiculo = orden._vehiculo || {};
+      const cliente = orden._cliente || {};
+
+      return {
+        id: archivo.id,
+        archivo,
+        ordenId: archivo.ordenId,
+        estado: evaluacion.estado,
+        prioridad: evaluacion.prioridad,
+        motivo: evaluacion.motivo,
+        minutos: Math.round(evaluacion.minutos),
+        horas: Number((evaluacion.minutos / 60).toFixed(1)),
+        responsable: responsableProcessGuard(archivo),
+        estado_archivo: archivo.estado,
+        resultado_tecnico: archivo.resultado_tecnico || "PENDIENTE",
+        post_escritura_estado: archivo.post_escritura_estado || "PENDIENTE",
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+        cliente: cliente.nombre || "Cliente no informado",
+        vehiculo: vehiculo.patente
+          ? `${vehiculo.patente} ${vehiculo.marca || ""} ${vehiculo.modelo || ""}`.trim()
+          : "Vehiculo no informado",
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const peso = { ESCALADO: 5, CRITICO: 4, ADVERTENCIA: 3, EN_ESPERA_POST_ESCRITURA: 2 };
+      const prioridad = (peso[b.estado] || 0) - (peso[a.estado] || 0);
+      if (prioridad !== 0) return prioridad;
+      return b.minutos - a.minutos;
+    });
+};
+
+const revisionProcessGuardData = (ctx) => {
+  const items = generarItemsProcessGuard(ctx);
+  const criticos = items.filter((item) => ["CRITICO", "ESCALADO"].includes(item.estado));
+  const advertencias = items.filter((item) => item.estado === "ADVERTENCIA");
+  const porResponsable = items.reduce((acc, item) => {
+    acc[item.responsable] = (acc[item.responsable] || 0) + 1;
+    return acc;
+  }, {});
+
+  const alertas = items.slice(0, 8).map((item) =>
+    alerta({
+      id: `process-guard-${item.id}-${item.estado}`,
+      titulo:
+        item.estado === "ESCALADO"
+          ? "Process Guard escalado"
+          : item.estado === "CRITICO"
+          ? "Process Guard critico"
+          : "Process Guard requiere seguimiento",
+      detalle: `File #${item.id} - ${item.motivo} - ${item.horas}h sin cierre tecnico.`,
+      prioridad: ["CRITICO", "ESCALADO"].includes(item.estado)
+        ? "URGENTE"
+        : item.estado === "ADVERTENCIA"
+        ? "ALTA"
+        : "MEDIA",
+      accion_url: item.accion_url,
+      entidad_tipo: "ARCHIVO_ECU",
+      entidad_id: item.id,
+      sugerencia:
+        item.estado === "ESCALADO"
+          ? "Escalar a OWNER/SUPERVISOR y registrar post escritura, correccion o nueva lectura."
+          : "Registrar post escritura, resultado tecnico y cierre antes de entrega.",
+    })
+  );
+
+  return {
+    resumen:
+      items.length === 0
+        ? "Process Guard sin procesos tecnicos abiertos."
+        : `Process Guard detecta ${items.length} proceso(s) sin cierre, ${criticos.length} critico(s).`,
+    prioridad: prioridadGeneral(alertas),
+    alertas,
+    sugerencias: [
+      "Despues de MOD listo o descargado, registrar post escritura y cierre tecnico.",
+      "No dejar trabajos ECU/File Service cerrados por WhatsApp sin trazabilidad.",
+      "Escalar a OWNER/SUPERVISOR si supera 180 minutos.",
+    ],
+    accion_recomendada:
+      criticos.length > 0
+        ? "Resolver o escalar procesos criticos antes de nuevas entregas."
+        : "Revisar advertencias y registrar cierre tecnico pendiente.",
+    metricas: {
+      total: items.length,
+      criticos: criticos.length,
+      escalados: items.filter((item) => item.estado === "ESCALADO").length,
+      advertencias: advertencias.length,
+      espera_post: items.filter((item) => item.estado === "EN_ESPERA_POST_ESCRITURA").length,
+      por_responsable: porResponsable,
+    },
+    items: items.map(({ archivo, ...item }) => item),
+  };
+};
+
 const revisionOperativaData = (ctx) => {
   const base = crearRevisionBase(ctx);
+  const processGuard = revisionProcessGuardData(ctx);
   const alertas = [];
 
   if (base.ordenesSinResponsable.length) {
@@ -405,6 +540,19 @@ const revisionOperativaData = (ctx) => {
         accion_url: "/archivos-ecu#post-escritura",
         entidad_tipo: "ARCHIVO_ECU",
         sugerencia: "Registrar post escritura antes de finalizar tecnico.",
+      })
+    );
+  }
+  if (processGuard.metricas.total > 0) {
+    alertas.push(
+      alerta({
+        id: "process-guard-sin-cierre",
+        titulo: "Procesos tecnicos sin cierre",
+        detalle: `${processGuard.metricas.total} File Service requieren post escritura, resultado tecnico o cierre.`,
+        prioridad: processGuard.metricas.criticos > 0 ? "URGENTE" : "ALTA",
+        accion_url: "/archivos-ecu#post-escritura",
+        entidad_tipo: "ARCHIVO_ECU",
+        sugerencia: "Usar Process Guard para cerrar o escalar lo pendiente.",
       })
     );
   }
@@ -532,6 +680,8 @@ const revisionOperativaData = (ctx) => {
       archivos_activos: base.archivosActivos.length,
       alertas: alertas.length,
       post_escritura_pendiente: base.postEscrituraPendiente.length,
+      process_guard_sin_cierre: processGuard.metricas.total,
+      process_guard_criticos: processGuard.metricas.criticos,
       correcciones_tecnicas: base.correccionesTecnicas.length,
       bitacoras_prioritarias: base.bitacorasPrioritarias.length,
       comprobantes_pendientes: base.comprobantesPendientes.length,
@@ -542,6 +692,7 @@ const revisionOperativaData = (ctx) => {
 
 const revisionFileServiceData = (ctx) => {
   const base = crearRevisionBase(ctx);
+  const processGuard = revisionProcessGuardData(ctx);
   const alertas = [];
 
   [
@@ -550,6 +701,7 @@ const revisionFileServiceData = (ctx) => {
     ["post-pendiente", "Post escritura pendiente", base.postEscrituraPendiente, "ALTA", "/archivos-ecu#post-escritura"],
     ["correccion-pendiente", "Correcciones pendientes", base.archivosCorreccion, "URGENTE", "/archivos-ecu#correccion"],
     ["nueva-lectura", "Nueva lectura requerida", base.nuevaLectura, "URGENTE", "/portal-admin#nueva-lectura"],
+    ["process-guard", "Procesos sin cierre tecnico", processGuard.items || [], processGuard.metricas.criticos > 0 ? "URGENTE" : "ALTA", "/archivos-ecu#post-escritura"],
     ["sin-responsable", "Archivos sin responsable", base.archivosSinResponsable, "ALTA", "/archivos-ecu"],
     ["viejos", "Archivos viejos sin movimiento", base.archivosViejos, "MEDIA", "/archivos-ecu"],
   ].forEach(([id, titulo, lista, prioridad, accion_url]) => {
@@ -575,6 +727,7 @@ const revisionFileServiceData = (ctx) => {
     sugerencias: [
       "Asignar responsable a cada archivo activo.",
       "No finalizar tecnico sin post escritura OK cuando corresponda.",
+      "Cerrar Process Guard con resultado tecnico y observacion.",
       "Usar nueva lectura requerida cuando el metodo de lectura no sea valido.",
     ],
     accion_recomendada:
@@ -588,6 +741,8 @@ const revisionFileServiceData = (ctx) => {
       post_escritura_pendiente: base.postEscrituraPendiente.length,
       correcciones: base.archivosCorreccion.length,
       nueva_lectura: base.nuevaLectura.length,
+      process_guard_total: processGuard.metricas.total,
+      process_guard_criticos: processGuard.metricas.criticos,
       sin_responsable: base.archivosSinResponsable.length,
       viejos: base.archivosViejos.length,
     },
@@ -775,6 +930,7 @@ const revisionMaterialData = (ctx) => {
 const crearReporteData = (ctx, tipo) => {
   const revision = revisionOperativaData(ctx);
   const file = revisionFileServiceData(ctx);
+  const processGuard = revisionProcessGuardData(ctx);
   const finanzas = revisionFinanzasData(ctx);
   const material = revisionMaterialData(ctx);
   const base = crearRevisionBase(ctx);
@@ -791,8 +947,9 @@ const crearReporteData = (ctx, tipo) => {
       ? [
           ...revision.alertas,
           ...file.alertas.filter((item) => ["URGENTE", "ALTA"].includes(upper(item.prioridad))),
+          ...processGuard.alertas.filter((item) => ["URGENTE", "ALTA"].includes(upper(item.prioridad))),
         ]
-      : [...revision.alertas.slice(0, 8), ...file.alertas.slice(0, 4)];
+      : [...revision.alertas.slice(0, 8), ...file.alertas.slice(0, 4), ...processGuard.alertas.slice(0, 4)];
 
   return {
     tipo,
@@ -802,7 +959,7 @@ const crearReporteData = (ctx, tipo) => {
         : "Reporte apertura del dia GMTCH",
     resumen:
       tipo === "CIERRE_DIA"
-        ? `Cierre: ${cerradasHoy.length} orden(es) entregada(s) hoy, ${base.ordenesActivas.length} activa(s), ${base.bitacorasAbiertas.length} bitacora(s) abierta(s).`
+        ? `Cierre: ${cerradasHoy.length} orden(es) entregada(s) hoy, ${base.ordenesActivas.length} activa(s), ${processGuard.metricas.total} proceso(s) tecnico(s) sin cierre, ${base.bitacorasAbiertas.length} bitacora(s) abierta(s).`
         : `Apertura: ${base.ordenesActivas.length} orden(es) activa(s), ${base.archivosActivos.length} File Service activo(s), ${base.listasPagoPendiente.length} entrega(s) con pago pendiente.`,
     prioridad: prioridadGeneral(alertas),
     alertas,
@@ -820,6 +977,8 @@ const crearReporteData = (ctx, tipo) => {
       pagos_pendientes: revision.metricas.comprobantes_pendientes,
       archivos_pendientes: base.archivosSinRevisar.length,
       postventas_abiertas: base.correccionesTecnicas.length,
+      process_guard_sin_cierre: processGuard.metricas.total,
+      process_guard_criticos: processGuard.metricas.criticos,
       bitacoras_abiertas: base.bitacorasAbiertas.length,
       material_kg_mes: material.metricas.kg_real_mes,
       cerradas_hoy: cerradasHoy.length,
@@ -836,16 +995,21 @@ const crearNotificacionAntiSpam = async ({
   accion_url,
   entidad_tipo,
   entidad_id,
+  ordenId = null,
+  archivoECUId = null,
   metadata = {},
+  ventanaMs = 2 * 60 * 60 * 1000,
 }) => {
   try {
-    const desde = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const where = {
       tipo,
-      createdAt: {
-        [Op.gte]: desde,
-      },
     };
+
+    if (ventanaMs) {
+      where.createdAt = {
+        [Op.gte]: new Date(Date.now() - ventanaMs),
+      };
+    }
 
     if (entidad_tipo) where.entidad_tipo = entidad_tipo;
     if (entidad_id !== null && entidad_id !== undefined) where.entidad_id = String(entidad_id);
@@ -858,6 +1022,8 @@ const crearNotificacionAntiSpam = async ({
       tipo,
       titulo,
       mensaje,
+      ordenId,
+      archivoECUId,
       accion_url,
       accion_tipo: "ABRIR_ALERTA_AUTOMATIZACION",
       entidad_tipo,
@@ -903,6 +1069,109 @@ const notificarAlertasPrioritarias = async (resultado, tipoReporte = "REVISION_O
   return creadas;
 };
 
+const sincronizarProcessGuard = async (ctx, notificar = false) => {
+  await prepararColumnasArchivoECU();
+
+  const items = generarItemsProcessGuard(ctx);
+  let actualizados = 0;
+  let notificaciones = 0;
+
+  for (const item of items) {
+    const estadoAnterior = upper(item.archivo.proceso_guard_estado || "SIN_RIESGO");
+    const estadoNuevo = item.estado;
+    const requiereUpdate =
+      estadoAnterior !== estadoNuevo ||
+      !item.archivo.proceso_guard_started_at ||
+      booleano(item.archivo.cierre_tecnico_obligatorio) !== true;
+
+    if (requiereUpdate) {
+      await sequelize.query(
+        `
+        UPDATE "archivos_ecu"
+        SET
+          "proceso_guard_estado" = :estado,
+          "proceso_guard_started_at" = COALESCE("proceso_guard_started_at", "mod_descargado_at", "updatedAt", NOW()),
+          "proceso_guard_escalado_at" = CASE
+            WHEN :estado = 'ESCALADO' AND "proceso_guard_escalado_at" IS NULL THEN NOW()
+            ELSE "proceso_guard_escalado_at"
+          END,
+          "cierre_tecnico_obligatorio" = true,
+          "resultado_tecnico" = COALESCE("resultado_tecnico", 'PENDIENTE'),
+          "updatedAt" = NOW()
+        WHERE "id" = :id
+        `,
+        {
+          replacements: {
+            id: item.id,
+            estado: estadoNuevo,
+          },
+        }
+      );
+      actualizados += 1;
+    }
+
+    const debeNotificar =
+      notificar &&
+      estadoProcessGuardVisible(estadoNuevo) &&
+      ["EN_ESPERA_POST_ESCRITURA", "ADVERTENCIA", "CRITICO", "ESCALADO"].includes(
+        estadoNuevo
+      );
+
+    if (debeNotificar) {
+      const tipo = `PROCESS_GUARD_${estadoNuevo}`;
+      const rolesDestino =
+        estadoNuevo === "ESCALADO"
+          ? ["OWNER", "SUPERVISOR"]
+          : ["OWNER", "ADMIN", "SUPERVISOR", "OPERADOR_ECU", "TUNER"];
+      const creada = await crearNotificacionAntiSpam({
+        rolesDestino,
+        tipo,
+        titulo:
+          estadoNuevo === "ESCALADO"
+            ? "Process Guard escalado"
+            : estadoNuevo === "CRITICO"
+            ? "Process Guard critico"
+            : "Process Guard requiere cierre tecnico",
+        mensaje: `File Service #${item.id}: ${item.motivo}. Lleva ${item.horas}h sin cierre tecnico.`,
+        ordenId: item.ordenId,
+        archivoECUId: item.id,
+        accion_url: item.accion_url,
+        entidad_tipo: "ARCHIVO_ECU",
+        entidad_id: item.id,
+        metadata: {
+          proceso_guard: true,
+          estado: estadoNuevo,
+          prioridad: ["CRITICO", "ESCALADO"].includes(estadoNuevo) ? "URGENTE" : "ALTA",
+          minutos: item.minutos,
+          responsable: item.responsable,
+          sonido: ["CRITICO", "ESCALADO"].includes(estadoNuevo) ? "tsunami" : "fuerte",
+        },
+        ventanaMs: null,
+      });
+
+      if (creada) {
+        await sequelize.query(
+          `
+          UPDATE "archivos_ecu"
+          SET "proceso_guard_last_alert_at" = NOW()
+          WHERE "id" = :id
+          `,
+          {
+            replacements: { id: item.id },
+          }
+        );
+        notificaciones += 1;
+      }
+    }
+  }
+
+  return {
+    actualizados,
+    notificaciones,
+    items,
+  };
+};
+
 const responderRevision = (creador, notificar = false, tipoNotificacion = "REVISION") => async (req, res) => {
   try {
     const ctx = await cargarContexto();
@@ -929,6 +1198,30 @@ const responderRevision = (creador, notificar = false, tipoNotificacion = "REVIS
 const revisionOperativa = responderRevision(revisionOperativaData, false, "REVISION_OPERATIVA");
 const revisionFileService = responderRevision(revisionFileServiceData, false, "FILE_SERVICE");
 const revisionMaterialRecuperado = responderRevision(revisionMaterialData, false, "MATERIAL_RECUPERADO");
+const revisionProcessGuard = responderRevision(revisionProcessGuardData, false, "PROCESS_GUARD");
+
+const revisarProcessGuard = async (req, res) => {
+  try {
+    const ctx = await cargarContexto();
+    const sync = await sincronizarProcessGuard(ctx, true);
+    const ctxActualizado = await cargarContexto();
+    const resultado = revisionProcessGuardData(ctxActualizado);
+
+    return res.json({
+      ...resultado,
+      actualizados: sync.actualizados,
+      notificaciones_creadas: sync.notificaciones,
+      solo_lectura: false,
+      generado_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("ERROR PROCESS GUARD:", error);
+    return res.status(500).json({
+      error: "No se pudo revisar Process Guard",
+      detalle: process.env.NODE_ENV === "production" ? undefined : error.message,
+    });
+  }
+};
 
 const revisionFinanzas = async (req, res) => {
   if (!esOwnerAdmin(req)) {
@@ -999,12 +1292,47 @@ const obtenerUltimoReporte = async (req, res) => {
   }
 };
 
+const schedulerStatus = async (req, res) => {
+  try {
+    return res.json(obtenerEstadoScheduler());
+  } catch (error) {
+    return res.status(500).json({
+      error: "No se pudo obtener el estado del scheduler",
+      detalle: process.env.NODE_ENV === "production" ? undefined : error.message,
+    });
+  }
+};
+
+const schedulerRunOnce = async (req, res) => {
+  try {
+    const summary = await ejecutarRevisionInterna({
+      triggeredBy: usuarioActual(req),
+    });
+
+    return res.json({
+      mensaje: "Revision interna ejecutada",
+      summary,
+      status: obtenerEstadoScheduler(),
+      solo_lectura: true,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "No se pudo ejecutar la revision interna",
+      detalle: process.env.NODE_ENV === "production" ? undefined : error.message,
+    });
+  }
+};
+
 module.exports = {
   revisionOperativa,
   reporteApertura: crearReporte("APERTURA_DIA"),
   reporteCierre: crearReporte("CIERRE_DIA"),
   revisionFileService,
+  revisionProcessGuard,
+  revisarProcessGuard,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,
+  schedulerStatus,
+  schedulerRunOnce,
 };

@@ -1,6 +1,7 @@
 const { Op } = require("sequelize");
 const sequelize = require("../config/database");
 const { Notificacion } = require("../models");
+const { enviarPushParaNotificaciones } = require("../services/pushService");
 
 let tablaPreparada = false;
 
@@ -186,6 +187,7 @@ const TIPOS_INSISTENTES = [
   "FILE_TUNER_ASIGNADO",
   "FILE_OPERADOR_ECU_ASIGNADO",
   "FILE_SLAVE_ASIGNADO",
+  "PROCESS_GUARD",
 ];
 
 const esTipoInsistente = (tipo) => {
@@ -341,7 +343,13 @@ const crearNotificacionesInternas = async ({
       return [];
     }
 
-    return await Notificacion.bulkCreate(payload);
+    const creadas = await Notificacion.bulkCreate(payload);
+
+    enviarPushParaNotificaciones(creadas).catch((error) => {
+      console.warn("No se pudo enviar push para notificaciones:", error.message);
+    });
+
+    return creadas;
   } catch (error) {
     console.warn("No se pudo crear notificacion interna:", error.message);
     return [];

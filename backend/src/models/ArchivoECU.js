@@ -237,6 +237,64 @@ const ArchivoECU = sequelize.define(
       allowNull: true,
     },
 
+    mod_descargado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    proceso_guard_estado: {
+      type: DataTypes.STRING(60),
+      allowNull: false,
+      defaultValue: "SIN_RIESGO",
+    },
+
+    proceso_guard_started_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    proceso_guard_last_alert_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    proceso_guard_escalado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    proceso_guard_responsable_id: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    cierre_tecnico_obligatorio: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    cierre_tecnico_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    cierre_tecnico_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    resultado_tecnico: {
+      type: DataTypes.STRING(60),
+      allowNull: false,
+      defaultValue: "PENDIENTE",
+    },
+
+    observacion_cierre_tecnico: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
     archivado: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

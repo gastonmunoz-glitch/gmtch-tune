@@ -6,9 +6,13 @@ const {
   reporteApertura,
   reporteCierre,
   revisionFileService,
+  revisionProcessGuard,
+  revisarProcessGuard,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,
+  schedulerStatus,
+  schedulerRunOnce,
 } = require("../controllers/automatizacionController");
 
 const router = express.Router();
@@ -31,7 +35,27 @@ router.get(
   permitirRoles("OWNER", "ADMIN", "SUPERVISOR", "OPERADOR_ECU", "TUNER"),
   revisionFileService
 );
+router.get(
+  "/process-guard",
+  permitirRoles("OWNER", "ADMIN", "SUPERVISOR", "OPERADOR_ECU", "TUNER", "RECEPCION"),
+  revisionProcessGuard
+);
+router.post(
+  "/process-guard/revisar",
+  permitirRoles("OWNER", "ADMIN", "SUPERVISOR", "OPERADOR_ECU", "TUNER"),
+  revisarProcessGuard
+);
 router.get("/finanzas", permitirRoles("OWNER", "ADMIN"), revisionFinanzas);
+router.get(
+  "/scheduler/status",
+  permitirRoles("OWNER", "ADMIN"),
+  schedulerStatus
+);
+router.post(
+  "/scheduler/run-once",
+  permitirRoles("OWNER", "ADMIN"),
+  schedulerRunOnce
+);
 router.get(
   "/material-recuperado",
   permitirRoles("OWNER", "ADMIN", "SUPERVISOR"),

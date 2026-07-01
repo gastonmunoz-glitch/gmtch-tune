@@ -31,8 +31,28 @@ const LeadComercial = sequelize.define(
       defaultValue: "OTRO",
     },
 
+    campaniaId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
     origen_detalle: {
       type: DataTypes.STRING(200),
+      allowNull: true,
+    },
+
+    utm_source: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+    },
+
+    utm_campaign: {
+      type: DataTypes.STRING(160),
+      allowNull: true,
+    },
+
+    utm_content: {
+      type: DataTypes.STRING(160),
       allowNull: true,
     },
 
@@ -140,6 +160,38 @@ const LeadComercial = sequelize.define(
     proximo_contacto_at: {
       type: DataTypes.DATE,
       allowNull: true,
+    },
+
+    primer_contacto_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    ultimo_contacto_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    respondido_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    tiempo_respuesta_minutos: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    es_lead_caliente: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    requiere_contacto_humano: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
     },
 
     asignado_a: {

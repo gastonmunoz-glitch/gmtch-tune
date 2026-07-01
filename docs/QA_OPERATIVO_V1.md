@@ -95,6 +95,19 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Confirmar que ninguna automatizacion cambia estado, marca pagos, cierra ordenes, borra datos ni envia mensajes externos.
 - Confirmar que Portal Masters externo no puede acceder a `/api/automatizaciones`.
 
+## 2.2.1 QA Scheduler Interno V1
+
+- Confirmar que con `ENABLE_INTERNAL_AUTOMATIONS=false` el Dashboard muestra Scheduler desactivado para OWNER/ADMIN.
+- Probar `GET /api/automatizaciones/scheduler/status` con token OWNER/ADMIN.
+- Probar que roles operativos no acceden a `scheduler/status` ni `scheduler/run-once`.
+- Ejecutar `POST /api/automatizaciones/scheduler/run-once` desde el Dashboard con `Ejecutar revision ahora`.
+- Confirmar que el resultado muestra ultima revision, resumen y notificaciones creadas si habia alertas.
+- Confirmar que no cambia estados de ordenes, File Service, pagos ni cierres tecnicos.
+- Confirmar anti-spam: repetir `run-once` no duplica la misma alerta de la misma entidad dentro de 2 horas.
+- Confirmar que Process Guard no duplica infinitamente el mismo nivel para el mismo archivo.
+- Confirmar que si un modulo falla, el endpoint responde resumen y no rompe el dashboard.
+- Activar `ENABLE_INTERNAL_AUTOMATIONS=true` en Railway solo despues de validar manualmente.
+
 ## 3. QA Ordenes
 
 - Crear orden con vehiculo existente.
@@ -117,7 +130,14 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Crear lead que solo pregunta precio sin marca/modelo/año/motor y confirmar `Sin datos minimos`.
 - Crear lead con presupuesto bajo el minimo del tarifario y confirmar prioridad BAJA o alerta de presupuesto bajo.
 - Crear lead con datos completos y presupuesto compatible y confirmar mejora de score.
+- Crear campaña como OWNER/ADMIN con canal FACEBOOK_ADS o INSTAGRAM_ADS.
+- Confirmar que RECEPCION ve campañas activas y puede asignar lead.
+- Confirmar que un lead sin campaña queda como “Sin campaña / orgánico”.
+- Confirmar que UTM source/campaign/content quedan guardados si se ingresan.
+- Confirmar resumen por campaña: leads totales, potenciales reales, ganados, perdidos y conversion simple.
+- Confirmar que operadores no ven presupuesto ni métricas sensibles de campaña.
 - Confirmar que el Dashboard muestra Leads nuevos, Potenciales reales, Sin datos minimos, Presupuesto bajo, Sin responder +30m y Cotizados sin seguimiento.
+- Confirmar que el Dashboard muestra leads calientes y campaña con más potenciales reales cuando existan datos.
 - Registrar interaccion saliente y confirmar que el estado puede pasar a CONTACTADO.
 - Copiar sugerencia de respuesta y confirmar que usa precio desde solo si hay tarifa cargada.
 - Confirmar que la respuesta pide marca/modelo/año/motor cuando faltan datos.
@@ -213,6 +233,20 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Solicitar correccion si aplica.
 - Finalizar tecnico sin cerrar pago ni entrega comercial.
 
+### QA Process Guard V1
+
+- Subir MOD y confirmar que aparece `Process Guard: esperando post escritura/cierre`.
+- Marcar MOD descargado/aplicado y confirmar `mod_descargado_at`.
+- Simular caso MOD listo sin post escritura y ejecutar `POST /api/automatizaciones/process-guard/revisar`.
+- Confirmar SLA visual 30/60/120/180 min: aviso, advertencia, critico y escalado.
+- Registrar post escritura OK y confirmar que sigue pidiendo cierre tecnico.
+- Cerrar tecnico OK y confirmar que la orden pasa a `LISTO_PARA_ENTREGA` sin marcar pago ni entrega.
+- Registrar resultado `REQUIERE_CORRECCION` y confirmar notificacion accionable.
+- Registrar resultado `REQUIERE_NUEVA_LECTURA` y confirmar alerta/escalamiento.
+- Confirmar dashboard `Procesos sin cierre`: total, criticos y por responsable.
+- Confirmar que notificacion abre `/archivos-ecu?archivoId={id}#post-escritura`.
+- Confirmar que no se duplican notificaciones infinitas por el mismo nivel del mismo archivo.
+
 ## 9. QA Portal Masters
 
 - Login externo con Email de login portal.
@@ -245,6 +279,24 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 - Alerta visual aparece sin tapar toda la pantalla.
 - Contador de campana aumenta y baja al marcar leidas.
 
+### QA Web Push PWA V1
+
+- Confirmar `GET /api/push/status` con usuario autenticado.
+- Confirmar que `GET /api/push/vapid-public-key` no devuelve clave privada.
+- Confirmar que con `ENABLE_WEB_PUSH=false` el panel muestra backend inactivo.
+- Activar `ENABLE_WEB_PUSH=true` con VAPID keys en Railway y redeploy backend.
+- En PC, abrir campana y presionar `Activar notificaciones en este dispositivo`.
+- Permitir notificaciones del navegador.
+- Confirmar que `POST /api/push/subscribe` registra el dispositivo.
+- Presionar `Enviar prueba` y confirmar notificacion del sistema.
+- Como OWNER/ADMIN, presionar `Enviar prueba critica`.
+- Confirmar que al tocar la push abre la URL accionable.
+- Crear alerta ALTA/URGENTE de Process Guard o Scheduler y confirmar que genera push si el dispositivo esta registrado.
+- Confirmar anti-spam: misma entidad/tag no debe repetir push al mismo usuario dentro de 5 minutos.
+- Desactivar dispositivo y confirmar que no recibe nuevas pruebas.
+- En iPhone, instalar PWA desde Safari antes de probar permisos.
+- Confirmar que Portal Masters externo no puede usar endpoints `/api/push`.
+
 ## 11. QA Web Publica
 
 - `/web` carga en desktop y celular.
@@ -275,6 +327,7 @@ Documento de validacion manual para ejecutar despues de cambios grandes, deploys
 | Dashboard V2 |  |  |  |  |
 | Agentes IA GMTCH V1 |  |  |  |  |
 | Automatizaciones GMTCH V1 |  |  |  |  |
+| Scheduler Interno V1 |  |  |  |  |
 | Bitacora operativa |  |  |  |  |
 | Ordenes |  |  |  |  |
 | Postventa tecnica |  |  |  |  |

@@ -14,6 +14,8 @@ const {
   notificarSlave,
   solicitarCorreccion,
   registrarPostEscritura,
+  marcarModDescargado,
+  registrarCierreTecnico,
   archivarArchivoECU,
   eliminarArchivoECU,
 } = require("../controllers/archivoECUController");
@@ -73,7 +75,11 @@ router.post("/:id/notificar-slave", notificarSlave);
 
 router.post("/:id/solicitar-correccion", solicitarCorreccion);
 
+router.post("/:id/mod-descargado", marcarModDescargado);
+
 router.post("/:id/post-escritura", manejarPostEscritura, registrarPostEscritura);
+
+router.post("/:id/cierre-tecnico", registrarCierreTecnico);
 
 router.post("/:id/archivar", archivarArchivoECU);
 

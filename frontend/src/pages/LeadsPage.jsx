@@ -6,6 +6,9 @@ import { getPriorityColor, getStatusColor } from "../utils/statusStyles";
 const CANALES = [
   "WHATSAPP",
   "INSTAGRAM",
+  "INSTAGRAM_ADS",
+  "FACEBOOK_ADS",
+  "GRUPO_FACEBOOK",
   "WEB",
   "FACEBOOK",
   "PRESENCIAL",
@@ -28,6 +31,29 @@ const ESTADOS = [
 ];
 
 const PRIORIDADES = ["BAJA", "MEDIA", "ALTA", "URGENTE"];
+
+const CANALES_CAMPANIA = [
+  "FACEBOOK_ADS",
+  "INSTAGRAM_ADS",
+  "WHATSAPP",
+  "WEB",
+  "GRUPO_FACEBOOK",
+  "REFERIDO",
+  "PRESENCIAL",
+  "OTRO",
+];
+
+const OBJETIVOS_CAMPANIA = [
+  "MENSAJES_WHATSAPP",
+  "LEADS",
+  "AGENDA",
+  "VENTAS",
+  "FILE_SERVICE",
+  "FLOTA",
+  "OTRO",
+];
+
+const ESTADOS_CAMPANIA = ["BORRADOR", "ACTIVA", "PAUSADA", "FINALIZADA"];
 
 const SERVICIOS = [
   ["DIAGNOSTICO", "Diagnóstico profesional"],
@@ -109,6 +135,14 @@ const datosFaltantesLead = (lead) => {
   return faltantes;
 };
 
+const campaniaNombre = (campanias, campaniaId) => {
+  if (!campaniaId) return "Sin campaña / orgánico";
+  return (
+    campanias.find((campania) => String(campania.id) === String(campaniaId))
+      ?.nombre || `Campaña #${campaniaId}`
+  );
+};
+
 const TARIFA_FORM_INICIAL = {
   servicio: "",
   categoria: "OTRO",
@@ -123,12 +157,30 @@ const TARIFA_FORM_INICIAL = {
   notas_internas: "",
 };
 
+const CAMPANIA_FORM_INICIAL = {
+  nombre: "",
+  canal: "WHATSAPP",
+  objetivo: "MENSAJES_WHATSAPP",
+  presupuesto: "",
+  fecha_inicio: "",
+  fecha_fin: "",
+  estado: "ACTIVA",
+  descripcion: "",
+  utm_source: "",
+  utm_campaign: "",
+  utm_content: "",
+};
+
 const FORM_INICIAL = {
   nombre: "",
   telefono: "",
   email: "",
   canal: "WHATSAPP",
+  campaniaId: "",
   origen_detalle: "",
+  utm_source: "",
+  utm_campaign: "",
+  utm_content: "",
   vehiculo_marca: "",
   vehiculo_modelo: "",
   vehiculo_anio: "",
@@ -148,6 +200,8 @@ const FILTROS_INICIALES = {
   prioridad: "",
   servicio_interes: "",
   asignado_a: "",
+  campaniaId: "",
+  es_lead_caliente: "",
 };
 
 const texto = (valor, fallback = "No registrado") => {
@@ -222,12 +276,17 @@ function LeadsPage() {
   const [searchParams] = useSearchParams();
   const leadIdQuery = searchParams.get("leadId");
   const estadoQuery = searchParams.get("estado");
+  const leadCalienteQuery = searchParams.get("es_lead_caliente");
 
   const [leads, setLeads] = useState([]);
   const [usuarios, setUsuarios] = useState([]);
   const [tarifas, setTarifas] = useState([]);
   const [tarifaForm, setTarifaForm] = useState(TARIFA_FORM_INICIAL);
   const [tarifaEditando, setTarifaEditando] = useState({});
+  const [campanias, setCampanias] = useState([]);
+  const [resumenCampanias, setResumenCampanias] = useState([]);
+  const [campaniaForm, setCampaniaForm] = useState(CAMPANIA_FORM_INICIAL);
+  const [campaniaEditando, setCampaniaEditando] = useState({});
   const [seleccionadoId, setSeleccionadoId] = useState("");
   const [form, setForm] = useState(FORM_INICIAL);
   const [editForm, setEditForm] = useState({});
@@ -264,16 +323,28 @@ function LeadsPage() {
     "MECANICO",
     "TUNER",
   ].includes(rolUsuario);
+  const puedeVerCampanias = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(
+    rolUsuario
+  );
+  const puedeAdministrarCampanias = ["OWNER", "ADMIN"].includes(rolUsuario);
+  const puedeVerCostosCampania = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
+    rolUsuario
+  );
 
   const cargar = async () => {
     try {
       setLoading(true);
       setError("");
 
-      const [leadsRes, usuariosRes, tarifasRes] = await Promise.allSettled([
+      const [leadsRes, usuariosRes, tarifasRes, campaniasRes, resumenCampaniasRes] =
+        await Promise.allSettled([
         api.get("/leads"),
         api.get("/usuarios/responsables"),
         puedeVerTarifas ? api.get("/tarifas") : Promise.resolve({ data: [] }),
+        puedeVerCampanias ? api.get("/campanias") : Promise.resolve({ data: [] }),
+        puedeVerCampanias
+          ? api.get("/leads/resumen-campanias")
+          : Promise.resolve({ data: [] }),
       ]);
 
       if (leadsRes.status === "fulfilled") {
@@ -296,6 +367,20 @@ function LeadsPage() {
       } else {
         setTarifas([]);
       }
+
+      if (campaniasRes.status === "fulfilled") {
+        const data = campaniasRes.value.data;
+        setCampanias(Array.isArray(data) ? data : data.campanias || []);
+      } else {
+        setCampanias([]);
+      }
+
+      if (resumenCampaniasRes.status === "fulfilled") {
+        const data = resumenCampaniasRes.value.data;
+        setResumenCampanias(Array.isArray(data) ? data : data.campanias || []);
+      } else {
+        setResumenCampanias([]);
+      }
     } catch (err) {
       console.error("ERROR CARGANDO LEADS:", err.response?.data || err.message);
       setError(err.response?.data?.error || "No se pudieron cargar los leads.");
@@ -316,6 +401,15 @@ function LeadsPage() {
   }, [estadoQuery]);
 
   useEffect(() => {
+    if (!leadCalienteQuery) return;
+    if (!["true", "false"].includes(leadCalienteQuery)) return;
+    setFiltros((actual) => ({
+      ...actual,
+      es_lead_caliente: leadCalienteQuery,
+    }));
+  }, [leadCalienteQuery]);
+
+  useEffect(() => {
     if (!leadIdQuery || !leads.length) return;
     const existe = leads.some((lead) => String(lead.id) === String(leadIdQuery));
     if (existe) setSeleccionadoId(String(leadIdQuery));
@@ -325,6 +419,12 @@ function LeadsPage() {
     return leads.filter((lead) => {
       return Object.entries(filtros).every(([campo, valor]) => {
         if (!valor) return true;
+        if (campo === "campaniaId") {
+          return String(lead.campaniaId || "") === String(valor);
+        }
+        if (campo === "es_lead_caliente") {
+          return Boolean(lead.es_lead_caliente) === (valor === "true");
+        }
         return String(lead[campo] || "") === String(valor);
       });
     });
@@ -537,6 +637,52 @@ function LeadsPage() {
     }));
   };
 
+  const crearCampania = async (event) => {
+    event.preventDefault();
+    if (!puedeAdministrarCampanias) return;
+    if (!String(campaniaForm.nombre || "").trim()) {
+      setError("Debes indicar nombre de campaña.");
+      return;
+    }
+
+    try {
+      setGuardando(true);
+      await api.post("/campanias", campaniaForm);
+      setMensaje("Campaña comercial creada.");
+      setCampaniaForm(CAMPANIA_FORM_INICIAL);
+      await cargar();
+    } catch (err) {
+      setError(err.response?.data?.error || "No se pudo crear la campaña.");
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const guardarCampania = async (campania) => {
+    if (!puedeAdministrarCampanias || !campania?.id) return;
+    try {
+      setGuardando(true);
+      const payload = campaniaEditando[campania.id] || campania;
+      await api.patch(`/campanias/${campania.id}`, payload);
+      setMensaje("Campaña comercial actualizada.");
+      await cargar();
+    } catch (err) {
+      setError(err.response?.data?.error || "No se pudo actualizar la campaña.");
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const actualizarCampaniaEditando = (id, campo, valor) => {
+    setCampaniaEditando((actual) => ({
+      ...actual,
+      [id]: {
+        ...(actual[id] || campanias.find((campania) => campania.id === id) || {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
   return (
     <div className="max-w-full mx-auto p-2 space-y-6">
       <header className="bg-black text-white p-6 border-b-8 border-blue-600 shadow-2xl">
@@ -606,6 +752,17 @@ function LeadsPage() {
                 <Input label="Teléfono / WhatsApp" value={form.telefono} onChange={(v) => actualizarForm("telefono", v)} />
                 <Input label="Email" value={form.email} onChange={(v) => actualizarForm("email", v)} />
                 <Select label="Canal" value={form.canal} onChange={(v) => actualizarForm("canal", v)} options={CANALES.map((v) => [v, v])} />
+                <Select
+                  label="Campaña"
+                  value={form.campaniaId}
+                  onChange={(v) => actualizarForm("campaniaId", v)}
+                  options={[
+                    ["", "Sin campaña / orgánico"],
+                    ...campanias
+                      .filter((campania) => campania.estado === "ACTIVA")
+                      .map((campania) => [String(campania.id), campania.nombre]),
+                  ]}
+                />
                 <Select label="Servicio interés" value={form.servicio_interes} onChange={(v) => actualizarForm("servicio_interes", v)} options={SERVICIOS} />
                 <TarifaRapida tarifa={tarifaFormSeleccionada} servicio={form.servicio_interes} />
                 <Input label="Marca" value={form.vehiculo_marca} onChange={(v) => actualizarForm("vehiculo_marca", v)} />
@@ -614,6 +771,16 @@ function LeadsPage() {
                 <Input label="Motor" value={form.vehiculo_motor} onChange={(v) => actualizarForm("vehiculo_motor", v)} />
                 <Input label="Patente" value={form.patente} onChange={(v) => actualizarForm("patente", v.toUpperCase())} />
                 <Input label="Presupuesto indicado" type="number" value={form.presupuesto_estimado} onChange={(v) => actualizarForm("presupuesto_estimado", v)} />
+                <details className="border-2 border-black bg-slate-50 p-3">
+                  <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-500">
+                    UTM / origen avanzado
+                  </summary>
+                  <div className="mt-3 space-y-2">
+                    <Input label="utm_source" value={form.utm_source} onChange={(v) => actualizarForm("utm_source", v)} />
+                    <Input label="utm_campaign" value={form.utm_campaign} onChange={(v) => actualizarForm("utm_campaign", v)} />
+                    <Input label="utm_content" value={form.utm_content} onChange={(v) => actualizarForm("utm_content", v)} />
+                  </div>
+                </details>
                 <Textarea label="Mensaje inicial" value={form.mensaje_inicial} onChange={(v) => actualizarForm("mensaje_inicial", v)} />
                 <button
                   type="submit"
@@ -638,6 +805,25 @@ function LeadsPage() {
               <Select label="Canal" value={filtros.canal} onChange={(v) => setFiltros((a) => ({ ...a, canal: v }))} options={[["", "Todos"], ...CANALES.map((v) => [v, v])]} />
               <Select label="Prioridad" value={filtros.prioridad} onChange={(v) => setFiltros((a) => ({ ...a, prioridad: v }))} options={[["", "Todas"], ...PRIORIDADES.map((v) => [v, v])]} />
               <Select label="Servicio" value={filtros.servicio_interes} onChange={(v) => setFiltros((a) => ({ ...a, servicio_interes: v }))} options={[["", "Todos"], ...SERVICIOS]} />
+              <Select
+                label="Campaña"
+                value={filtros.campaniaId}
+                onChange={(v) => setFiltros((a) => ({ ...a, campaniaId: v }))}
+                options={[
+                  ["", "Todas"],
+                  ...campanias.map((campania) => [String(campania.id), campania.nombre]),
+                ]}
+              />
+              <Select
+                label="Lead caliente"
+                value={filtros.es_lead_caliente}
+                onChange={(v) => setFiltros((a) => ({ ...a, es_lead_caliente: v }))}
+                options={[
+                  ["", "Todos"],
+                  ["true", "Sí"],
+                  ["false", "No"],
+                ]}
+              />
               <button
                 type="button"
                 onClick={() => setFiltros(FILTROS_INICIALES)}
@@ -647,6 +833,22 @@ function LeadsPage() {
               </button>
             </div>
           </div>
+
+          {puedeVerCampanias && (
+            <CampaniasComerciales
+              campanias={campanias}
+              resumenCampanias={resumenCampanias}
+              campaniaForm={campaniaForm}
+              setCampaniaForm={setCampaniaForm}
+              campaniaEditando={campaniaEditando}
+              onEditarCampania={actualizarCampaniaEditando}
+              onCrearCampania={crearCampania}
+              onGuardarCampania={guardarCampania}
+              puedeAdministrar={puedeAdministrarCampanias}
+              puedeVerCostos={puedeVerCostosCampania}
+              guardando={guardando}
+            />
+          )}
 
           {puedeVerTarifas && (
             <TarifarioComercial
@@ -722,6 +924,7 @@ function LeadsPage() {
             <LeadDetalle
               lead={seleccionado}
               tarifa={tarifaSeleccionada}
+              campanias={campanias}
               editForm={editForm}
               setEditForm={actualizarEdit}
               usuarios={usuarios}
@@ -750,6 +953,7 @@ function LeadsPage() {
 function LeadDetalle({
   lead,
   tarifa,
+  campanias,
   editForm,
   setEditForm,
   usuarios,
@@ -801,6 +1005,8 @@ function LeadDetalle({
 
       <section className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Info label="Canal" value={lead.canal} />
+        <Info label="Campaña" value={campaniaNombre(campanias, lead.campaniaId)} />
+        <Info label="Lead caliente" value={lead.es_lead_caliente ? "Sí" : "No"} />
         <Info label="Servicio" value={lead.servicio_interes} />
         <Info label="Asignado" value={lead.asignado_a} />
         <Info label="Vehículo" value={`${texto(lead.vehiculo_marca, "")} ${texto(lead.vehiculo_modelo, "")} ${texto(lead.vehiculo_anio, "")}`.trim() || "No registrado"} />
@@ -810,6 +1016,9 @@ function LeadDetalle({
         <Info label="Datos mínimos" value={lead.datos_minimos_completos ? "Completos" : `Faltan: ${datosFaltantesLead(lead).join(", ") || "No registrado"}`} />
         <Info label="Filtro comercial" value={lead.presupuesto_bajo ? "Presupuesto bajo" : "Sin alerta de presupuesto"} />
         <Info label="Próximo contacto" value={fecha(lead.proximo_contacto_at)} />
+        <Info label="Primer contacto" value={fecha(lead.primer_contacto_at)} />
+        <Info label="Respondido" value={fecha(lead.respondido_at)} />
+        <Info label="Tiempo respuesta" value={lead.tiempo_respuesta_minutos ? `${lead.tiempo_respuesta_minutos} min` : "Pendiente"} />
         <Info label="Cliente convertido" value={lead.convertido_cliente_id ? `Cliente #${lead.convertido_cliente_id}` : "Pendiente"} />
         <Info label="Orden convertida" value={lead.convertido_orden_id ? `Orden #${lead.convertido_orden_id}` : "Pendiente"} />
       </section>
@@ -828,6 +1037,17 @@ function LeadDetalle({
                 <Select label="Estado" value={editForm.estado || "NUEVO"} onChange={(v) => setEditForm("estado", v)} options={ESTADOS.map((v) => [v, v])} />
                 <Select label="Prioridad" value={editForm.prioridad || "MEDIA"} onChange={(v) => setEditForm("prioridad", v)} options={PRIORIDADES.map((v) => [v, v])} />
                 <Select label="Servicio" value={editForm.servicio_interes || "OTRO"} onChange={(v) => setEditForm("servicio_interes", v)} options={SERVICIOS} />
+                <Select
+                  label="Campaña"
+                  value={editForm.campaniaId || ""}
+                  onChange={(v) => setEditForm("campaniaId", v)}
+                  options={[
+                    ["", "Sin campaña / orgánico"],
+                    ...campanias
+                      .filter((campania) => campania.estado === "ACTIVA")
+                      .map((campania) => [String(campania.id), campania.nombre]),
+                  ]}
+                />
                 <Input label="Presupuesto indicado" type="number" value={editForm.presupuesto_estimado || ""} onChange={(v) => setEditForm("presupuesto_estimado", v)} />
               </>
             )}
@@ -839,6 +1059,9 @@ function LeadDetalle({
                 <Input label="Próxima acción" value={editForm.proxima_accion || ""} onChange={(v) => setEditForm("proxima_accion", v)} className="md:col-span-2" />
                 <Input label="Próximo contacto" type="datetime-local" value={String(editForm.proximo_contacto_at || "").slice(0, 16)} onChange={(v) => setEditForm("proximo_contacto_at", v)} />
                 <Input label="Motivo perdido" value={editForm.perdido_motivo || ""} onChange={(v) => setEditForm("perdido_motivo", v)} />
+                <Input label="utm_source" value={editForm.utm_source || ""} onChange={(v) => setEditForm("utm_source", v)} />
+                <Input label="utm_campaign" value={editForm.utm_campaign || ""} onChange={(v) => setEditForm("utm_campaign", v)} />
+                <Input label="utm_content" value={editForm.utm_content || ""} onChange={(v) => setEditForm("utm_content", v)} />
               </>
             )}
           </div>
@@ -1048,6 +1271,125 @@ function AnalisisComercialLead({ lead, tarifa }) {
         <p className="mt-1 text-sm font-black text-black">{accion}</p>
       </div>
     </div>
+  );
+}
+
+function CampaniasComerciales({
+  campanias,
+  resumenCampanias,
+  campaniaForm,
+  setCampaniaForm,
+  campaniaEditando,
+  onEditarCampania,
+  onCrearCampania,
+  onGuardarCampania,
+  puedeAdministrar,
+  puedeVerCostos,
+  guardando,
+}) {
+  const resumenPorId = new Map(
+    resumenCampanias.map((item) => [String(item.campaniaId || "SIN_CAMPANIA"), item])
+  );
+
+  return (
+    <details className="border-4 border-black bg-white p-4">
+      <summary className="cursor-pointer text-sm font-black uppercase">
+        Campañas
+      </summary>
+
+      <p className="mt-3 text-[10px] font-black uppercase leading-relaxed text-gray-500">
+        Mide de dónde vienen los leads y qué campaña genera potencial real. WhatsApp
+        único público: +56 9 6226 7642.
+      </p>
+
+      {puedeAdministrar && (
+        <form onSubmit={onCrearCampania} className="mt-4 space-y-3 border-2 border-black bg-slate-50 p-3">
+          <Input label="Nombre campaña" value={campaniaForm.nombre} onChange={(v) => setCampaniaForm((a) => ({ ...a, nombre: v }))} />
+          <Select label="Canal" value={campaniaForm.canal} onChange={(v) => setCampaniaForm((a) => ({ ...a, canal: v }))} options={CANALES_CAMPANIA.map((v) => [v, v])} />
+          <Select label="Objetivo" value={campaniaForm.objetivo} onChange={(v) => setCampaniaForm((a) => ({ ...a, objetivo: v }))} options={OBJETIVOS_CAMPANIA.map((v) => [v, v])} />
+          <Select label="Estado" value={campaniaForm.estado} onChange={(v) => setCampaniaForm((a) => ({ ...a, estado: v }))} options={ESTADOS_CAMPANIA.map((v) => [v, v])} />
+          <Input label="Presupuesto" type="number" value={campaniaForm.presupuesto} onChange={(v) => setCampaniaForm((a) => ({ ...a, presupuesto: v }))} />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Input label="Inicio" type="date" value={campaniaForm.fecha_inicio} onChange={(v) => setCampaniaForm((a) => ({ ...a, fecha_inicio: v }))} />
+            <Input label="Fin" type="date" value={campaniaForm.fecha_fin} onChange={(v) => setCampaniaForm((a) => ({ ...a, fecha_fin: v }))} />
+          </div>
+          <Input label="utm_source" value={campaniaForm.utm_source} onChange={(v) => setCampaniaForm((a) => ({ ...a, utm_source: v }))} />
+          <Input label="utm_campaign" value={campaniaForm.utm_campaign} onChange={(v) => setCampaniaForm((a) => ({ ...a, utm_campaign: v }))} />
+          <Input label="utm_content" value={campaniaForm.utm_content} onChange={(v) => setCampaniaForm((a) => ({ ...a, utm_content: v }))} />
+          <Textarea label="Descripción" value={campaniaForm.descripcion} onChange={(v) => setCampaniaForm((a) => ({ ...a, descripcion: v }))} />
+          <button
+            type="submit"
+            disabled={guardando}
+            className="w-full bg-black px-4 py-3 text-xs font-black uppercase text-white disabled:opacity-50"
+          >
+            Crear campaña
+          </button>
+        </form>
+      )}
+
+      <div className="mt-4 space-y-3">
+        {campanias.map((campania) => {
+          const resumen = resumenPorId.get(String(campania.id)) || {};
+          const edit = campaniaEditando[campania.id] || campania;
+
+          return (
+            <div key={campania.id} className="border-2 border-black bg-white p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-black uppercase">{campania.nombre}</p>
+                  <p className="text-[10px] font-black uppercase text-gray-500">
+                    {campania.canal} / {campania.objetivo} / {campania.estado}
+                  </p>
+                </div>
+                {puedeVerCostos && (
+                  <span className="text-xs font-black text-blue-700">
+                    {formatoCLP(campania.presupuesto)}
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Info label="Leads" value={resumen.leads_totales ?? 0} />
+                <Info label="Potenciales" value={resumen.potenciales_reales ?? 0} />
+                <Info label="Ganados" value={resumen.ganados ?? 0} />
+                <Info label="Conversión" value={`${resumen.conversion_simple ?? 0}%`} />
+                {puedeVerCostos && (
+                  <>
+                    <Info label="Costo lead" value={formatoCLP(resumen.costo_estimado_por_lead)} />
+                    <Info label="Costo real" value={formatoCLP(resumen.costo_estimado_por_lead_real)} />
+                  </>
+                )}
+              </div>
+
+              {puedeAdministrar && (
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Select label="Estado" value={edit.estado || "ACTIVA"} onChange={(v) => onEditarCampania(campania.id, "estado", v)} options={ESTADOS_CAMPANIA.map((item) => [item, item])} />
+                  <Input label="Presupuesto" type="number" value={edit.presupuesto || ""} onChange={(v) => onEditarCampania(campania.id, "presupuesto", v)} />
+                  <button
+                    type="button"
+                    onClick={() => onGuardarCampania(campania)}
+                    disabled={guardando}
+                    className="bg-blue-700 px-3 py-2 text-[10px] font-black uppercase text-white disabled:opacity-50 sm:col-span-2"
+                  >
+                    Guardar campaña
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <div className="border-2 border-dashed border-gray-400 bg-slate-50 p-3">
+          <p className="text-xs font-black uppercase text-gray-500">
+            Sin campaña / orgánico
+          </p>
+          <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
+            Usar cuando el origen real no se sabe. Medir potencial real, no solo cantidad
+            de mensajes.
+          </p>
+        </div>
+      </div>
+    </details>
   );
 }
 
