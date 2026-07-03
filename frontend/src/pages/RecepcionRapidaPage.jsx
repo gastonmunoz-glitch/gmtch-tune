@@ -173,6 +173,8 @@ const prioridadSugeridaPorCategoria = (categoria) => {
 
 function RecepcionRapidaPage() {
   const fotosInputRef = useRef(null);
+  const rolUsuario = String(leerStorage("rol") || "").toUpperCase();
+  const esRecepcionEmergenciaOperador = rolUsuario === "OPERADOR_ECU";
 
   const [paso, setPaso] = useState(() => calcularPasoInicial());
   const [cargando, setCargando] = useState(false);
@@ -190,6 +192,7 @@ function RecepcionRapidaPage() {
 
   const [orden, setOrden] = useState({ ...ESTADO_INICIAL_ORDEN });
   const [ordenId, setOrdenId] = useState(() => leerStorage("gmtch_ordenId"));
+  const [origenRecepcion, setOrigenRecepcion] = useState("");
 
   const [fotosArchivos, setFotosArchivos] = useState([]);
 
@@ -566,10 +569,15 @@ function RecepcionRapidaPage() {
         motivo_ingreso: construirMotivoIngreso(),
         monto_total: Number(montoTotal),
         estado: ESTADO_ORDEN_INICIAL,
+        origen_recepcion: esRecepcionEmergenciaOperador
+          ? "RECEPCION_EMERGENCIA_OPERADOR"
+          : undefined,
       };
 
       const res = await api.post("/ordenes", payload);
       const nuevaOrdenId = obtenerOrdenId(res.data);
+      const origenBackend =
+        res.data?.orden?.origen_recepcion || res.data?.origen_recepcion || "";
 
       if (!nuevaOrdenId) {
         mostrarAviso("error", "La orden se guardo, pero no se recibio el ID.");
@@ -578,6 +586,7 @@ function RecepcionRapidaPage() {
       }
 
       setOrdenId(nuevaOrdenId);
+      setOrigenRecepcion(origenBackend);
       escribirStorage("gmtch_ordenId", nuevaOrdenId);
 
       mostrarAviso("ok", "Orden creada correctamente. Continúa con las fotos de respaldo.");
@@ -693,6 +702,7 @@ function RecepcionRapidaPage() {
   const limpiarFlujo = () => {
     setPaso(1);
     setAviso(null);
+    setOrigenRecepcion("");
     setPatenteBusqueda("");
     setBusquedaRealizada(false);
     limpiarContextoTrabajo();
@@ -1337,6 +1347,14 @@ function RecepcionRapidaPage() {
         </p>
       </div>
 
+      {esRecepcionEmergenciaOperador && (
+        <div className="mb-6 border-4 border-amber-500 bg-amber-50 p-4">
+          <p className="text-[11px] font-black uppercase text-amber-900">
+            Recepcion de emergencia operador: registra solo datos minimos. No puedes cobrar ni entregar desde este flujo.
+          </p>
+        </div>
+      )}
+
       <div className="mb-6 border-4 border-blue-700 bg-blue-50 p-4">
         <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-900">
           Guía visual de recepción rápida
@@ -1395,6 +1413,7 @@ function RecepcionRapidaPage() {
           Cliente ID: {clienteId || "No registrado"} | Vehículo ID:{" "}
           {vehiculoId || "No registrado"} | Orden ID:{" "}
           {ordenId || leerStorage("gmtch_ordenId") || "No registrado"}
+          {origenRecepcion && <> | Origen: {origenRecepcion}</>}
         </div>
 
         <button

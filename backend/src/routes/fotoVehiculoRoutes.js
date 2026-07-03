@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 
 const { FotoVehiculo } = require("../models");
+const { permitirRoles } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -97,7 +98,13 @@ const obtenerArchivosSubidos = (req) => {
   return [];
 };
 
-router.post("/", (req, res, next) => {
+router.post("/", permitirRoles(
+  "OWNER",
+  "ADMIN",
+  "SUPERVISOR",
+  "RECEPCION",
+  "OPERADOR_ECU"
+), (req, res, next) => {
   subirFoto(req, res, (error) => {
     if (error) {
       console.error("ERROR MULTER FOTOS:", error.message);

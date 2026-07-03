@@ -37,7 +37,7 @@ const PERMISOS_RUTAS = {
     "MECANICO",
     "TUNER",
   ],
-  "/flujo": ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
+  "/flujo": ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION", "OPERADOR_ECU"],
   "/clientes": ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
   "/leads": [
     "OWNER",
@@ -211,6 +211,55 @@ const puedeVerAutomatizaciones = (usuario) =>
 
 const puedeVerSchedulerInterno = (usuario) =>
   ["OWNER", "ADMIN"].includes(String(usuario?.rol || "").toUpperCase());
+
+const rolNormalizado = (usuario) => String(usuario?.rol || "").toUpperCase();
+
+const obtenerPerfilDashboardRol = (usuario) => {
+  const rol = rolNormalizado(usuario);
+  const perfiles = {
+    OWNER: {
+      titulo: "Vista completa OWNER",
+      foco: "Caja, ventas, operacion, File Service, CRM y automatizaciones.",
+      operacion: "Control total",
+    },
+    ADMIN: {
+      titulo: "Vista completa ADMIN",
+      foco: "Caja, ventas, operacion, File Service, CRM y automatizaciones.",
+      operacion: "Control administrativo",
+    },
+    SUPERVISOR: {
+      titulo: "Vista supervisor",
+      foco: "Operacion general, responsables, atrasos, File Service resumido y automatizaciones en lectura.",
+      operacion: "Sin caja global detallada",
+    },
+    RECEPCION: {
+      titulo: "Vista recepcion",
+      foco: "Ordenes activas, listos para entrega, pagos pendientes, entregadas hoy y clientes prioritarios.",
+      operacion: "Sin caja global",
+    },
+    OPERADOR_ECU: {
+      titulo: "Vista operador ECU",
+      foco: "Ordenes relacionadas, diagnostico, MOD listo, post escritura, correcciones y recepcion de emergencia.",
+      operacion: "Sin ventas ni caja global",
+    },
+    MECANICO: {
+      titulo: "Vista mecanica",
+      foco: "Ordenes mecanicas, intervencion fisica, material recuperado, servicios pendientes y feedback.",
+      operacion: "Sin ventas ni caja global",
+    },
+    TUNER: {
+      titulo: "Vista tuner",
+      foco: "File Service, MOD pendientes, correcciones y archivos listos.",
+      operacion: "Sin ventas ni caja global",
+    },
+  };
+
+  return perfiles[rol] || {
+    titulo: "Vista operativa",
+    foco: "Operacion asignada segun rol.",
+    operacion: "Acceso limitado",
+  };
+};
 
 const limpiarSesion = () => {
   localStorage.removeItem("token");
@@ -1855,9 +1904,10 @@ const AlertaNotificacionFlotante = ({
 };
 
 function Dashboard({ usuario, actualizarNotificaciones }) {
-  const puedeVerBase = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(
-    usuario?.rol
-  );
+  const rol = rolNormalizado(usuario);
+  const usernameActual = String(usuario?.username || usuario?.nombre || "").trim();
+  const perfilRol = obtenerPerfilDashboardRol(usuario);
+  const puedeVerBase = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(rol);
   const puedeVerFileService = tieneRol(usuario, PERMISOS_RUTAS["/archivos-ecu"]);
   const mostrarComercial = puedeVerMetricasComerciales(usuario);
   const mostrarOperacion = puedeVerOperacion(usuario);
@@ -1865,17 +1915,17 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const mostrarAutomatizaciones = puedeVerAutomatizaciones(usuario);
   const mostrarScheduler = puedeVerSchedulerInterno(usuario);
   const mostrarCRM = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(
-    String(usuario?.rol || "").toUpperCase()
+    rol
   );
   const mostrarChecklistLunes = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
-    String(usuario?.rol || "").toUpperCase()
+    rol
   );
   const puedeGenerarReportesAutomatizacion = ["OWNER", "ADMIN"].includes(
-    String(usuario?.rol || "").toUpperCase()
+    rol
   );
   const puedeVerFinanzasAutomatizacion = puedeGenerarReportesAutomatizacion;
   const puedeVerMaterialAutomatizacion = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
-    String(usuario?.rol || "").toUpperCase()
+    rol
   );
 
   const [stats, setStats] = useState({
@@ -1990,6 +2040,75 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     if (Array.isArray(data?.vehiculos)) return data.vehiculos;
     if (Array.isArray(data?.archivos)) return data.archivos;
     if (Array.isArray(data?.items)) return data.items;
+    return [];
+  };
+
+  const coincideUsuario = (valor) => {
+    if (!usernameActual) return false;
+    return String(valor || "").trim().toLowerCase() === usernameActual.toLowerCase();
+  };
+
+  const filtrarOrdenesPorRol = (ordenes = []) => {
+    if (["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(rol)) {
+      return ordenes;
+    }
+
+    if (rol === "OPERADOR_ECU") {
+      return ordenes.filter((orden) => {
+        const estado = String(orden.estado || "").toUpperCase();
+        return (
+          coincideUsuario(orden.operador_ecu_asignado_a) ||
+          coincideUsuario(orden.diagnostico_asignado_a) ||
+          coincideUsuario(orden.recepcionado_por) ||
+          ["PARA_DIAGNOSTICO", "EN_PROGRAMACION", "POST_ESCRITURA_PENDIENTE"].includes(
+            estado
+          ) ||
+          Boolean(orden.correccion_estado)
+        );
+      });
+    }
+
+    if (rol === "MECANICO") {
+      return ordenes.filter((orden) => {
+        const tipoIntervencion = String(orden.intervencion_fisica_tipo || "").toUpperCase();
+        return (
+          coincideUsuario(orden.mecanico_asignado_a) ||
+          tipoIntervencion === "MECANICA_INDEPENDIENTE" ||
+          tipoIntervencion === "ASOCIADA_SERVICIO_TECNICO"
+        );
+      });
+    }
+
+    if (rol === "TUNER") {
+      return ordenes.filter(
+        (orden) =>
+          coincideUsuario(orden.operador_ecu_asignado_a) ||
+          Boolean(orden.correccion_estado)
+      );
+    }
+
+    return ordenes;
+  };
+
+  const filtrarArchivosPorRol = (archivos = []) => {
+    if (["OWNER", "ADMIN", "SUPERVISOR", "TUNER"].includes(rol)) {
+      return archivos;
+    }
+
+    if (rol === "OPERADOR_ECU") {
+      return archivos.filter((archivo) => {
+        const estado = String(archivo.estado || "").toUpperCase();
+        return (
+          coincideUsuario(archivo.operador_ecu_asignado_a) ||
+          coincideUsuario(archivo.slave_asignado_a) ||
+          ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE", "REQUIERE_CORRECCION"].includes(
+            estado
+          ) ||
+          archivo.correccion_pendiente === true
+        );
+      });
+    }
+
     return [];
   };
 
@@ -3251,6 +3370,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         finanzasRes.status === "fulfilled" ? finanzasRes.value?.data || null : null;
       const leadsResumen =
         leadsRes.status === "fulfilled" ? leadsRes.value?.data || null : null;
+      const ordenesDashboard = filtrarOrdenesPorRol(ordenes);
+      const archivosDashboard = filtrarArchivosPorRol(archivos);
 
       setBitacoraOperativa({
         items: bitacoraItems,
@@ -3265,10 +3386,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       });
 
       const dashboardCalculado = calcularDashboard(
-        ordenes,
+        ordenesDashboard,
         clientes,
         vehiculos,
-        archivos,
+        archivosDashboard,
         finanzasResumen,
         leadsResumen
       );
@@ -3404,6 +3525,13 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
       {mostrarChecklistLunes && <PuestaMarchaLunesSection stats={stats} />}
 
+      <EstadoPlataformaDashboard
+        perfil={perfilRol}
+        stats={stats}
+        scheduler={automatizaciones.scheduler}
+        mostrarScheduler={mostrarScheduler}
+      />
+
       <SemaforoOperativo semaforo={stats.semaforoOperativo} />
 
       {mostrarCRM && <CRMComercialDashboardSection leads={stats.leads} />}
@@ -3422,6 +3550,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           puedeVerFinanzas={puedeVerFinanzasAutomatizacion}
           puedeVerMaterial={puedeVerMaterialAutomatizacion}
           puedeVerScheduler={mostrarScheduler}
+          soloLectura={!["OWNER", "ADMIN"].includes(rol)}
           onEjecutar={ejecutarAutomatizacion}
           onSchedulerRunOnce={ejecutarSchedulerAhora}
         />
@@ -3519,6 +3648,60 @@ const nivelClassCentro = (nivel) => {
   if (nivel === "azul") return getStatusColor("EN_PROCESO", "soft");
   if (nivel === "morado") return getStatusColor("REQUIERE_NUEVA_LECTURA", "soft");
   return getStatusColor("OK", "soft");
+};
+
+const EstadoPlataformaDashboard = ({
+  perfil,
+  stats,
+  scheduler,
+  mostrarScheduler,
+}) => {
+  const automatizacionesEstado = mostrarScheduler
+    ? scheduler?.enabled
+      ? "activas"
+      : "manual / apagadas"
+    : "modo seguro / lectura";
+
+  return (
+    <section className="rounded-3xl border-4 border-black bg-slate-950 p-5 text-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+        <div className="lg:col-span-2">
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">
+            Estado plataforma
+          </p>
+          <h2 className="mt-2 text-2xl font-black uppercase">{perfil.titulo}</h2>
+          <p className="mt-2 text-xs font-bold uppercase leading-relaxed text-slate-300">
+            {perfil.foco}
+          </p>
+          <p className="mt-3 text-[11px] font-black uppercase text-blue-200">
+            La plataforma es la fuente oficial. Lo que no se registra, no se puede controlar.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
+          <p className="text-[10px] font-black uppercase text-slate-400">API</p>
+          <p className="mt-1 text-lg font-black uppercase text-emerald-300">
+            Operativa
+          </p>
+          <p className="mt-1 text-[10px] font-bold uppercase text-slate-400">
+            Ultima actualizacion: {stats.ultimaActualizacion || "Pendiente"}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
+          <p className="text-[10px] font-black uppercase text-slate-400">
+            Automatizaciones
+          </p>
+          <p className="mt-1 text-lg font-black uppercase text-amber-300">
+            {automatizacionesEstado}
+          </p>
+          <p className="mt-1 text-[10px] font-bold uppercase text-slate-400">
+            {perfil.operacion}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
 };
 
 const semaforoClass = (color) => {
@@ -3977,6 +4160,7 @@ const AutomatizacionesGMTCHSection = ({
   puedeVerFinanzas,
   puedeVerMaterial,
   puedeVerScheduler,
+  soloLectura = false,
   onEjecutar,
   onSchedulerRunOnce,
 }) => {
@@ -4017,7 +4201,7 @@ const AutomatizacionesGMTCHSection = ({
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:max-w-xl xl:grid-cols-3">
           {acciones
-            .filter(([, , visible]) => visible)
+            .filter(([, , visible]) => visible && !soloLectura)
             .map(([tipo, label]) => (
               <button
                 key={tipo}
@@ -4029,6 +4213,11 @@ const AutomatizacionesGMTCHSection = ({
                 {estado?.cargando === tipo ? "Ejecutando..." : label}
               </button>
             ))}
+          {soloLectura && (
+            <div className="rounded-xl border-2 border-black bg-amber-100 px-3 py-2 text-[10px] font-black uppercase text-amber-900 xl:col-span-3">
+              Modo lectura: automatizaciones visibles sin ejecucion desde este rol.
+            </div>
+          )}
         </div>
       </div>
 
