@@ -4,6 +4,7 @@ const {
   crearOrden,
   obtenerOrdenes,
   obtenerOrdenPorId,
+  obtenerEventosOrden,
   actualizarOrden,
   registrarAjusteComercial,
   obtenerItemsOrden,
@@ -25,6 +26,7 @@ const router = express.Router();
 router.post("/", crearOrden);
 
 router.get("/", obtenerOrdenes);
+router.get("/:id/eventos", obtenerEventosOrden);
 router.get("/:id", obtenerOrdenPorId);
 
 // Orden Comercial V2 / items de servicio / material recuperado

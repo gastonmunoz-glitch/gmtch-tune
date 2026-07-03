@@ -2,6 +2,7 @@ const Cliente = require("./Cliente");
 const Vehiculo = require("./Vehiculo");
 const OrdenTrabajo = require("./OrdenTrabajo");
 const OrdenServicioItem = require("./OrdenServicioItem");
+const OrdenEventoOperativo = require("./OrdenEventoOperativo");
 const Diagnostico = require("./Diagnostico");
 const ArchivoECU = require("./ArchivoECU");
 const FotoVehiculo = require("./FotoVehiculo");
@@ -68,6 +69,16 @@ OrdenTrabajo.hasMany(OrdenServicioItem, {
 });
 
 OrdenServicioItem.belongsTo(OrdenTrabajo, {
+  foreignKey: "ordenId",
+  constraints: false,
+});
+
+OrdenTrabajo.hasMany(OrdenEventoOperativo, {
+  foreignKey: "ordenId",
+  constraints: false,
+});
+
+OrdenEventoOperativo.belongsTo(OrdenTrabajo, {
   foreignKey: "ordenId",
   constraints: false,
 });
@@ -327,6 +338,7 @@ module.exports = {
   Vehiculo,
   OrdenTrabajo,
   OrdenServicioItem,
+  OrdenEventoOperativo,
   Diagnostico,
   ArchivoECU,
   FotoVehiculo,

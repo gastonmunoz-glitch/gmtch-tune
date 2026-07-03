@@ -9,6 +9,7 @@ const {
   FotoVehiculo,
   OrdenServicioItem,
   MaterialRecuperado,
+  OrdenEventoOperativo,
 } = require("../models");
 const {
   crearNotificacionesInternas,
@@ -51,6 +52,133 @@ const normalizarDecimal3 = (valor, defecto = 0) => {
 
 const rolActual = (req) =>
   String(req.usuario?.rol || req.user?.rol || "").trim().toUpperCase();
+
+let eventosOrdenPreparados = false;
+
+const usuarioEventoDesdeReq = (req) =>
+  limpiarTexto(
+    req.usuario?.username ||
+      req.usuario?.nombre ||
+      req.usuario?.email ||
+      req.user?.username ||
+      req.user?.nombre ||
+      req.user?.email
+  ) || "sistema";
+
+const metadataSensibleTokens = [
+  "monto",
+  "precio",
+  "valor",
+  "caja",
+  "venta",
+  "utilidad",
+  "pago",
+  "comprobante",
+  "password",
+  "token",
+  "secret",
+  "hash",
+];
+
+const sanitizarMetadataEvento = (metadata = {}) => {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return {};
+  }
+
+  return Object.entries(metadata).reduce((acc, [clave, valor]) => {
+    const claveNormalizada = String(clave || "").toLowerCase();
+    const esSensible = metadataSensibleTokens.some((token) =>
+      claveNormalizada.includes(token)
+    );
+
+    if (esSensible || valor === undefined) return acc;
+
+    if (
+      valor === null ||
+      ["string", "number", "boolean"].includes(typeof valor)
+    ) {
+      acc[clave] = valor;
+    }
+
+    return acc;
+  }, {});
+};
+
+const prepararTablaEventosOrden = async () => {
+  if (eventosOrdenPreparados) return;
+
+  await OrdenEventoOperativo.sync();
+  await sequelize.query(`
+    ALTER TABLE "orden_eventos_operativos"
+      ADD COLUMN IF NOT EXISTS "ordenId" INTEGER,
+      ADD COLUMN IF NOT EXISTS "tipo_evento" VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS "categoria" VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS "titulo" VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS "descripcion" TEXT,
+      ADD COLUMN IF NOT EXISTS "estado_anterior" VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS "estado_nuevo" VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS "usuario" VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS "usuario_rol" VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS "origen" VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS "metadata" JSONB DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+  `);
+  await sequelize.query(`
+    CREATE INDEX IF NOT EXISTS "idx_orden_eventos_operativos_orden"
+    ON "orden_eventos_operativos" ("ordenId")
+  `);
+  await sequelize.query(`
+    CREATE INDEX IF NOT EXISTS "idx_orden_eventos_operativos_created"
+    ON "orden_eventos_operativos" ("createdAt")
+  `);
+
+  eventosOrdenPreparados = true;
+};
+
+const registrarEventoOrden = async ({
+  ordenId,
+  tipo_evento,
+  categoria,
+  titulo,
+  descripcion,
+  estado_anterior,
+  estado_nuevo,
+  usuario,
+  usuario_rol,
+  origen,
+  metadata,
+}) => {
+  try {
+    if (!ordenId || !tipo_evento || !titulo) return null;
+
+    await prepararTablaEventosOrden();
+
+    return await OrdenEventoOperativo.create({
+      ordenId,
+      tipo_evento,
+      categoria: categoria || null,
+      titulo,
+      descripcion: descripcion || null,
+      estado_anterior: estado_anterior || null,
+      estado_nuevo: estado_nuevo || null,
+      usuario: usuario || null,
+      usuario_rol: usuario_rol || null,
+      origen: origen || null,
+      metadata: sanitizarMetadataEvento(metadata),
+    });
+  } catch (error) {
+    console.warn("No se pudo registrar evento operativo de orden:", error.message);
+    return null;
+  }
+};
+
+const registrarEventoOrdenDesdeReq = (req, datos) =>
+  registrarEventoOrden({
+    ...datos,
+    usuario: datos.usuario || usuarioEventoDesdeReq(req),
+    usuario_rol: datos.usuario_rol || rolActual(req),
+  });
 
 const tieneRol = (req, roles = []) => roles.includes(rolActual(req));
 
@@ -1001,6 +1129,66 @@ const obtenerOrdenPorId = async (req, res) => {
   }
 };
 
+const obtenerEventosOrden = async (req, res) => {
+  try {
+    const ordenId = Number(req.params.id);
+
+    if (!ordenId || Number.isNaN(ordenId)) {
+      return res.status(400).json({
+        error: "ID de orden invalido",
+      });
+    }
+
+    await prepararTablaEventosOrden();
+
+    const orden = await OrdenTrabajo.findByPk(ordenId, {
+      attributes: ["id"],
+    });
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    const eventos = await OrdenEventoOperativo.findAll({
+      where: { ordenId },
+      order: [
+        ["createdAt", "ASC"],
+        ["id", "ASC"],
+      ],
+    });
+
+    return res.json({
+      ordenId,
+      eventos: eventos.map((evento) => {
+        const data = evento.toJSON();
+        return {
+          id: data.id,
+          tipo_evento: data.tipo_evento,
+          categoria: data.categoria,
+          titulo: data.titulo,
+          descripcion: data.descripcion,
+          estado_anterior: data.estado_anterior,
+          estado_nuevo: data.estado_nuevo,
+          usuario: data.usuario,
+          usuario_rol: data.usuario_rol,
+          origen: data.origen,
+          metadata_publica: sanitizarMetadataEvento(data.metadata),
+          createdAt: data.createdAt,
+        };
+      }),
+    });
+  } catch (error) {
+    console.error("ERROR OBTENIENDO EVENTOS DE ORDEN:", error);
+
+    return res.status(500).json({
+      error: "No se pudo cargar la bitacora operativa de la orden",
+      detalle: process.env.NODE_ENV === "production" ? undefined : error.message,
+    });
+  }
+};
+
 const crearOrden = async (req, res) => {
   try {
     await prepararColumnas();
@@ -1090,6 +1278,32 @@ const crearOrden = async (req, res) => {
       }
     );
 
+    await registrarEventoOrdenDesdeReq(req, {
+      ordenId: nuevaOrden.id,
+      tipo_evento: "ORDEN_CREADA",
+      categoria: "OPERACION",
+      titulo: "Orden creada",
+      descripcion: "Orden creada en el sistema.",
+      estado_nuevo: nuevaOrden.estado,
+      origen: origenRecepcion || "NORMAL",
+      metadata: {
+        prioridad: prioridadFinal,
+        recepcion_emergencia: esRecepcionEmergenciaOperador,
+      },
+    });
+
+    if (origenRecepcion === "RECEPCION_EMERGENCIA_OPERADOR") {
+      await registrarEventoOrdenDesdeReq(req, {
+        ordenId: nuevaOrden.id,
+        tipo_evento: "RECEPCION_EMERGENCIA",
+        categoria: "OPERACION",
+        titulo: "Recepcion de emergencia operador",
+        descripcion: "Orden ingresada por operador en flujo de emergencia.",
+        estado_nuevo: nuevaOrden.estado,
+        origen: origenRecepcion,
+      });
+    }
+
     res.status(201).json({
       mensaje: "Orden creada correctamente",
       orden: {
@@ -1127,6 +1341,7 @@ const actualizarOrden = async (req, res) => {
       });
     }
 
+    const estadoAnteriorOrden = limpiarTexto(orden.estado);
     const camposComerciales = camposComercialesPatchRecibidos(req.body);
 
     if (camposComerciales.length > 0 && !tieneRol(req, ROLES_PATCH_COMERCIAL)) {
@@ -1324,6 +1539,37 @@ const actualizarOrden = async (req, res) => {
 
     await orden.update(payload);
 
+    if (
+      Object.prototype.hasOwnProperty.call(payload, "estado") &&
+      limpiarTexto(payload.estado) &&
+      limpiarTexto(payload.estado) !== estadoAnteriorOrden
+    ) {
+      await registrarEventoOrdenDesdeReq(req, {
+        ordenId: orden.id,
+        tipo_evento: "ESTADO_CAMBIADO",
+        categoria: "OPERACION",
+        titulo: "Estado actualizado",
+        descripcion: "Estado de orden actualizado.",
+        estado_anterior: estadoAnteriorOrden,
+        estado_nuevo: payload.estado,
+        origen: "PATCH_ORDEN",
+      });
+    }
+
+    if (actualizaFeedback) {
+      await registrarEventoOrdenDesdeReq(req, {
+        ordenId: orden.id,
+        tipo_evento: "FEEDBACK_REGISTRADO",
+        categoria: "OPERACION",
+        titulo: "Feedback operativo registrado",
+        descripcion: "Se registro feedback operativo en la orden.",
+        origen: "PATCH_ORDEN",
+        metadata: {
+          requiere_seguimiento: payload.requiere_seguimiento === true,
+        },
+      });
+    }
+
     if (Object.keys(responsablesPayload).length > 0) {
       const asignaciones = Object.keys(responsablesPayload).map(
         (campo) => `"${campo}" = :${campo}`
@@ -1344,6 +1590,34 @@ const actualizarOrden = async (req, res) => {
           },
         }
       );
+    }
+
+    if (Object.keys(responsablesPayload).length > 0) {
+      const responsablesCambiados = Object.entries(responsablesPayload)
+        .filter(([campo]) => NOTIFICACIONES_RESPONSABLES[campo])
+        .filter(([, nuevoResponsable]) => Boolean(limpiarTexto(nuevoResponsable)))
+        .filter(([campo, nuevoResponsable]) => {
+          const anterior = limpiarTexto(responsablesActuales[campo]);
+          return limpiarTexto(nuevoResponsable) !== anterior;
+        });
+
+      for (const [campo, nuevoResponsable] of responsablesCambiados) {
+        const meta = NOTIFICACIONES_RESPONSABLES[campo];
+        await registrarEventoOrdenDesdeReq(req, {
+          ordenId: orden.id,
+          tipo_evento: "RESPONSABLE_ASIGNADO",
+          categoria: "OPERACION",
+          titulo: "Responsable actualizado",
+          descripcion: "Responsable asignado o modificado.",
+          origen: "PATCH_ORDEN",
+          metadata: {
+            campo,
+            etapa: meta.etapa,
+            responsable_anterior: limpiarTexto(responsablesActuales[campo]),
+            responsable_nuevo: limpiarTexto(nuevoResponsable),
+          },
+        });
+      }
     }
 
     if (Object.keys(responsablesPayload).length > 0) {
@@ -1459,6 +1733,18 @@ const registrarAjusteComercial = async (req, res) => {
       historial_ajustes: [...historialActual, evento],
     });
 
+    await registrarEventoOrdenDesdeReq(req, {
+      ordenId: orden.id,
+      tipo_evento: "AJUSTE_COMERCIAL",
+      categoria: "COMERCIAL",
+      titulo: "Ajuste comercial registrado",
+      descripcion: "Se registro un ajuste comercial con motivo obligatorio.",
+      origen: "AJUSTE_COMERCIAL",
+      metadata: {
+        tiene_motivo: Boolean(motivoAjuste),
+      },
+    });
+
     const ordenActualizada = await OrdenTrabajo.findByPk(orden.id);
 
     res.json({
@@ -1563,6 +1849,23 @@ const crearItemOrden = async (req, res) => {
     });
 
     const ordenActualizada = await recalcularMontoOrdenPorItems(orden.id);
+
+    await registrarEventoOrdenDesdeReq(req, {
+      ordenId: orden.id,
+      tipo_evento: "ITEM_SERVICIO_AGREGADO",
+      categoria: "SERVICIO",
+      titulo: "Item de servicio agregado",
+      descripcion: "Se agrego un servicio a la orden.",
+      origen: "ITEM_SERVICIO",
+      metadata: {
+        itemId: item.id,
+        tipo_servicio: item.tipo_servicio,
+        categoria: item.categoria,
+        requiere_material_recuperado: item.requiere_material_recuperado === true,
+        material_recuperado_obligatorio:
+          item.material_recuperado_obligatorio === true,
+      },
+    });
 
     res.status(201).json({
       mensaje: "Item de servicio agregado correctamente",
@@ -1695,6 +1998,20 @@ const actualizarItemOrden = async (req, res) => {
       ? await recalcularMontoOrdenPorItems(orden.id)
       : orden;
 
+    await registrarEventoOrdenDesdeReq(req, {
+      ordenId: orden.id,
+      tipo_evento: "ITEM_SERVICIO_ACTUALIZADO",
+      categoria: "SERVICIO",
+      titulo: "Item de servicio actualizado",
+      descripcion: "Se actualizo o modifico un servicio de la orden.",
+      origen: "ITEM_SERVICIO",
+      metadata: {
+        itemId: item.id,
+        tipo_servicio: item.tipo_servicio,
+        estado: item.estado,
+      },
+    });
+
     res.json({
       mensaje: "Item de servicio actualizado correctamente",
       item,
@@ -1758,6 +2075,20 @@ const eliminarItemOrden = async (req, res) => {
     });
 
     const ordenActualizada = await recalcularMontoOrdenPorItems(orden.id);
+
+    await registrarEventoOrdenDesdeReq(req, {
+      ordenId: orden.id,
+      tipo_evento: "ITEM_SERVICIO_ACTUALIZADO",
+      categoria: "SERVICIO",
+      titulo: "Item de servicio actualizado",
+      descripcion: "Se actualizo o anulo un servicio de la orden.",
+      origen: "ITEM_SERVICIO",
+      metadata: {
+        itemId: item.id,
+        tipo_servicio: item.tipo_servicio,
+        estado: item.estado,
+      },
+    });
 
     res.json({
       mensaje: "Item de servicio anulado correctamente",
@@ -1923,6 +2254,22 @@ const registrarMaterialOrden = async (req, res) => {
       registrado_por: usuario,
       registrado_at: new Date(),
       auditoria: [eventoAuditoria],
+    });
+
+    await registrarEventoOrdenDesdeReq(req, {
+      ordenId: orden.id,
+      tipo_evento: "MATERIAL_RECUPERADO_REGISTRADO",
+      categoria: "OPERACION",
+      titulo: "Material recuperado registrado",
+      descripcion: "Se registro material recuperado o motivo de excepcion.",
+      origen: "MATERIAL_RECUPERADO",
+      metadata: {
+        materialId: material.id,
+        itemId: itemId || null,
+        tipo_material: material.tipo_material,
+        tiene_peso: pesoKg > 0,
+        tiene_excepcion: Boolean(motivoExcepcion),
+      },
     });
 
     res.status(201).json({
@@ -2206,6 +2553,8 @@ const actualizarEstado = async (req, res) => {
       });
     }
 
+    const estadoAnteriorOrden = limpiarTexto(orden.estado);
+
     if (estado === "ENTREGADO" && !tieneRol(req, ROLES_PATCH_COMERCIAL)) {
       return res.status(403).json({
         error: "No tienes permisos para entregar ordenes por cambio de estado.",
@@ -2228,6 +2577,19 @@ const actualizarEstado = async (req, res) => {
     }
 
     await orden.update(payload);
+
+    if (estadoAnteriorOrden !== estado) {
+      await registrarEventoOrdenDesdeReq(req, {
+        ordenId: orden.id,
+        tipo_evento: "ESTADO_CAMBIADO",
+        categoria: "OPERACION",
+        titulo: "Estado actualizado",
+        descripcion: "Estado de orden actualizado.",
+        estado_anterior: estadoAnteriorOrden,
+        estado_nuevo: estado,
+        origen: "PATCH_ESTADO",
+      });
+    }
 
     res.json({
       mensaje: "Estado actualizado correctamente",
@@ -2271,6 +2633,8 @@ const registrarPago = async (req, res) => {
       });
     }
 
+    const estadoPagoAnterior = limpiarTexto(orden.estado_pago);
+
     await orden.update({
       estado_pago: "PAGADO",
       medio_pago: medioPago,
@@ -2280,6 +2644,20 @@ const registrarPago = async (req, res) => {
       observacion_pago:
         limpiarTexto(req.body.observacion_pago) ||
         `Pago confirmado por ${usuarioActual(req)}`,
+    });
+
+    await registrarEventoOrdenDesdeReq(req, {
+      ordenId: orden.id,
+      tipo_evento: "PAGO_CONFIRMADO",
+      categoria: "COMERCIAL",
+      titulo: "Pago confirmado",
+      descripcion: "Pago confirmado por usuario autorizado.",
+      estado_anterior: estadoPagoAnterior,
+      estado_nuevo: "PAGADO",
+      origen: "REGISTRAR_PAGO",
+      metadata: {
+        medio_pago: medioPago,
+      },
     });
 
     res.json({
@@ -2323,6 +2701,9 @@ const cobrarYEntregar = async (req, res) => {
       });
     }
 
+    const estadoAnteriorOrden = limpiarTexto(orden.estado);
+    const estadoPagoAnterior = limpiarTexto(orden.estado_pago);
+
     await orden.update({
       estado: "ENTREGADO",
       estado_pago: "PAGADO",
@@ -2338,6 +2719,31 @@ const cobrarYEntregar = async (req, res) => {
       observacion_cierre:
         limpiarTexto(req.body.observacion_cierre) ||
         `Orden cerrada comercialmente por ${usuarioActual(req)}`,
+    });
+
+    await registrarEventoOrdenDesdeReq(req, {
+      ordenId: orden.id,
+      tipo_evento: "PAGO_CONFIRMADO",
+      categoria: "COMERCIAL",
+      titulo: "Pago confirmado",
+      descripcion: "Pago confirmado por usuario autorizado.",
+      estado_anterior: estadoPagoAnterior,
+      estado_nuevo: "PAGADO",
+      origen: "COBRAR_ENTREGAR",
+      metadata: {
+        medio_pago: medioPago,
+      },
+    });
+
+    await registrarEventoOrdenDesdeReq(req, {
+      ordenId: orden.id,
+      tipo_evento: "ENTREGA_CONFIRMADA",
+      categoria: "COMERCIAL",
+      titulo: "Entrega confirmada",
+      descripcion: "Vehiculo/orden entregada por usuario autorizado.",
+      estado_anterior: estadoAnteriorOrden,
+      estado_nuevo: "ENTREGADO",
+      origen: "COBRAR_ENTREGAR",
     });
 
     res.json({
@@ -2357,6 +2763,7 @@ module.exports = {
   crearOrden,
   obtenerOrdenes,
   obtenerOrdenPorId,
+  obtenerEventosOrden,
   actualizarOrden,
   registrarAjusteComercial,
   obtenerItemsOrden,

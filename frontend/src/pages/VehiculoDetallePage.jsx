@@ -92,10 +92,12 @@ function VehiculoDetallePage() {
   const [materialesError, setMaterialesError] = useState("");
   const [comprobantesPago, setComprobantesPago] = useState([]);
   const [comprobantesError, setComprobantesError] = useState("");
+  const [eventosOrdenes, setEventosOrdenes] = useState({});
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
     let activo = true;
+    setEventosOrdenes({});
 
     const cargar = async () => {
       try {
@@ -156,6 +158,51 @@ function VehiculoDetallePage() {
       activo = false;
     };
   }, [id]);
+
+  const cargarEventosOrden = async (ordenId) => {
+    const key = String(ordenId || "");
+    if (!key) return;
+
+    const estadoActual = eventosOrdenes[key];
+    if (estadoActual?.cargando || estadoActual?.cargado) return;
+
+    setEventosOrdenes((actual) => ({
+      ...actual,
+      [key]: {
+        eventos: [],
+        cargando: true,
+        cargado: false,
+        error: "",
+      },
+    }));
+
+    try {
+      const respuesta = await api.get(`/ordenes/${ordenId}/eventos`);
+      const eventos = Array.isArray(respuesta.data?.eventos)
+        ? respuesta.data.eventos
+        : [];
+
+      setEventosOrdenes((actual) => ({
+        ...actual,
+        [key]: {
+          eventos,
+          cargando: false,
+          cargado: true,
+          error: "",
+        },
+      }));
+    } catch (error) {
+      setEventosOrdenes((actual) => ({
+        ...actual,
+        [key]: {
+          eventos: [],
+          cargando: false,
+          cargado: true,
+          error: "No se pudo cargar la bitacora operativa.",
+        },
+      }));
+    }
+  };
 
   useEffect(() => {
     if (cargando || !location.hash) return;
@@ -565,6 +612,12 @@ function VehiculoDetallePage() {
             const comprobantesOrden = comprobantesVehiculo.filter(
               (item) => String(item.ordenId || "") === String(orden.id)
             );
+            const eventosOrden = eventosOrdenes[String(orden.id)] || {
+              eventos: [],
+              cargando: false,
+              cargado: false,
+              error: "",
+            };
 
             return (
               <article
@@ -959,6 +1012,21 @@ function VehiculoDetallePage() {
                   </Panel>
                 )}
 
+                <details
+                  className="border-4 border-black bg-slate-950 text-white"
+                  onToggle={(event) => {
+                    if (event.currentTarget.open) {
+                      cargarEventosOrden(orden.id);
+                    }
+                  }}
+                >
+                  <summary className="cursor-pointer bg-slate-900 p-4 text-sm font-black uppercase tracking-wide">
+                    Bitacora operativa
+                  </summary>
+
+                  <BitacoraEventosOrden estado={eventosOrden} />
+                </details>
+
                 {diagnosticos.length > 0 && (
                   <Panel id="diagnosticos" title="Diagnosticos asociados">
                     <div className="space-y-3">
@@ -1130,6 +1198,118 @@ const Panel = ({ id, title, children }) => (
     <div className="space-y-2">{children}</div>
   </section>
 );
+
+const categoriaEventoClase = (categoria) => {
+  const valor = String(categoria || "").toUpperCase();
+  if (valor === "COMERCIAL") return "bg-emerald-500 text-black";
+  if (valor === "SERVICIO") return "bg-blue-500 text-white";
+  return "bg-yellow-400 text-black";
+};
+
+const formatearValorMetadata = (valor) => {
+  if (valor === true) return "Si";
+  if (valor === false) return "No";
+  if (valor === null || valor === undefined || valor === "") return "No registrado";
+  return String(valor);
+};
+
+const MetadataPublicaEvento = ({ metadata }) => {
+  const entradas = Object.entries(metadata || {}).filter(([, valor]) => valor !== undefined);
+  if (!entradas.length) return null;
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {entradas.map(([clave, valor]) => (
+        <span
+          key={clave}
+          className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-black uppercase text-slate-200"
+        >
+          {clave.replace(/_/g, " ")}: {formatearValorMetadata(valor)}
+        </span>
+      ))}
+    </div>
+  );
+};
+
+const BitacoraEventosOrden = ({ estado }) => {
+  const eventos = Array.isArray(estado?.eventos) ? estado.eventos : [];
+
+  if (estado?.cargando) {
+    return (
+      <div className="p-4 text-xs font-black uppercase text-slate-300">
+        Cargando bitacora operativa...
+      </div>
+    );
+  }
+
+  if (estado?.error) {
+    return (
+      <div className="m-4 border-2 border-red-500 bg-red-950 p-3 text-xs font-black uppercase text-red-100">
+        {estado.error}
+      </div>
+    );
+  }
+
+  if (!estado?.cargado) {
+    return (
+      <div className="p-4 text-xs font-bold uppercase text-slate-400">
+        Abre este bloque para cargar el historial automatico de eventos.
+      </div>
+    );
+  }
+
+  if (!eventos.length) {
+    return (
+      <div className="p-4 text-xs font-black uppercase text-slate-300">
+        Sin eventos registrados todavia.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 p-4">
+      {eventos.map((evento) => (
+        <div
+          key={evento.id}
+          className="border-l-4 border-blue-400 bg-white/10 p-4 text-white"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`px-3 py-1 text-[10px] font-black uppercase ${categoriaEventoClase(
+                evento.categoria
+              )}`}
+            >
+              {evento.categoria || "OPERACION"}
+            </span>
+            <span className="text-[10px] font-black uppercase text-slate-400">
+              {evento.tipo_evento || "EVENTO"}
+            </span>
+          </div>
+
+          <p className="mt-2 text-sm font-black uppercase">
+            {evento.titulo || "Evento operativo"}
+          </p>
+          <p className="mt-1 text-xs font-bold text-slate-300">
+            {evento.descripcion || "Sin descripcion registrada."}
+          </p>
+          <p className="mt-2 text-[10px] font-black uppercase text-slate-400">
+            {formatearFecha(evento.createdAt)} / {evento.usuario || "Sistema"} /{" "}
+            {evento.usuario_rol || "Sin rol"}
+          </p>
+
+          {(evento.estado_anterior || evento.estado_nuevo) && (
+            <p className="mt-2 text-[10px] font-black uppercase text-blue-200">
+              Estado: {evento.estado_anterior || "-"} {"->"}{" "}
+              {evento.estado_nuevo || "-"}
+            </p>
+          )}
+
+          <MetadataPublicaEvento metadata={evento.metadata_publica} />
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const QuickLink = ({ to, label }) => (
   <Link
