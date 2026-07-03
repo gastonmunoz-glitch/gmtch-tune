@@ -8,6 +8,7 @@ const {
   revisionFileService,
   revisionProcessGuard,
   revisarProcessGuard,
+  cumplimientoOperativo,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,
@@ -28,6 +29,11 @@ const rolesOperativos = [
 ];
 
 router.get("/revision-operativa", permitirRoles(...rolesOperativos), revisionOperativa);
+router.get(
+  "/cumplimiento-operativo",
+  permitirRoles("OWNER", "ADMIN", "SUPERVISOR"),
+  cumplimientoOperativo
+);
 router.post("/reporte-apertura", permitirRoles("OWNER", "ADMIN"), reporteApertura);
 router.post("/reporte-cierre", permitirRoles("OWNER", "ADMIN"), reporteCierre);
 router.get(

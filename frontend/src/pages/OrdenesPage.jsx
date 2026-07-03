@@ -1277,6 +1277,10 @@ function OrdenesPage() {
               o.OrdenServicioItems,
               o.ItemsServicio
             );
+            const fotosOrden = normalizarLista(
+              o.FotoVehiculos,
+              o.FotosVehiculo
+            );
             const materialesOrden = normalizarLista(
               o.MaterialRecuperados,
               o.MaterialRecuperado
@@ -1285,6 +1289,22 @@ function OrdenesPage() {
               itemsOrden,
               materialesOrden
             );
+            const tieneFeedbackOperativo = Boolean(
+              o.feedback_por ||
+                o.feedback_at ||
+                o.feedback_operario ||
+                o.detalle_pendiente ||
+                o.recomendacion_futura
+            );
+            const badgesCumplimiento = [
+              fotosOrden.length === 0 ? "Sin fotos" : null,
+              itemsOrden.length === 0 ? "Sin items" : null,
+              itemsPendientesMaterial.length > 0 ? "Material pendiente" : null,
+              !tieneFeedbackOperativo ? "Sin feedback" : null,
+              o.origen_recepcion === "RECEPCION_EMERGENCIA_OPERADOR"
+                ? "Recepcion emergencia"
+                : null,
+            ].filter(Boolean);
             const itemNuevo = itemNuevoActual(o);
             const ajuste = ajusteActual(o);
             const materialForm = materialActual(o);
@@ -1352,6 +1372,15 @@ function OrdenesPage() {
                             No cuenta en estadísticas
                           </span>
                         )}
+
+                        {badgesCumplimiento.map((badge) => (
+                          <span
+                            key={`${o.id}-${badge}`}
+                            className="bg-amber-100 text-amber-900 border-2 border-amber-500 px-3 py-1 text-[10px] font-black uppercase"
+                          >
+                            {badge}
+                          </span>
+                        ))}
 
                         {procesosSinCierre.length > 0 && (
                           <span

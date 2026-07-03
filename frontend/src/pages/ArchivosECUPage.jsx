@@ -1719,6 +1719,25 @@ export default function ArchivosECUPage() {
               const guardCritico = ["CRITICO", "ESCALADO"].includes(
                 String(guardEstado || "").toUpperCase()
               );
+              const estadoArchivo = String(archivo.estado || "").toUpperCase();
+              const archivoActivo =
+                !archivo.archivado &&
+                !["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(
+                  estadoArchivo
+                );
+              const activoMas24h =
+                archivoActivo && minutosDesde(archivo.createdAt) > 1440;
+              const badgesCumplimiento = [
+                archivoActivo &&
+                archivo.archivo_modificado &&
+                archivo.post_escritura_estado !== "OK"
+                  ? "Sin post escritura OK"
+                  : null,
+                !archivo.correccion_pendiente && estadoArchivo === "REQUIERE_CORRECCION"
+                  ? "Correccion pendiente"
+                  : null,
+                activoMas24h ? "Activo mas de 24h" : null,
+              ].filter(Boolean);
 
               return (
                 <article
@@ -1753,6 +1772,15 @@ export default function ArchivosECUPage() {
                             Corrección pendiente
                           </span>
                         )}
+
+                        {badgesCumplimiento.map((badge) => (
+                          <span
+                            key={`${archivo.id}-${badge}`}
+                            className="text-xs px-3 py-1 rounded-full border bg-amber-500/15 text-amber-200 border-amber-500/40"
+                          >
+                            {badge}
+                          </span>
+                        ))}
                       </div>
 
                       <p className="text-slate-200">{textoCliente}</p>

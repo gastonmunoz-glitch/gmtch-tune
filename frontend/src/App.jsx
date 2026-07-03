@@ -1920,6 +1920,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const mostrarChecklistLunes = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
     rol
   );
+  const mostrarCumplimientoOperativo = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
+    rol
+  );
   const puedeGenerarReportesAutomatizacion = ["OWNER", "ADMIN"].includes(
     rol
   );
@@ -1995,6 +1998,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const [bitacoraOperativa, setBitacoraOperativa] = useState({
     items: [],
     puedeResolver: false,
+    error: "",
+  });
+  const [cumplimientoOperativo, setCumplimientoOperativo] = useState({
+    data: null,
     error: "",
   });
   const [agentesIA, setAgentesIA] = useState({
@@ -3343,6 +3350,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         mostrarCRM
           ? api.get("/leads/resumen")
           : Promise.resolve({ data: null }),
+        mostrarCumplimientoOperativo
+          ? api.get("/automatizaciones/cumplimiento-operativo")
+          : Promise.resolve({ data: null }),
       ]);
 
       const [
@@ -3353,6 +3363,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         bitacoraRes,
         finanzasRes,
         leadsRes,
+        cumplimientoRes,
       ] =
         respuestas;
 
@@ -3370,6 +3381,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         finanzasRes.status === "fulfilled" ? finanzasRes.value?.data || null : null;
       const leadsResumen =
         leadsRes.status === "fulfilled" ? leadsRes.value?.data || null : null;
+      const cumplimientoData =
+        cumplimientoRes.status === "fulfilled"
+          ? cumplimientoRes.value?.data || null
+          : null;
       const ordenesDashboard = filtrarOrdenesPorRol(ordenes);
       const archivosDashboard = filtrarArchivosPorRol(archivos);
 
@@ -3383,6 +3398,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           bitacoraRes.status === "fulfilled"
             ? ""
             : "No se pudo cargar la bitacora operativa",
+      });
+
+      setCumplimientoOperativo({
+        data: cumplimientoData,
+        error:
+          mostrarCumplimientoOperativo && cumplimientoRes.status !== "fulfilled"
+            ? "No se pudo cargar cumplimiento operativo."
+            : "",
       });
 
       const dashboardCalculado = calcularDashboard(
@@ -3533,6 +3556,13 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       />
 
       <SemaforoOperativo semaforo={stats.semaforoOperativo} />
+
+      {mostrarCumplimientoOperativo && (
+        <CumplimientoOperativoSection
+          data={cumplimientoOperativo.data}
+          error={cumplimientoOperativo.error}
+        />
+      )}
 
       {mostrarCRM && <CRMComercialDashboardSection leads={stats.leads} />}
 
@@ -3698,6 +3728,131 @@ const EstadoPlataformaDashboard = ({
           <p className="mt-1 text-[10px] font-bold uppercase text-slate-400">
             {perfil.operacion}
           </p>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+const CumplimientoOperativoSection = ({ data, error }) => {
+  const resumen = data?.resumen || {};
+  const usuarios = Array.isArray(data?.usuarios) ? data.usuarios.slice(0, 6) : [];
+  const alertas = Array.isArray(data?.alertas) ? data.alertas.slice(0, 5) : [];
+  const tarjetas = [
+    ["Ordenes sin fotos", resumen.ordenes_sin_fotos, "border-red-500"],
+    ["Ordenes sin items", resumen.ordenes_sin_items, "border-amber-500"],
+    ["Sin feedback", resumen.ordenes_sin_feedback, "border-yellow-500"],
+    ["Material pendiente", resumen.items_material_pendiente, "border-orange-500"],
+    ["FS sin post escritura", resumen.file_service_sin_post_escritura, "border-blue-500"],
+    ["Correcciones pendientes", resumen.file_service_correccion_pendiente, "border-red-700"],
+    ["Recepciones emergencia", resumen.ordenes_emergencia_operador, "border-purple-500"],
+  ];
+
+  return (
+    <section className="rounded-3xl border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-700">
+            Cumplimiento operativo
+          </p>
+          <h2 className="mt-1 text-2xl font-black uppercase text-black">
+            Panel de pendientes operativos
+          </h2>
+          <p className="mt-2 text-xs font-bold uppercase text-gray-500">
+            V1 mide trabajos incompletos para ordenar la operacion. No es ranking, bono ni sancion.
+          </p>
+        </div>
+        <p className="text-[10px] font-black uppercase text-gray-400">
+          Generado: {data?.generado_at ? formatoFechaCorta(data.generado_at) : "Pendiente"}
+        </p>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-50 p-3 text-xs font-black uppercase text-red-800">
+          {error}
+        </div>
+      )}
+
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
+        {tarjetas.map(([label, valor, color]) => (
+          <div key={label} className={`rounded-2xl border-4 ${color} bg-slate-50 p-4`}>
+            <p className="text-[10px] font-black uppercase text-gray-500">{label}</p>
+            <p className="mt-2 text-3xl font-black text-black">
+              {numeroDashboard(valor)}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="rounded-2xl border-4 border-slate-900 bg-slate-950 p-4 text-white">
+          <h3 className="text-sm font-black uppercase text-blue-300">
+            Pendientes por usuario
+          </h3>
+          <div className="mt-3 space-y-2">
+            {usuarios.length === 0 ? (
+              <p className="text-xs font-bold uppercase text-slate-400">
+                Sin pendientes asociados.
+              </p>
+            ) : (
+              usuarios.map((usuario) => {
+                const total =
+                  numeroDashboard(usuario.ordenes_pendientes) +
+                  numeroDashboard(usuario.file_service_pendientes) +
+                  numeroDashboard(usuario.material_pendiente) +
+                  numeroDashboard(usuario.cobros_pendientes_asociados);
+
+                return (
+                  <div
+                    key={usuario.username}
+                    className="rounded-xl border border-white/10 bg-white/10 p-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-black uppercase">
+                        {usuario.username}
+                      </p>
+                      <span className="rounded-full bg-blue-500 px-3 py-1 text-[10px] font-black uppercase">
+                        {total} pendiente(s)
+                      </span>
+                    </div>
+                    <p className="mt-2 text-[10px] font-bold uppercase text-slate-300">
+                      Ordenes: {numeroDashboard(usuario.ordenes_pendientes)} · FS:{" "}
+                      {numeroDashboard(usuario.file_service_pendientes)} · Material:{" "}
+                      {numeroDashboard(usuario.material_pendiente)} · Cobros:{" "}
+                      {numeroDashboard(usuario.cobros_pendientes_asociados)}
+                    </p>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border-4 border-black bg-amber-50 p-4">
+          <h3 className="text-sm font-black uppercase text-amber-900">
+            Alertas de cumplimiento
+          </h3>
+          <div className="mt-3 space-y-2">
+            {alertas.length === 0 ? (
+              <p className="text-xs font-black uppercase text-amber-800">
+                Sin alertas de cumplimiento operativo.
+              </p>
+            ) : (
+              alertas.map((alerta) => (
+                <div key={`${alerta.tipo}-${alerta.titulo}`} className="rounded-xl border-2 border-black bg-white p-3">
+                  <p className="text-[10px] font-black uppercase text-gray-500">
+                    {alerta.tipo}
+                  </p>
+                  <p className="text-xs font-black uppercase text-black">
+                    {alerta.titulo}
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-gray-600">
+                    {alerta.mensaje}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </section>
