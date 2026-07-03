@@ -385,11 +385,19 @@ const armarVehiculoDesdeRows = (rows = []) => {
       kilometraje: row.orden_kilometraje,
       motivo_ingreso: row.orden_motivo_ingreso,
       monto_total: row.orden_monto_total,
+      monto_original: row.orden_monto_original,
+      monto_final: row.orden_monto_final ?? row.orden_monto_total,
+      motivo_ajuste: row.orden_motivo_ajuste,
+      ajustado_por: row.orden_ajustado_por,
+      ajustado_at: row.orden_ajustado_at,
+      historial_ajustes: row.orden_historial_ajustes || [],
       createdAt: row.orden_createdAt,
       updatedAt: row.orden_updatedAt,
       Diagnosticos: [],
       ArchivoECUs: [],
       FotoVehiculos: [],
+      OrdenServicioItems: [],
+      MaterialRecuperados: [],
     }));
 
   return {
@@ -454,6 +462,12 @@ const queryVehiculoDetalleSQL = `
     o."kilometraje" AS "orden_kilometraje",
     o."motivo_ingreso" AS "orden_motivo_ingreso",
     o."monto_total" AS "orden_monto_total",
+    o."monto_original" AS "orden_monto_original",
+    o."monto_final" AS "orden_monto_final",
+    o."motivo_ajuste" AS "orden_motivo_ajuste",
+    o."ajustado_por" AS "orden_ajustado_por",
+    o."ajustado_at" AS "orden_ajustado_at",
+    o."historial_ajustes" AS "orden_historial_ajustes",
     o."createdAt" AS "orden_createdAt",
     o."updatedAt" AS "orden_updatedAt"
 
@@ -860,7 +874,8 @@ app.get(
         }
       };
 
-      const [diagnosticos, fotos, archivosECU] = await Promise.all([
+      const [diagnosticos, fotos, archivosECU, servicioItems, materiales] =
+        await Promise.all([
         consultarRelacion(
           "diagnósticos",
           `
@@ -888,17 +903,39 @@ app.get(
           ORDER BY "createdAt" DESC NULLS LAST;
           `
         ),
+        consultarRelacion(
+          "items de servicio",
+          `
+          SELECT *
+          FROM "orden_servicio_items"
+          WHERE "ordenId" IN (:ordenIds)
+          ORDER BY "id" ASC;
+          `
+        ),
+        consultarRelacion(
+          "material recuperado",
+          `
+          SELECT *
+          FROM "materiales_recuperados"
+          WHERE "ordenId" IN (:ordenIds)
+          ORDER BY "createdAt" DESC NULLS LAST;
+          `
+        ),
       ]);
 
       const diagnosticosPorOrden = agruparPorOrden(diagnosticos);
       const fotosPorOrden = agruparPorOrden(fotos);
       const archivosPorOrden = agruparPorOrden(archivosECU);
+      const itemsPorOrden = agruparPorOrden(servicioItems);
+      const materialPorOrden = agruparPorOrden(materiales);
 
       const ordenes = ordenesRows.map((orden) => {
         const key = String(orden.id);
         const diagnosticosOrden = diagnosticosPorOrden[key] || [];
         const fotosOrden = fotosPorOrden[key] || [];
         const archivosOrden = archivosPorOrden[key] || [];
+        const itemsOrden = itemsPorOrden[key] || [];
+        const materialOrden = materialPorOrden[key] || [];
 
         return {
           id: orden.id,
@@ -919,6 +956,12 @@ app.get(
           kilometraje: orden.kilometraje,
           motivo_ingreso: orden.motivo_ingreso,
           monto_total: orden.monto_total,
+          monto_original: orden.monto_original,
+          monto_final: orden.monto_final ?? orden.monto_total,
+          motivo_ajuste: orden.motivo_ajuste,
+          ajustado_por: orden.ajustado_por,
+          ajustado_at: orden.ajustado_at,
+          historial_ajustes: orden.historial_ajustes || [],
           createdAt: orden.createdAt,
           updatedAt: orden.updatedAt,
           Diagnosticos: diagnosticosOrden,
@@ -926,11 +969,16 @@ app.get(
           ArchivosECU: archivosOrden,
           FotoVehiculos: fotosOrden,
           FotosVehiculo: fotosOrden,
+          OrdenServicioItems: itemsOrden,
+          ItemsServicio: itemsOrden,
+          MaterialRecuperados: materialOrden,
+          MaterialRecuperado: materialOrden,
         };
       });
 
       const totalFacturado = ordenes.reduce(
-        (acc, orden) => acc + Number(orden.monto_total || 0),
+        (acc, orden) =>
+          acc + Number(orden.monto_final ?? orden.monto_total ?? 0),
         0
       );
 
@@ -1228,7 +1276,7 @@ app.use(
       "MECANICO",
       "TUNER",
     ],
-    POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
+    POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION", "MECANICO"],
     PUT: [
       "OWNER",
       "ADMIN",
@@ -1247,7 +1295,7 @@ app.use(
       "OPERADOR_ECU",
       "MECANICO",
     ],
-    DELETE: ["OWNER"],
+    DELETE: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
   }),
   ordenTrabajoRoutes
 );
@@ -1641,6 +1689,27 @@ const prepararBaseDatos = async () => {
           ADD COLUMN IF NOT EXISTS "monto_pagado" DECIMAL(10, 2) DEFAULT 0;
 
           ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "monto_total" DECIMAL(10, 2) DEFAULT 0;
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "monto_original" DECIMAL(10, 2);
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "monto_final" DECIMAL(10, 2);
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "motivo_ajuste" TEXT;
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "ajustado_por" VARCHAR(100);
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "ajustado_at" TIMESTAMP WITH TIME ZONE;
+
+          ALTER TABLE "ordenes_trabajo"
+          ADD COLUMN IF NOT EXISTS "historial_ajustes" JSONB DEFAULT '[]'::jsonb;
+
+          ALTER TABLE "ordenes_trabajo"
           ADD COLUMN IF NOT EXISTS "fecha_pago" TIMESTAMP WITH TIME ZONE;
 
           ALTER TABLE "ordenes_trabajo"
@@ -1657,6 +1726,14 @@ const prepararBaseDatos = async () => {
           UPDATE "ordenes_trabajo"
           SET "monto_pagado" = 0
           WHERE "monto_pagado" IS NULL;
+
+          UPDATE "ordenes_trabajo"
+          SET "monto_final" = COALESCE("monto_final", "monto_total", 0)
+          WHERE "monto_final" IS NULL;
+
+          UPDATE "ordenes_trabajo"
+          SET "historial_ajustes" = '[]'::jsonb
+          WHERE "historial_ajustes" IS NULL;
 
         END IF;
 

@@ -1,4 +1,4 @@
-const { QueryTypes } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
 const {
   OrdenTrabajo,
@@ -7,6 +7,8 @@ const {
   Diagnostico,
   ArchivoECU,
   FotoVehiculo,
+  OrdenServicioItem,
+  MaterialRecuperado,
 } = require("../models");
 const {
   crearNotificacionesInternas,
@@ -36,6 +38,26 @@ const normalizarNumero = (valor, defecto = 0) => {
   if (Number.isNaN(numero)) return defecto;
   return numero;
 };
+
+const normalizarDecimal = (valor, defecto = 0) => {
+  const numero = normalizarNumero(valor, defecto);
+  return Number(numero.toFixed(2));
+};
+
+const normalizarDecimal3 = (valor, defecto = 0) => {
+  const numero = normalizarNumero(valor, defecto);
+  return Number(numero.toFixed(3));
+};
+
+const rolActual = (req) =>
+  String(req.usuario?.rol || req.user?.rol || "").trim().toUpperCase();
+
+const tieneRol = (req, roles = []) => roles.includes(rolActual(req));
+
+const enviarErrorPermiso = (res) =>
+  res.status(403).json({
+    error: "No tienes permisos para esta accion",
+  });
 
 const normalizarBoolean = (valor) => {
   if (valor === true || valor === false) return valor;
@@ -175,6 +197,50 @@ const parseJsonSeguro = (valor, defecto = []) => {
   }
 };
 
+const ESTADOS_ITEM_SERVICIO = ["PENDIENTE", "EN_PROCESO", "LISTO", "ANULADO"];
+
+const CATEGORIAS_ITEM_SERVICIO = [
+  "DIAGNOSTICO",
+  "MECANICA",
+  "MANTENIMIENTO",
+  "ECU_TCU",
+  "FILE_SERVICE",
+  "DPF_FAP",
+  "ELECTRONICA",
+  "OTRO",
+];
+
+const ROLES_AJUSTE_COMERCIAL = ["OWNER", "ADMIN"];
+const ROLES_CREAR_ORDEN = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"];
+const ROLES_CIERRE_COMERCIAL = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"];
+const ROLES_GESTION_ITEMS = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"];
+const ROLES_MATERIAL_RECUPERADO = [
+  "OWNER",
+  "ADMIN",
+  "SUPERVISOR",
+  "RECEPCION",
+  "MECANICO",
+];
+
+const normalizarEstadoItem = (valor) => {
+  const estado = limpiarTexto(valor || "PENDIENTE").toUpperCase();
+  return ESTADOS_ITEM_SERVICIO.includes(estado) ? estado : "PENDIENTE";
+};
+
+const normalizarCategoriaItem = (valor) => {
+  const categoria = limpiarTexto(valor || "OTRO").toUpperCase();
+  return CATEGORIAS_ITEM_SERVICIO.includes(categoria) ? categoria : "OTRO";
+};
+
+const calcularSubtotalItem = (cantidad, precioUnitario) =>
+  normalizarDecimal(
+    normalizarDecimal(cantidad, 1) * normalizarDecimal(precioUnitario, 0),
+    0
+  );
+
+const montoComercialOrden = (orden) =>
+  normalizarDecimal(orden?.monto_final ?? orden?.monto_total ?? 0, 0);
+
 const prepararColumnas = async () => {
   if (columnasPreparadas) return;
 
@@ -211,6 +277,32 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "monto_total" NUMERIC(10,2) DEFAULT 0;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "monto_original" NUMERIC(10,2);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "monto_final" NUMERIC(10,2);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "motivo_ajuste" TEXT;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "ajustado_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "ajustado_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "historial_ajustes" JSONB DEFAULT '[]'::jsonb;
+
+    UPDATE "ordenes_trabajo"
+    SET "historial_ajustes" = '[]'::jsonb
+    WHERE "historial_ajustes" IS NULL;
+
+    UPDATE "ordenes_trabajo"
+    SET "monto_final" = COALESCE("monto_final", "monto_total", 0)
+    WHERE "monto_final" IS NULL;
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "excluir_estadisticas" BOOLEAN DEFAULT false;
@@ -390,6 +482,87 @@ const prepararColumnas = async () => {
     ADD COLUMN IF NOT EXISTS "archivada_at" TIMESTAMP WITH TIME ZONE;
   `);
 
+  await OrdenServicioItem.sync();
+  await MaterialRecuperado.sync();
+
+  await sequelize.query(`
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "ordenId" INTEGER;
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "tipo_servicio" VARCHAR(120) NOT NULL DEFAULT 'Otro';
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "categoria" VARCHAR(60) DEFAULT 'OTRO';
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "descripcion" TEXT;
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "cantidad" NUMERIC(10,2) DEFAULT 1;
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "precio_unitario" NUMERIC(10,2) DEFAULT 0;
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "subtotal" NUMERIC(10,2) DEFAULT 0;
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "responsable" VARCHAR(100);
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "estado" VARCHAR(30) DEFAULT 'PENDIENTE';
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "requiere_material_recuperado" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "material_recuperado_obligatorio" BOOLEAN DEFAULT false;
+
+    ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "observaciones" TEXT;
+
+    UPDATE "orden_servicio_items"
+    SET
+      "categoria" = COALESCE(NULLIF(TRIM("categoria"), ''), 'OTRO'),
+      "estado" = COALESCE(NULLIF(TRIM("estado"), ''), 'PENDIENTE'),
+      "cantidad" = COALESCE("cantidad", 1),
+      "precio_unitario" = COALESCE("precio_unitario", 0),
+      "subtotal" = COALESCE("subtotal", COALESCE("cantidad", 1) * COALESCE("precio_unitario", 0)),
+      "requiere_material_recuperado" = COALESCE("requiere_material_recuperado", false),
+      "material_recuperado_obligatorio" = COALESCE("material_recuperado_obligatorio", false);
+
+    ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "itemId" INTEGER;
+
+    ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "peso_kg" NUMERIC(10,3) DEFAULT 0;
+
+    ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "foto" VARCHAR(255);
+
+    ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "responsable" VARCHAR(100);
+
+    ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "destino" VARCHAR(120);
+
+    ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "motivo_excepcion_material" TEXT;
+
+    ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "registrado_por" VARCHAR(100);
+
+    ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "registrado_at" TIMESTAMP WITH TIME ZONE;
+
+    UPDATE "materiales_recuperados"
+    SET
+      "peso_kg" = COALESCE("peso_kg", "kilos", 0),
+      "registrado_por" = COALESCE("registrado_por", "creado_por"),
+      "registrado_at" = COALESCE("registrado_at", "createdAt");
+  `);
+
   columnasPreparadas = true;
 };
 
@@ -455,6 +628,109 @@ const obtenerFotosOrden = async (ordenId) => {
   }
 };
 
+const obtenerItemsOrdenInterno = async (ordenId) => {
+  try {
+    return await OrdenServicioItem.findAll({
+      where: { ordenId },
+      order: [["id", "ASC"]],
+    });
+  } catch (error) {
+    console.warn("No se pudieron cargar items de servicio:", error.message);
+    return [];
+  }
+};
+
+const obtenerMaterialOrdenInterno = async (ordenId) => {
+  try {
+    return await MaterialRecuperado.findAll({
+      where: { ordenId },
+      order: [["createdAt", "DESC"]],
+    });
+  } catch (error) {
+    console.warn("No se pudo cargar material recuperado:", error.message);
+    return [];
+  }
+};
+
+const materialCumpleRegistro = (material) => {
+  if (!material) return false;
+  const peso = normalizarDecimal3(material.peso_kg ?? material.kilos, 0);
+  const excepcion = limpiarTexto(material.motivo_excepcion_material);
+  return peso > 0 || Boolean(excepcion);
+};
+
+const validarMaterialObligatorioOrden = async (ordenId) => {
+  const items = await OrdenServicioItem.findAll({
+    where: {
+      ordenId,
+      estado: { [Op.ne]: "ANULADO" },
+      material_recuperado_obligatorio: true,
+    },
+    order: [["id", "ASC"]],
+  });
+
+  if (!items.length) return;
+
+  const materiales = await MaterialRecuperado.findAll({
+    where: { ordenId },
+  });
+
+  const pendientes = items.filter((item) => {
+    const materialItem = materiales.find(
+      (material) => Number(material.itemId) === Number(item.id)
+    );
+    const materialOrden = materiales.find(
+      (material) => !material.itemId || Number(material.itemId) === 0
+    );
+
+    return (
+      !materialCumpleRegistro(materialItem) &&
+      !materialCumpleRegistro(materialOrden)
+    );
+  });
+
+  if (pendientes.length) {
+    const error = new Error(
+      "Esta orden tiene material recuperado pendiente. Registra peso o motivo de excepcion antes de cerrar tecnico."
+    );
+    error.statusCode = 400;
+    error.itemsPendientes = pendientes.map((item) => ({
+      id: item.id,
+      tipo_servicio: item.tipo_servicio,
+    }));
+    throw error;
+  }
+};
+
+const recalcularMontoOrdenPorItems = async (ordenId) => {
+  const itemsActivos = await OrdenServicioItem.findAll({
+    where: {
+      ordenId,
+      estado: { [Op.ne]: "ANULADO" },
+    },
+  });
+
+  const total = itemsActivos.reduce(
+    (acc, item) => acc + normalizarDecimal(item.subtotal, 0),
+    0
+  );
+  const orden = await OrdenTrabajo.findByPk(ordenId);
+
+  if (!orden) return null;
+
+  const montoActual = normalizarDecimal(orden.monto_total, 0);
+  const montoOriginal =
+    orden.monto_original ?? (montoActual > 0 ? montoActual : total);
+
+  await orden.update({
+    monto_original: montoOriginal,
+    monto_total: total,
+    monto_final: total,
+  });
+
+  return await OrdenTrabajo.findByPk(ordenId);
+};
+
 const mapearOrdenRow = async (row, incluirDetalle = true) => {
   const orden = {
     id: row.id,
@@ -472,6 +748,12 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     kilometraje: row.kilometraje,
     motivo_ingreso: row.motivo_ingreso,
     monto_total: row.monto_total,
+    monto_original: row.monto_original,
+    monto_final: row.monto_final ?? row.monto_total,
+    motivo_ajuste: row.motivo_ajuste,
+    ajustado_por: row.ajustado_por,
+    ajustado_at: row.ajustado_at,
+    historial_ajustes: parseJsonSeguro(row.historial_ajustes, []),
     excluir_estadisticas: row.excluir_estadisticas,
     feedback_operario: row.feedback_operario,
     detalle_pendiente: row.detalle_pendiente,
@@ -557,10 +839,13 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
   };
 
   if (incluirDetalle) {
-    const [diagnosticos, archivosECU, fotos] = await Promise.all([
+    const [diagnosticos, archivosECU, fotos, items, materialRecuperado] =
+      await Promise.all([
       obtenerDiagnosticosOrden(row.id),
       obtenerArchivosOrden(row.id),
       obtenerFotosOrden(row.id),
+      obtenerItemsOrdenInterno(row.id),
+      obtenerMaterialOrdenInterno(row.id),
     ]);
 
     orden.Diagnosticos = diagnosticos;
@@ -568,6 +853,10 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     orden.ArchivosECU = archivosECU;
     orden.FotoVehiculos = fotos;
     orden.FotosVehiculo = fotos;
+    orden.OrdenServicioItems = items;
+    orden.ItemsServicio = items;
+    orden.MaterialRecuperados = materialRecuperado;
+    orden.MaterialRecuperado = materialRecuperado;
   }
 
   return orden;
@@ -654,6 +943,10 @@ const crearOrden = async (req, res) => {
   try {
     await prepararColumnas();
 
+    if (!tieneRol(req, ROLES_CREAR_ORDEN)) {
+      return enviarErrorPermiso(res);
+    }
+
     const vehiculoId = Number(req.body.vehiculoId || req.body.vehiculo_id);
 
     if (!vehiculoId || Number.isNaN(vehiculoId)) {
@@ -673,6 +966,7 @@ const crearOrden = async (req, res) => {
     const prioridadExplicita = limpiarTexto(req.body.prioridad);
     const prioridadFinal =
       prioridadExplicita || (await obtenerPrioridadSugeridaPorVehiculo(vehiculoId));
+    const montoInicial = normalizarDecimal(req.body.monto_total, 0);
 
     const nuevaOrden = await OrdenTrabajo.create({
       vehiculoId,
@@ -683,7 +977,9 @@ const crearOrden = async (req, res) => {
       monto_pagado: normalizarNumero(req.body.monto_pagado, 0),
       kilometraje: req.body.kilometraje ? Number(req.body.kilometraje) : null,
       motivo_ingreso: limpiarTexto(req.body.motivo_ingreso),
-      monto_total: normalizarNumero(req.body.monto_total, 0),
+      monto_total: montoInicial,
+      monto_original: montoInicial,
+      monto_final: montoInicial,
       excluir_estadisticas: normalizarBoolean(req.body.excluir_estadisticas),
       intervencion_fisica_tipo: normalizarTipoIntervencionFisica(
         req.body.intervencion_fisica_tipo
@@ -871,8 +1167,24 @@ const actualizarOrden = async (req, res) => {
       payload.kilometraje = req.body.kilometraje ? Number(req.body.kilometraje) : null;
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body, "monto_total")) {
-      payload.monto_total = normalizarNumero(req.body.monto_total, 0);
+    const intentoEditarMonto =
+      Object.prototype.hasOwnProperty.call(req.body, "monto_total") ||
+      Object.prototype.hasOwnProperty.call(req.body, "monto_final") ||
+      Object.prototype.hasOwnProperty.call(req.body, "monto_original");
+
+    if (intentoEditarMonto) {
+      const nuevoMonto = normalizarDecimal(
+        req.body.monto_final ?? req.body.monto_total ?? orden.monto_total,
+        0
+      );
+      const montoActual = montoComercialOrden(orden);
+
+      if (nuevoMonto !== montoActual) {
+        return res.status(400).json({
+          error:
+            "Para modificar el monto de una orden usa /ordenes/:id/ajuste-comercial e indica motivo_ajuste.",
+        });
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "monto_pagado")) {
@@ -894,7 +1206,7 @@ const actualizarOrden = async (req, res) => {
       }
 
       if (!payload.monto_pagado || Number(payload.monto_pagado) <= 0) {
-        payload.monto_pagado = normalizarNumero(req.body.monto_total || orden.monto_total, 0);
+        payload.monto_pagado = montoComercialOrden(orden);
       }
     }
 
@@ -908,6 +1220,7 @@ const actualizarOrden = async (req, res) => {
     }
 
     if (payload.estado === "LISTO_PARA_ENTREGA") {
+      await validarMaterialObligatorioOrden(orden.id);
       payload.tecnico_finalizado_at = orden.tecnico_finalizado_at || new Date();
       payload.tecnico_finalizado_por =
         orden.tecnico_finalizado_por || usuarioActual(req);
@@ -975,6 +1288,554 @@ const actualizarOrden = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR ACTUALIZANDO ORDEN:", error);
+
+    res.status(error.statusCode || 500).json({
+      error: error.message,
+      itemsPendientes: error.itemsPendientes || undefined,
+    });
+  }
+};
+
+const registrarAjusteComercial = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    if (!tieneRol(req, ROLES_AJUSTE_COMERCIAL)) {
+      return enviarErrorPermiso(res);
+    }
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    if (orden.archivada) {
+      return res.status(400).json({
+        error: "No puedes ajustar una orden archivada",
+      });
+    }
+
+    const montoFinal = normalizarDecimal(req.body.monto_final, NaN);
+    const motivoAjuste = limpiarTexto(req.body.motivo_ajuste);
+
+    if (!Number.isFinite(montoFinal) || montoFinal < 0) {
+      return res.status(400).json({
+        error: "Debes indicar un monto_final valido",
+      });
+    }
+
+    if (!motivoAjuste) {
+      return res.status(400).json({
+        error: "Debes indicar motivo_ajuste para modificar el monto",
+      });
+    }
+
+    const usuario = usuarioActual(req);
+    const ahora = new Date();
+    const montoAnterior = montoComercialOrden(orden);
+    const historialActual = parseJsonSeguro(
+      orden.getDataValue("historial_ajustes"),
+      []
+    );
+    const evento = {
+      tipo: "AJUSTE_COMERCIAL",
+      monto_anterior: montoAnterior,
+      monto_final: montoFinal,
+      motivo_ajuste: motivoAjuste,
+      ajustado_por: usuario,
+      fecha: ahora.toISOString(),
+      estado_pago: orden.estado_pago,
+      monto_pagado: normalizarDecimal(orden.monto_pagado, 0),
+    };
+    const montoOriginal =
+      orden.monto_original ?? normalizarDecimal(orden.monto_total, montoAnterior);
+
+    await orden.update({
+      monto_original: montoOriginal,
+      monto_final: montoFinal,
+      monto_total: montoFinal,
+      motivo_ajuste: motivoAjuste,
+      ajustado_por: usuario,
+      ajustado_at: ahora,
+      historial_ajustes: [...historialActual, evento],
+    });
+
+    const ordenActualizada = await OrdenTrabajo.findByPk(orden.id);
+
+    res.json({
+      mensaje: "Ajuste comercial registrado correctamente",
+      orden: ordenActualizada,
+      ajuste: evento,
+    });
+  } catch (error) {
+    console.error("ERROR REGISTRANDO AJUSTE COMERCIAL:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const obtenerItemsOrden = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    const items = await obtenerItemsOrdenInterno(orden.id);
+
+    res.json(items);
+  } catch (error) {
+    console.error("ERROR OBTENIENDO ITEMS DE ORDEN:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const crearItemOrden = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    if (!tieneRol(req, ROLES_GESTION_ITEMS)) {
+      return enviarErrorPermiso(res);
+    }
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    if (orden.archivada) {
+      return res.status(400).json({
+        error: "No puedes agregar items a una orden archivada",
+      });
+    }
+
+    if (orden.estado_pago === "PAGADO" || orden.estado === "ENTREGADO") {
+      return res.status(400).json({
+        error:
+          "La orden ya esta pagada o entregada. Usa ajuste comercial para corregir montos.",
+      });
+    }
+
+    const tipoServicio = limpiarTexto(req.body.tipo_servicio);
+
+    if (!tipoServicio) {
+      return res.status(400).json({
+        error: "Debes indicar tipo_servicio",
+      });
+    }
+
+    const cantidad = Math.max(normalizarDecimal(req.body.cantidad, 1), 0);
+    const precioUnitario = Math.max(
+      normalizarDecimal(req.body.precio_unitario, 0),
+      0
+    );
+    const subtotal = calcularSubtotalItem(cantidad, precioUnitario);
+
+    const item = await OrdenServicioItem.create({
+      ordenId: orden.id,
+      tipo_servicio: tipoServicio,
+      categoria: normalizarCategoriaItem(req.body.categoria),
+      descripcion: limpiarTexto(req.body.descripcion),
+      cantidad,
+      precio_unitario: precioUnitario,
+      subtotal,
+      responsable: limpiarTexto(req.body.responsable),
+      estado: normalizarEstadoItem(req.body.estado),
+      requiere_material_recuperado: normalizarBoolean(
+        req.body.requiere_material_recuperado
+      ),
+      material_recuperado_obligatorio: normalizarBoolean(
+        req.body.material_recuperado_obligatorio
+      ),
+      observaciones: limpiarTexto(req.body.observaciones),
+    });
+
+    const ordenActualizada = await recalcularMontoOrdenPorItems(orden.id);
+
+    res.status(201).json({
+      mensaje: "Item de servicio agregado correctamente",
+      item,
+      orden: ordenActualizada,
+    });
+  } catch (error) {
+    console.error("ERROR CREANDO ITEM DE ORDEN:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const actualizarItemOrden = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    if (!tieneRol(req, ROLES_GESTION_ITEMS)) {
+      return enviarErrorPermiso(res);
+    }
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    const item = await OrdenServicioItem.findOne({
+      where: {
+        id: req.params.itemId,
+        ordenId: orden.id,
+      },
+    });
+
+    if (!item) {
+      return res.status(404).json({
+        error: "Item de servicio no encontrado",
+      });
+    }
+
+    const alteraMonto =
+      Object.prototype.hasOwnProperty.call(req.body, "cantidad") ||
+      Object.prototype.hasOwnProperty.call(req.body, "precio_unitario") ||
+      Object.prototype.hasOwnProperty.call(req.body, "estado");
+
+    if (
+      alteraMonto &&
+      (orden.estado_pago === "PAGADO" || orden.estado === "ENTREGADO")
+    ) {
+      return res.status(400).json({
+        error:
+          "La orden ya esta pagada o entregada. Usa ajuste comercial para corregir montos.",
+      });
+    }
+
+    const payload = {};
+
+    ["tipo_servicio", "descripcion", "responsable", "observaciones"].forEach(
+      (campo) => {
+        if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
+          payload[campo] = limpiarTexto(req.body[campo]);
+        }
+      }
+    );
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "categoria")) {
+      payload.categoria = normalizarCategoriaItem(req.body.categoria);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "estado")) {
+      payload.estado = normalizarEstadoItem(req.body.estado);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "cantidad")) {
+      payload.cantidad = Math.max(normalizarDecimal(req.body.cantidad, 1), 0);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "precio_unitario")) {
+      payload.precio_unitario = Math.max(
+        normalizarDecimal(req.body.precio_unitario, 0),
+        0
+      );
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        req.body,
+        "requiere_material_recuperado"
+      )
+    ) {
+      payload.requiere_material_recuperado = normalizarBoolean(
+        req.body.requiere_material_recuperado
+      );
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        req.body,
+        "material_recuperado_obligatorio"
+      )
+    ) {
+      payload.material_recuperado_obligatorio = normalizarBoolean(
+        req.body.material_recuperado_obligatorio
+      );
+    }
+
+    const cantidadFinal =
+      payload.cantidad !== undefined
+        ? payload.cantidad
+        : normalizarDecimal(item.cantidad, 1);
+    const precioFinal =
+      payload.precio_unitario !== undefined
+        ? payload.precio_unitario
+        : normalizarDecimal(item.precio_unitario, 0);
+
+    if (
+      Object.prototype.hasOwnProperty.call(payload, "cantidad") ||
+      Object.prototype.hasOwnProperty.call(payload, "precio_unitario")
+    ) {
+      payload.subtotal = calcularSubtotalItem(cantidadFinal, precioFinal);
+    }
+
+    await item.update(payload);
+
+    const ordenActualizada = alteraMonto
+      ? await recalcularMontoOrdenPorItems(orden.id)
+      : orden;
+
+    res.json({
+      mensaje: "Item de servicio actualizado correctamente",
+      item,
+      orden: ordenActualizada,
+    });
+  } catch (error) {
+    console.error("ERROR ACTUALIZANDO ITEM DE ORDEN:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const eliminarItemOrden = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    if (!tieneRol(req, ROLES_GESTION_ITEMS)) {
+      return enviarErrorPermiso(res);
+    }
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    if (orden.estado_pago === "PAGADO" || orden.estado === "ENTREGADO") {
+      return res.status(400).json({
+        error: "No puedes eliminar items de una orden pagada o entregada",
+      });
+    }
+
+    const item = await OrdenServicioItem.findOne({
+      where: {
+        id: req.params.itemId,
+        ordenId: orden.id,
+      },
+    });
+
+    if (!item) {
+      return res.status(404).json({
+        error: "Item de servicio no encontrado",
+      });
+    }
+
+    const observaciones = [
+      limpiarTexto(item.observaciones),
+      `Anulado por ${usuarioActual(req)} el ${new Date().toISOString()}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    await item.update({
+      estado: "ANULADO",
+      subtotal: 0,
+      observaciones,
+    });
+
+    const ordenActualizada = await recalcularMontoOrdenPorItems(orden.id);
+
+    res.json({
+      mensaje: "Item de servicio anulado correctamente",
+      item,
+      orden: ordenActualizada,
+    });
+  } catch (error) {
+    console.error("ERROR ANULANDO ITEM DE ORDEN:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const obtenerMaterialOrden = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    const materiales = await obtenerMaterialOrdenInterno(orden.id);
+
+    res.json(materiales);
+  } catch (error) {
+    console.error("ERROR OBTENIENDO MATERIAL RECUPERADO:", error);
+
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
+const registrarMaterialOrden = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    if (!tieneRol(req, ROLES_MATERIAL_RECUPERADO)) {
+      return enviarErrorPermiso(res);
+    }
+
+    const orden = await OrdenTrabajo.findByPk(req.params.id);
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    if (orden.archivada) {
+      return res.status(400).json({
+        error: "No puedes registrar material en una orden archivada",
+      });
+    }
+
+    const itemIdRaw = req.body.itemId || req.body.item_id;
+    const itemId = itemIdRaw ? Number(itemIdRaw) : null;
+    let item = null;
+
+    if (itemId) {
+      item = await OrdenServicioItem.findOne({
+        where: {
+          id: itemId,
+          ordenId: orden.id,
+        },
+      });
+
+      if (!item) {
+        return res.status(404).json({
+          error: "El item indicado no pertenece a esta orden",
+        });
+      }
+    }
+
+    const pesoKg = normalizarDecimal3(req.body.peso_kg ?? req.body.kilos, 0);
+    const motivoExcepcion = limpiarTexto(req.body.motivo_excepcion_material);
+
+    if (pesoKg < 0) {
+      return res.status(400).json({
+        error: "El peso_kg no puede ser negativo",
+      });
+    }
+
+    if (pesoKg <= 0 && !motivoExcepcion) {
+      return res.status(400).json({
+        error: "Debes registrar peso_kg o motivo_excepcion_material",
+      });
+    }
+
+    const detalle = await sequelize.query(
+      `
+      SELECT
+        o."id" AS "orden_id",
+        v."id" AS "vehiculo_id",
+        v."patente",
+        v."marca",
+        v."modelo",
+        v."anio",
+        c."id" AS "cliente_id"
+      FROM "ordenes_trabajo" o
+      LEFT JOIN "vehiculos" v ON v."id" = o."vehiculoId"
+      LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+      WHERE o."id" = :id
+      LIMIT 1;
+      `,
+      {
+        replacements: { id: orden.id },
+        type: QueryTypes.SELECT,
+      }
+    );
+    const datos = detalle[0] || {};
+    const fechaSolicitada = req.body.fecha ? new Date(req.body.fecha) : new Date();
+    const fecha = Number.isNaN(fechaSolicitada.getTime())
+      ? new Date()
+      : fechaSolicitada;
+    const precioEstimadoKg = normalizarDecimal(req.body.precio_estimado_kg, 11000);
+    const valorEstimado =
+      req.body.valor_estimado !== undefined
+        ? normalizarDecimal(req.body.valor_estimado, 0)
+        : normalizarDecimal(pesoKg * precioEstimadoKg, 0);
+    const usuario = usuarioActual(req);
+    const eventoAuditoria = {
+      tipo: "MATERIAL_RECUPERADO_REGISTRADO",
+      ordenId: orden.id,
+      itemId: itemId || null,
+      peso_kg: pesoKg,
+      motivo_excepcion_material: motivoExcepcion,
+      registrado_por: usuario,
+      fecha: new Date().toISOString(),
+    };
+
+    const material = await MaterialRecuperado.create({
+      ordenId: orden.id,
+      itemId: itemId || null,
+      clienteId: datos.cliente_id || null,
+      vehiculoId: datos.vehiculo_id || orden.vehiculoId || null,
+      fecha: fecha.toISOString().slice(0, 10),
+      marca: limpiarTexto(datos.marca) || "SIN MARCA",
+      modelo: limpiarTexto(datos.modelo) || "SIN MODELO",
+      motor: limpiarTexto(req.body.motor),
+      anio: datos.anio || null,
+      patente: limpiarTexto(datos.patente),
+      tipo_material: limpiarTexto(req.body.tipo_material) || "LOZA_DPF",
+      kilos: pesoKg,
+      peso_kg: pesoKg,
+      foto: limpiarTexto(req.body.foto || req.body.url_foto),
+      precio_estimado_kg: precioEstimadoKg,
+      valor_estimado: valorEstimado,
+      lote_mes: fecha.toISOString().slice(0, 7),
+      lote_estado: limpiarTexto(req.body.lote_estado) || "ABIERTO",
+      estado: limpiarTexto(req.body.estado) || "ACUMULADO",
+      observacion: limpiarTexto(req.body.observacion),
+      responsable: limpiarTexto(req.body.responsable) || usuario,
+      destino: limpiarTexto(req.body.destino),
+      motivo_excepcion_material: motivoExcepcion,
+      creado_por: usuario,
+      registrado_por: usuario,
+      registrado_at: new Date(),
+      auditoria: [eventoAuditoria],
+    });
+
+    res.status(201).json({
+      mensaje: "Material recuperado registrado correctamente",
+      material,
+      item,
+    });
+  } catch (error) {
+    console.error("ERROR REGISTRANDO MATERIAL RECUPERADO:", error);
 
     res.status(500).json({
       error: error.message,
@@ -1254,6 +2115,7 @@ const actualizarEstado = async (req, res) => {
     };
 
     if (estado === "LISTO_PARA_ENTREGA") {
+      await validarMaterialObligatorioOrden(orden.id);
       payload.tecnico_finalizado_at = new Date();
       payload.tecnico_finalizado_por = usuarioActual(req);
     }
@@ -1272,8 +2134,9 @@ const actualizarEstado = async (req, res) => {
   } catch (error) {
     console.error("ERROR ACTUALIZANDO ESTADO:", error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: error.message,
+      itemsPendientes: error.itemsPendientes || undefined,
     });
   }
 };
@@ -1281,6 +2144,10 @@ const actualizarEstado = async (req, res) => {
 const registrarPago = async (req, res) => {
   try {
     await prepararColumnas();
+
+    if (!tieneRol(req, ROLES_CIERRE_COMERCIAL)) {
+      return enviarErrorPermiso(res);
+    }
 
     const orden = await OrdenTrabajo.findByPk(req.params.id);
 
@@ -1292,7 +2159,7 @@ const registrarPago = async (req, res) => {
 
     const medioPago = limpiarTexto(req.body.medio_pago) || "TRANSFERENCIA";
     const montoPagado = normalizarNumero(
-      req.body.monto_pagado || req.body.monto_total || orden.monto_total,
+      req.body.monto_pagado || req.body.monto_total || montoComercialOrden(orden),
       0
     );
 
@@ -1330,6 +2197,10 @@ const cobrarYEntregar = async (req, res) => {
   try {
     await prepararColumnas();
 
+    if (!tieneRol(req, ROLES_CIERRE_COMERCIAL)) {
+      return enviarErrorPermiso(res);
+    }
+
     const orden = await OrdenTrabajo.findByPk(req.params.id);
 
     if (!orden) {
@@ -1340,7 +2211,7 @@ const cobrarYEntregar = async (req, res) => {
 
     const medioPago = limpiarTexto(req.body.medio_pago) || "TRANSFERENCIA";
     const montoPagado = normalizarNumero(
-      req.body.monto_pagado || req.body.monto_total || orden.monto_total,
+      req.body.monto_pagado || req.body.monto_total || montoComercialOrden(orden),
       0
     );
 
@@ -1385,6 +2256,13 @@ module.exports = {
   obtenerOrdenes,
   obtenerOrdenPorId,
   actualizarOrden,
+  registrarAjusteComercial,
+  obtenerItemsOrden,
+  crearItemOrden,
+  actualizarItemOrden,
+  eliminarItemOrden,
+  obtenerMaterialOrden,
+  registrarMaterialOrden,
   registrarCorreccionTecnica,
   actualizarCorreccionTecnica,
   agregarBitacoraOrden,

@@ -15,6 +15,11 @@ const MaterialRecuperado = sequelize.define(
       allowNull: true,
     },
 
+    itemId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
     clienteId: {
       type: DataTypes.INTEGER,
       allowNull: true,
@@ -67,6 +72,17 @@ const MaterialRecuperado = sequelize.define(
       defaultValue: 0,
     },
 
+    peso_kg: {
+      type: DataTypes.DECIMAL(10, 3),
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+    foto: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+
     precio_estimado_kg: {
       type: DataTypes.DECIMAL(12, 2),
       allowNull: false,
@@ -116,8 +132,33 @@ const MaterialRecuperado = sequelize.define(
       allowNull: true,
     },
 
+    responsable: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    destino: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+    },
+
+    motivo_excepcion_material: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
     creado_por: {
       type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    registrado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    registrado_at: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
 

@@ -75,6 +75,37 @@ const OrdenTrabajo = sequelize.define(
       defaultValue: 0,
     },
 
+    monto_original: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true,
+    },
+
+    monto_final: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true,
+    },
+
+    motivo_ajuste: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    ajustado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    ajustado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    historial_ajustes: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
+
     excluir_estadisticas: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

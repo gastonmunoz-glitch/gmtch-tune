@@ -5,6 +5,13 @@ const {
   obtenerOrdenes,
   obtenerOrdenPorId,
   actualizarOrden,
+  registrarAjusteComercial,
+  obtenerItemsOrden,
+  crearItemOrden,
+  actualizarItemOrden,
+  eliminarItemOrden,
+  obtenerMaterialOrden,
+  registrarMaterialOrden,
   registrarCorreccionTecnica,
   actualizarCorreccionTecnica,
   agregarBitacoraOrden,
@@ -19,6 +26,15 @@ router.post("/", crearOrden);
 
 router.get("/", obtenerOrdenes);
 router.get("/:id", obtenerOrdenPorId);
+
+// Orden Comercial V2 / items de servicio / material recuperado
+router.post("/:id/ajuste-comercial", registrarAjusteComercial);
+router.get("/:id/items", obtenerItemsOrden);
+router.post("/:id/items", crearItemOrden);
+router.patch("/:id/items/:itemId", actualizarItemOrden);
+router.delete("/:id/items/:itemId", eliminarItemOrden);
+router.get("/:id/material-recuperado", obtenerMaterialOrden);
+router.post("/:id/material-recuperado", registrarMaterialOrden);
 
 // Correccion tecnica / postventa interna
 router.post("/:id/correccion-tecnica", registrarCorreccionTecnica);
