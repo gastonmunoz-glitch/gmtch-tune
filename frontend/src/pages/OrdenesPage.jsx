@@ -56,6 +56,72 @@ const SERVICIOS_ORDEN_SUGERIDOS = [
   "Postventa técnica / corrección",
 ];
 
+const SERVICIOS_ITEM_ORDEN = [
+  "Diagnóstico",
+  "Scanner",
+  "Cambio de aceite",
+  "Mantenimiento preventivo",
+  "Limpieza DPF/FAP",
+  "Regeneración",
+  "Revisión mecánica",
+  "Reprogramación ECU",
+  "Reprogramación TCU",
+  "File Service",
+  "DPF/FAP según normativa aplicable",
+  "EGR según normativa aplicable",
+  "SCR/AdBlue según normativa aplicable",
+  "Otro",
+];
+
+const CATEGORIAS_ITEM_SERVICIO = [
+  "DIAGNOSTICO",
+  "MECANICA",
+  "MANTENIMIENTO",
+  "ECU_TCU",
+  "FILE_SERVICE",
+  "DPF_FAP",
+  "ELECTRONICA",
+  "OTRO",
+];
+
+const ESTADOS_ITEM_SERVICIO = ["PENDIENTE", "EN_PROCESO", "LISTO", "ANULADO"];
+
+const TIPOS_MATERIAL_RECUPERADO = [
+  "LOZA_DPF",
+  "DPF/FAP",
+  "CATALIZADOR",
+  "SCR/ADBLUE",
+  "OTRO",
+];
+
+const itemServicioInicial = {
+  tipo_servicio: "Diagnóstico",
+  categoria: "DIAGNOSTICO",
+  descripcion: "",
+  cantidad: "1",
+  precio_unitario: "",
+  responsable: "",
+  requiere_material_recuperado: false,
+  material_recuperado_obligatorio: false,
+  observaciones: "",
+};
+
+const ajusteInicial = {
+  monto_final: "",
+  motivo_ajuste: "",
+};
+
+const materialInicial = {
+  itemId: "",
+  tipo_material: "LOZA_DPF",
+  peso_kg: "",
+  responsable: "",
+  destino: "",
+  valor_estimado: "",
+  observacion: "",
+  motivo_excepcion_material: "",
+};
+
 const RESPONSABLES_ETAPAS = [
   {
     campo: "diagnostico_asignado_a",
@@ -196,7 +262,7 @@ const textoQR = (orden) => {
     `Banco: ${DATOS_CUENTA.banco}`,
     `Tipo: ${DATOS_CUENTA.tipo}`,
     `Cuenta: ${DATOS_CUENTA.numero}`,
-    `Monto: $${Number(orden?.monto_total || 0).toLocaleString("es-CL")}`,
+    `Monto: $${montoFinalOrden(orden).toLocaleString("es-CL")}`,
     `Glosa: Orden ${orden?.id || ""} ${patente}`,
   ].join("\n");
 };
@@ -213,6 +279,40 @@ const formatearFecha = (valor) => {
   if (Number.isNaN(fecha.getTime())) return "No registrado";
 
   return fecha.toLocaleString("es-CL");
+};
+
+const normalizarLista = (...valores) => {
+  for (const valor of valores) {
+    if (Array.isArray(valor)) return valor;
+    if (valor && typeof valor === "object") return [valor];
+  }
+
+  return [];
+};
+
+const montoFinalOrden = (orden) => Number(orden?.monto_final ?? orden?.monto_total ?? 0);
+
+const materialCumpleRegistro = (material) => {
+  const peso = Number(material?.peso_kg ?? material?.kilos ?? 0);
+  const excepcion = String(material?.motivo_excepcion_material || "").trim();
+  return peso > 0 || Boolean(excepcion);
+};
+
+const itemsMaterialPendiente = (items = [], materiales = []) => {
+  return items.filter((item) => {
+    if (item.estado === "ANULADO" || item.material_recuperado_obligatorio !== true) {
+      return false;
+    }
+
+    const materialItem = materiales.find(
+      (material) => String(material.itemId || "") === String(item.id)
+    );
+    const materialOrden = materiales.find(
+      (material) => !material.itemId || String(material.itemId) === "0"
+    );
+
+    return !materialCumpleRegistro(materialItem) && !materialCumpleRegistro(materialOrden);
+  });
 };
 
 const obtenerTiempo = (valor) => {
@@ -265,6 +365,10 @@ function OrdenesPage() {
   const [feedbackOrdenes, setFeedbackOrdenes] = useState({});
   const [correccionOrdenes, setCorreccionOrdenes] = useState({});
   const [bitacoraOrdenes, setBitacoraOrdenes] = useState({});
+  const [itemOrdenes, setItemOrdenes] = useState({});
+  const [itemEdiciones, setItemEdiciones] = useState({});
+  const [ajusteOrdenes, setAjusteOrdenes] = useState({});
+  const [materialOrdenes, setMaterialOrdenes] = useState({});
   const [filtro, setFiltro] = useState("ACTIVAS");
   const [cargando, setCargando] = useState(false);
 
@@ -739,8 +843,207 @@ function OrdenesPage() {
     }
   };
 
+  const itemNuevoActual = (orden) => itemOrdenes[orden.id] || itemServicioInicial;
+
+  const actualizarItemNuevoLocal = (orden, campo, valor) => {
+    setItemOrdenes((prev) => ({
+      ...prev,
+      [orden.id]: {
+        ...itemNuevoActual(orden),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const itemEdicionKey = (orden, item) => `${orden.id}-${item.id}`;
+
+  const itemEdicionActual = (orden, item) =>
+    itemEdiciones[itemEdicionKey(orden, item)] || {
+      tipo_servicio: item.tipo_servicio || "Otro",
+      categoria: item.categoria || "OTRO",
+      descripcion: item.descripcion || "",
+      cantidad: item.cantidad || "1",
+      precio_unitario: item.precio_unitario || "",
+      responsable: item.responsable || "",
+      estado: item.estado || "PENDIENTE",
+      requiere_material_recuperado: item.requiere_material_recuperado === true,
+      material_recuperado_obligatorio:
+        item.material_recuperado_obligatorio === true,
+      observaciones: item.observaciones || "",
+    };
+
+  const actualizarItemEdicionLocal = (orden, item, campo, valor) => {
+    const key = itemEdicionKey(orden, item);
+    setItemEdiciones((prev) => ({
+      ...prev,
+      [key]: {
+        ...itemEdicionActual(orden, item),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const agregarItemOrden = async (orden) => {
+    const item = itemNuevoActual(orden);
+
+    if (!String(item.tipo_servicio || "").trim()) {
+      alert("Debes seleccionar un tipo de servicio.");
+      return;
+    }
+
+    try {
+      await api.post(`/ordenes/${orden.id}/items`, {
+        ...item,
+        cantidad: Number(item.cantidad || 1),
+        precio_unitario: Number(item.precio_unitario || 0),
+      });
+
+      setItemOrdenes((prev) => {
+        const siguiente = { ...prev };
+        delete siguiente[orden.id];
+        return siguiente;
+      });
+      await recargar();
+      alert("Ítem agregado a la orden.");
+    } catch (err) {
+      console.error("ERROR AGREGANDO ITEM:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "No se pudo agregar el ítem.");
+    }
+  };
+
+  const guardarItemOrden = async (orden, item) => {
+    const edicion = itemEdicionActual(orden, item);
+
+    try {
+      await api.patch(`/ordenes/${orden.id}/items/${item.id}`, {
+        ...edicion,
+        cantidad: Number(edicion.cantidad || 0),
+        precio_unitario: Number(edicion.precio_unitario || 0),
+      });
+
+      setItemEdiciones((prev) => {
+        const siguiente = { ...prev };
+        delete siguiente[itemEdicionKey(orden, item)];
+        return siguiente;
+      });
+      await recargar();
+      alert("Ítem actualizado.");
+    } catch (err) {
+      console.error("ERROR ACTUALIZANDO ITEM:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "No se pudo actualizar el ítem.");
+    }
+  };
+
+  const anularItemOrden = async (orden, item) => {
+    const confirmar = window.confirm(
+      `¿Anular el ítem "${item.tipo_servicio || item.id}" de la orden #${orden.id}?`
+    );
+
+    if (!confirmar) return;
+
+    try {
+      await api.delete(`/ordenes/${orden.id}/items/${item.id}`);
+      await recargar();
+      alert("Ítem anulado.");
+    } catch (err) {
+      console.error("ERROR ANULANDO ITEM:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "No se pudo anular el ítem.");
+    }
+  };
+
+  const ajusteActual = (orden) =>
+    ajusteOrdenes[orden.id] || {
+      ...ajusteInicial,
+      monto_final: String(montoFinalOrden(orden) || ""),
+    };
+
+  const actualizarAjusteLocal = (orden, campo, valor) => {
+    setAjusteOrdenes((prev) => ({
+      ...prev,
+      [orden.id]: {
+        ...ajusteActual(orden),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const registrarAjusteComercial = async (orden) => {
+    const ajuste = ajusteActual(orden);
+
+    if (!String(ajuste.motivo_ajuste || "").trim()) {
+      alert("Debes indicar el motivo del ajuste comercial.");
+      return;
+    }
+
+    try {
+      await api.post(`/ordenes/${orden.id}/ajuste-comercial`, {
+        monto_final: Number(ajuste.monto_final || 0),
+        motivo_ajuste: ajuste.motivo_ajuste,
+      });
+
+      setAjusteOrdenes((prev) => {
+        const siguiente = { ...prev };
+        delete siguiente[orden.id];
+        return siguiente;
+      });
+      await recargar();
+      alert("Ajuste registrado.");
+    } catch (err) {
+      console.error("ERROR AJUSTANDO COBRO:", err.response?.data || err.message);
+      alert(
+        err.response?.status === 403
+          ? "Solo usuarios autorizados pueden ajustar montos."
+          : err.response?.data?.error || "No se pudo registrar el ajuste."
+      );
+    }
+  };
+
+  const materialActual = (orden) => materialOrdenes[orden.id] || materialInicial;
+
+  const actualizarMaterialLocal = (orden, campo, valor) => {
+    setMaterialOrdenes((prev) => ({
+      ...prev,
+      [orden.id]: {
+        ...materialActual(orden),
+        [campo]: valor,
+      },
+    }));
+  };
+
+  const registrarMaterialRecuperado = async (orden) => {
+    const material = materialActual(orden);
+    const tienePeso = Number(material.peso_kg || 0) > 0;
+    const tieneExcepcion = String(material.motivo_excepcion_material || "").trim();
+
+    if (!tienePeso && !tieneExcepcion) {
+      alert("Registra peso recuperado o motivo de excepción.");
+      return;
+    }
+
+    try {
+      await api.post(`/ordenes/${orden.id}/material-recuperado`, {
+        ...material,
+        itemId: material.itemId || null,
+        peso_kg: Number(material.peso_kg || 0),
+        valor_estimado:
+          material.valor_estimado === "" ? undefined : Number(material.valor_estimado),
+      });
+
+      setMaterialOrdenes((prev) => {
+        const siguiente = { ...prev };
+        delete siguiente[orden.id];
+        return siguiente;
+      });
+      await recargar();
+      alert("Material recuperado registrado.");
+    } catch (err) {
+      console.error("ERROR REGISTRANDO MATERIAL:", err.response?.data || err.message);
+      alert(err.response?.data?.error || "No se pudo registrar el material.");
+    }
+  };
+
   const cobrarYEntregar = async (orden, medioPago = "TRANSFERENCIA") => {
-    const montoTotal = Number(orden.monto_total || 0);
+    const montoTotal = montoFinalOrden(orden);
     const montoPagado = Number(orden.monto_pagado || montoTotal);
     const usuario = localStorage.getItem("username") || "sistema";
 
@@ -970,6 +1273,23 @@ function OrdenesPage() {
               o,
               archivosOrden
             );
+            const itemsOrden = normalizarLista(
+              o.OrdenServicioItems,
+              o.ItemsServicio
+            );
+            const materialesOrden = normalizarLista(
+              o.MaterialRecuperados,
+              o.MaterialRecuperado
+            );
+            const itemsPendientesMaterial = itemsMaterialPendiente(
+              itemsOrden,
+              materialesOrden
+            );
+            const itemNuevo = itemNuevoActual(o);
+            const ajuste = ajusteActual(o);
+            const materialForm = materialActual(o);
+            const montoFinal = montoFinalOrden(o);
+            const diferenciaPago = Number(o.monto_pagado || 0) - montoFinal;
             const pagoConfirmado = o.estado_pago === "PAGADO";
             const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
               textoQR(o)
@@ -1288,6 +1608,702 @@ function OrdenesPage() {
                             </p>
                           )}
                         </div>
+                      </details>
+
+                      <details
+                        open={itemsPendientesMaterial.length > 0}
+                        className="mt-4 border-2 border-black bg-slate-50 p-3"
+                      >
+                        <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-700">
+                          Servicios de la orden
+                        </summary>
+
+                        <p className="mt-3 border-2 border-blue-700 bg-blue-50 p-2 text-[10px] font-bold uppercase text-blue-900">
+                          Trabajo ingresado no es venta. Venta real = pago
+                          confirmado. Servicios relacionados con emisiones deben
+                          manejarse según normativa aplicable y uso autorizado.
+                        </p>
+
+                        <div className="mt-3 space-y-3">
+                          {itemsOrden.map((item) => {
+                            const edicion = itemEdicionActual(o, item);
+
+                            return (
+                              <div
+                                key={item.id}
+                                className={`border-2 p-3 ${
+                                  item.estado === "ANULADO"
+                                    ? "border-gray-400 bg-gray-100 text-gray-500"
+                                    : "border-black bg-white"
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <p className="text-xs font-black uppercase">
+                                      {item.tipo_servicio || "Servicio"}
+                                    </p>
+                                    <p className="text-[10px] font-bold uppercase text-gray-500">
+                                      {item.categoria || "OTRO"} ·{" "}
+                                      {item.estado || "PENDIENTE"}
+                                    </p>
+                                  </div>
+                                  <p className="text-sm font-black">
+                                    {formatearMonto(item.subtotal)}
+                                  </p>
+                                </div>
+
+                                <div className="mt-2 grid grid-cols-1 gap-2 text-[10px] font-bold uppercase text-gray-700 md:grid-cols-3">
+                                  <p>Cantidad: {item.cantidad || 1}</p>
+                                  <p>
+                                    Unitario: {formatearMonto(item.precio_unitario)}
+                                  </p>
+                                  <p>Responsable: {item.responsable || "No registrado"}</p>
+                                  <p className="md:col-span-3">
+                                    Descripción: {item.descripcion || "No registrada"}
+                                  </p>
+                                  <p>
+                                    Material:{" "}
+                                    {item.requiere_material_recuperado ? "Sí" : "No"}
+                                  </p>
+                                  <p>
+                                    Obligatorio:{" "}
+                                    {item.material_recuperado_obligatorio
+                                      ? "Sí"
+                                      : "No"}
+                                  </p>
+                                  <p>Obs: {item.observaciones || "Sin observaciones"}</p>
+                                </div>
+
+                                <details className="mt-3 border border-gray-300 bg-slate-50 p-2">
+                                  <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-600">
+                                    Editar ítem
+                                  </summary>
+                                  <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+                                    <select
+                                      className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                                      value={edicion.tipo_servicio}
+                                      onChange={(event) =>
+                                        actualizarItemEdicionLocal(
+                                          o,
+                                          item,
+                                          "tipo_servicio",
+                                          event.target.value
+                                        )
+                                      }
+                                    >
+                                      {SERVICIOS_ITEM_ORDEN.map((servicio) => (
+                                        <option key={servicio} value={servicio}>
+                                          {servicio}
+                                        </option>
+                                      ))}
+                                    </select>
+
+                                    <select
+                                      className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                                      value={edicion.categoria}
+                                      onChange={(event) =>
+                                        actualizarItemEdicionLocal(
+                                          o,
+                                          item,
+                                          "categoria",
+                                          event.target.value
+                                        )
+                                      }
+                                    >
+                                      {CATEGORIAS_ITEM_SERVICIO.map((categoria) => (
+                                        <option key={categoria} value={categoria}>
+                                          {categoria}
+                                        </option>
+                                      ))}
+                                    </select>
+
+                                    <select
+                                      className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                                      value={edicion.estado}
+                                      onChange={(event) =>
+                                        actualizarItemEdicionLocal(
+                                          o,
+                                          item,
+                                          "estado",
+                                          event.target.value
+                                        )
+                                      }
+                                    >
+                                      {ESTADOS_ITEM_SERVICIO.map((estado) => (
+                                        <option key={estado} value={estado}>
+                                          {estado}
+                                        </option>
+                                      ))}
+                                    </select>
+
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      className="border-2 border-black p-2 text-[10px] font-bold"
+                                      placeholder="Cantidad"
+                                      value={edicion.cantidad}
+                                      onChange={(event) =>
+                                        actualizarItemEdicionLocal(
+                                          o,
+                                          item,
+                                          "cantidad",
+                                          event.target.value
+                                        )
+                                      }
+                                    />
+
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1000"
+                                      className="border-2 border-black p-2 text-[10px] font-bold"
+                                      placeholder="Precio unitario"
+                                      value={edicion.precio_unitario}
+                                      onChange={(event) =>
+                                        actualizarItemEdicionLocal(
+                                          o,
+                                          item,
+                                          "precio_unitario",
+                                          event.target.value
+                                        )
+                                      }
+                                    />
+
+                                    <input
+                                      className="border-2 border-black p-2 text-[10px] font-bold"
+                                      placeholder="Responsable"
+                                      value={edicion.responsable}
+                                      onChange={(event) =>
+                                        actualizarItemEdicionLocal(
+                                          o,
+                                          item,
+                                          "responsable",
+                                          event.target.value
+                                        )
+                                      }
+                                    />
+
+                                    <textarea
+                                      className="border-2 border-black p-2 text-[10px] font-bold md:col-span-3"
+                                      rows="2"
+                                      placeholder="Descripción"
+                                      value={edicion.descripcion}
+                                      onChange={(event) =>
+                                        actualizarItemEdicionLocal(
+                                          o,
+                                          item,
+                                          "descripcion",
+                                          event.target.value
+                                        )
+                                      }
+                                    />
+
+                                    <label className="flex items-center gap-2 text-[10px] font-black uppercase text-gray-600">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!edicion.requiere_material_recuperado}
+                                        onChange={(event) =>
+                                          actualizarItemEdicionLocal(
+                                            o,
+                                            item,
+                                            "requiere_material_recuperado",
+                                            event.target.checked
+                                          )
+                                        }
+                                      />
+                                      Requiere material
+                                    </label>
+
+                                    <label className="flex items-center gap-2 text-[10px] font-black uppercase text-gray-600">
+                                      <input
+                                        type="checkbox"
+                                        checked={
+                                          !!edicion.material_recuperado_obligatorio
+                                        }
+                                        onChange={(event) =>
+                                          actualizarItemEdicionLocal(
+                                            o,
+                                            item,
+                                            "material_recuperado_obligatorio",
+                                            event.target.checked
+                                          )
+                                        }
+                                      />
+                                      Material obligatorio
+                                    </label>
+
+                                    <input
+                                      className="border-2 border-black p-2 text-[10px] font-bold"
+                                      placeholder="Observaciones"
+                                      value={edicion.observaciones}
+                                      onChange={(event) =>
+                                        actualizarItemEdicionLocal(
+                                          o,
+                                          item,
+                                          "observaciones",
+                                          event.target.value
+                                        )
+                                      }
+                                    />
+                                  </div>
+
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => guardarItemOrden(o, item)}
+                                      className="bg-blue-700 px-3 py-2 text-[10px] font-black uppercase text-white"
+                                    >
+                                      Guardar ítem
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => anularItemOrden(o, item)}
+                                      className="bg-red-700 px-3 py-2 text-[10px] font-black uppercase text-white"
+                                    >
+                                      Anular ítem
+                                    </button>
+                                  </div>
+                                </details>
+                              </div>
+                            );
+                          })}
+
+                          {itemsOrden.length === 0 && (
+                            <div className="border-2 border-dashed border-gray-300 bg-white p-3 text-[10px] font-black uppercase text-gray-500">
+                              Sin ítems registrados. Agrega servicios para
+                              estandarizar el presupuesto y el cierre técnico.
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-4 border-2 border-black bg-white p-3">
+                          <p className="text-[10px] font-black uppercase text-gray-500">
+                            Agregar ítem
+                          </p>
+                          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+                            <select
+                              className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                              value={itemNuevo.tipo_servicio}
+                              onChange={(event) =>
+                                actualizarItemNuevoLocal(
+                                  o,
+                                  "tipo_servicio",
+                                  event.target.value
+                                )
+                              }
+                            >
+                              {SERVICIOS_ITEM_ORDEN.map((servicio) => (
+                                <option key={servicio} value={servicio}>
+                                  {servicio}
+                                </option>
+                              ))}
+                            </select>
+
+                            <select
+                              className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                              value={itemNuevo.categoria}
+                              onChange={(event) =>
+                                actualizarItemNuevoLocal(
+                                  o,
+                                  "categoria",
+                                  event.target.value
+                                )
+                              }
+                            >
+                              {CATEGORIAS_ITEM_SERVICIO.map((categoria) => (
+                                <option key={categoria} value={categoria}>
+                                  {categoria}
+                                </option>
+                              ))}
+                            </select>
+
+                            <input
+                              className="border-2 border-black p-2 text-[10px] font-bold"
+                              placeholder="Responsable opcional"
+                              value={itemNuevo.responsable}
+                              onChange={(event) =>
+                                actualizarItemNuevoLocal(
+                                  o,
+                                  "responsable",
+                                  event.target.value
+                                )
+                              }
+                            />
+
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              className="border-2 border-black p-2 text-[10px] font-bold"
+                              placeholder="Cantidad"
+                              value={itemNuevo.cantidad}
+                              onChange={(event) =>
+                                actualizarItemNuevoLocal(
+                                  o,
+                                  "cantidad",
+                                  event.target.value
+                                )
+                              }
+                            />
+
+                            <input
+                              type="number"
+                              min="0"
+                              step="1000"
+                              className="border-2 border-black p-2 text-[10px] font-bold"
+                              placeholder="Precio unitario"
+                              value={itemNuevo.precio_unitario}
+                              onChange={(event) =>
+                                actualizarItemNuevoLocal(
+                                  o,
+                                  "precio_unitario",
+                                  event.target.value
+                                )
+                              }
+                            />
+
+                            <input
+                              className="border-2 border-black p-2 text-[10px] font-bold"
+                              placeholder="Observaciones"
+                              value={itemNuevo.observaciones}
+                              onChange={(event) =>
+                                actualizarItemNuevoLocal(
+                                  o,
+                                  "observaciones",
+                                  event.target.value
+                                )
+                              }
+                            />
+
+                            <textarea
+                              className="border-2 border-black p-2 text-[10px] font-bold md:col-span-3"
+                              rows="2"
+                              placeholder="Descripción del servicio"
+                              value={itemNuevo.descripcion}
+                              onChange={(event) =>
+                                actualizarItemNuevoLocal(
+                                  o,
+                                  "descripcion",
+                                  event.target.value
+                                )
+                              }
+                            />
+
+                            <label className="flex items-center gap-2 text-[10px] font-black uppercase text-gray-600">
+                              <input
+                                type="checkbox"
+                                checked={!!itemNuevo.requiere_material_recuperado}
+                                onChange={(event) =>
+                                  actualizarItemNuevoLocal(
+                                    o,
+                                    "requiere_material_recuperado",
+                                    event.target.checked
+                                  )
+                                }
+                              />
+                              Requiere material recuperado
+                            </label>
+
+                            <label className="flex items-center gap-2 text-[10px] font-black uppercase text-gray-600">
+                              <input
+                                type="checkbox"
+                                checked={!!itemNuevo.material_recuperado_obligatorio}
+                                onChange={(event) =>
+                                  actualizarItemNuevoLocal(
+                                    o,
+                                    "material_recuperado_obligatorio",
+                                    event.target.checked
+                                  )
+                                }
+                              />
+                              Material obligatorio
+                            </label>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => agregarItemOrden(o)}
+                            className="mt-3 bg-black px-4 py-2 text-[10px] font-black uppercase text-white"
+                          >
+                            Agregar ítem
+                          </button>
+                        </div>
+                      </details>
+
+                      <details className="mt-4 border-2 border-black bg-slate-50 p-3">
+                        <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-700">
+                          Ajuste comercial
+                        </summary>
+
+                        <div className="mt-3 grid grid-cols-1 gap-2 text-[10px] font-bold uppercase text-gray-700 md:grid-cols-2">
+                          <p>Monto original: {formatearMonto(o.monto_original || o.monto_total)}</p>
+                          <p>Presupuesto / monto final: {formatearMonto(montoFinal)}</p>
+                          <p>Monto pagado: {formatearMonto(o.monto_pagado)}</p>
+                          <p>Estado pago: {o.estado_pago || "PENDIENTE"}</p>
+                          <p>
+                            Diferencia pago/final:{" "}
+                            {diferenciaPago === 0
+                              ? "Sin diferencia"
+                              : formatearMonto(Math.abs(diferenciaPago))}
+                          </p>
+                          <p>Ajustado por: {o.ajustado_por || "No registrado"}</p>
+                          <p>Fecha ajuste: {formatearFecha(o.ajustado_at)}</p>
+                          <p className="md:col-span-2">
+                            Motivo último ajuste: {o.motivo_ajuste || "No registrado"}
+                          </p>
+                        </div>
+
+                        <p className="mt-3 border-2 border-yellow-600 bg-yellow-50 p-2 text-[10px] font-bold uppercase text-yellow-900">
+                          Este ajuste no borra el historial. Quedará registrado
+                          con usuario, fecha y motivo.
+                        </p>
+
+                        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">
+                          <input
+                            type="number"
+                            min="0"
+                            step="1000"
+                            className="border-2 border-black p-2 text-[10px] font-bold"
+                            placeholder="Nuevo monto final"
+                            value={ajuste.monto_final}
+                            onChange={(event) =>
+                              actualizarAjusteLocal(
+                                o,
+                                "monto_final",
+                                event.target.value
+                              )
+                            }
+                          />
+                          <input
+                            className="border-2 border-black p-2 text-[10px] font-bold md:col-span-2"
+                            placeholder="Motivo del ajuste obligatorio"
+                            value={ajuste.motivo_ajuste}
+                            onChange={(event) =>
+                              actualizarAjusteLocal(
+                                o,
+                                "motivo_ajuste",
+                                event.target.value
+                              )
+                            }
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => registrarAjusteComercial(o)}
+                          className="mt-3 bg-blue-700 px-4 py-2 text-[10px] font-black uppercase text-white"
+                        >
+                          Ajustar cobro
+                        </button>
+
+                        {Array.isArray(o.historial_ajustes) &&
+                          o.historial_ajustes.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              <p className="text-[10px] font-black uppercase text-gray-500">
+                                Historial de ajustes
+                              </p>
+                              {o.historial_ajustes.slice(-5).map((evento, index) => (
+                                <div
+                                  key={`${evento.fecha || index}-${index}`}
+                                  className="border border-gray-300 bg-white p-2 text-[10px] font-bold uppercase text-gray-600"
+                                >
+                                  <p>
+                                    {formatearFecha(evento.fecha)} ·{" "}
+                                    {evento.ajustado_por || "No registrado"}
+                                  </p>
+                                  <p>
+                                    {formatearMonto(evento.monto_anterior)} →{" "}
+                                    {formatearMonto(evento.monto_final)}
+                                  </p>
+                                  <p>{evento.motivo_ajuste || "Sin motivo"}</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                      </details>
+
+                      <details
+                        open={itemsPendientesMaterial.length > 0}
+                        className="mt-4 border-2 border-black bg-slate-50 p-3"
+                      >
+                        <summary className="cursor-pointer text-[10px] font-black uppercase text-gray-700">
+                          Material recuperado
+                        </summary>
+
+                        {itemsPendientesMaterial.length > 0 && (
+                          <p className="mt-3 border-2 border-red-700 bg-red-50 p-2 text-[10px] font-black uppercase text-red-900">
+                            Material pendiente: registra peso o motivo de
+                            excepción antes de cierre técnico.
+                          </p>
+                        )}
+
+                        <div className="mt-3 space-y-2">
+                          {materialesOrden.map((material) => (
+                            <div
+                              key={material.id}
+                              className="border-2 border-black bg-white p-3 text-[10px] font-bold uppercase text-gray-700"
+                            >
+                              <p>
+                                {material.tipo_material || "Material"} ·{" "}
+                                {material.peso_kg ?? material.kilos ?? 0} kg
+                              </p>
+                              <p>Ítem: {material.itemId || "Orden general"}</p>
+                              <p>Responsable: {material.responsable || "No registrado"}</p>
+                              <p>Destino: {material.destino || "No registrado"}</p>
+                              <p>Valor estimado: {formatearMonto(material.valor_estimado)}</p>
+                              <p>Observación: {material.observacion || "No registrada"}</p>
+                              <p>
+                                Excepción:{" "}
+                                {material.motivo_excepcion_material || "No registrada"}
+                              </p>
+                              <p>
+                                Registrado por:{" "}
+                                {material.registrado_por || material.creado_por || "-"} ·{" "}
+                                {formatearFecha(material.registrado_at || material.createdAt)}
+                              </p>
+                            </div>
+                          ))}
+
+                          {materialesOrden.length === 0 && (
+                            <div className="border-2 border-dashed border-gray-300 bg-white p-3 text-[10px] font-black uppercase text-gray-500">
+                              Sin material recuperado registrado para esta orden.
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-3">
+                          <select
+                            className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                            value={materialForm.itemId}
+                            onChange={(event) =>
+                              actualizarMaterialLocal(
+                                o,
+                                "itemId",
+                                event.target.value
+                              )
+                            }
+                          >
+                            <option value="">Orden general</option>
+                            {itemsOrden.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                #{item.id} {item.tipo_servicio}
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                            value={materialForm.tipo_material}
+                            onChange={(event) =>
+                              actualizarMaterialLocal(
+                                o,
+                                "tipo_material",
+                                event.target.value
+                              )
+                            }
+                          >
+                            {TIPOS_MATERIAL_RECUPERADO.map((tipo) => (
+                              <option key={tipo} value={tipo}>
+                                {tipo}
+                              </option>
+                            ))}
+                          </select>
+
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            className="border-2 border-black p-2 text-[10px] font-bold"
+                            placeholder="Peso kg"
+                            value={materialForm.peso_kg}
+                            onChange={(event) =>
+                              actualizarMaterialLocal(
+                                o,
+                                "peso_kg",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <input
+                            className="border-2 border-black p-2 text-[10px] font-bold"
+                            placeholder="Responsable"
+                            value={materialForm.responsable}
+                            onChange={(event) =>
+                              actualizarMaterialLocal(
+                                o,
+                                "responsable",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <input
+                            className="border-2 border-black p-2 text-[10px] font-bold"
+                            placeholder="Destino"
+                            value={materialForm.destino}
+                            onChange={(event) =>
+                              actualizarMaterialLocal(
+                                o,
+                                "destino",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <input
+                            type="number"
+                            min="0"
+                            step="1000"
+                            className="border-2 border-black p-2 text-[10px] font-bold"
+                            placeholder="Valor estimado"
+                            value={materialForm.valor_estimado}
+                            onChange={(event) =>
+                              actualizarMaterialLocal(
+                                o,
+                                "valor_estimado",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <textarea
+                            className="border-2 border-black p-2 text-[10px] font-bold md:col-span-3"
+                            rows="2"
+                            placeholder="Observación"
+                            value={materialForm.observacion}
+                            onChange={(event) =>
+                              actualizarMaterialLocal(
+                                o,
+                                "observacion",
+                                event.target.value
+                              )
+                            }
+                          />
+
+                          <textarea
+                            className="border-2 border-black p-2 text-[10px] font-bold md:col-span-3"
+                            rows="2"
+                            placeholder="Motivo de excepción si no hay peso recuperado"
+                            value={materialForm.motivo_excepcion_material}
+                            onChange={(event) =>
+                              actualizarMaterialLocal(
+                                o,
+                                "motivo_excepcion_material",
+                                event.target.value
+                              )
+                            }
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => registrarMaterialRecuperado(o)}
+                          className="mt-3 bg-black px-4 py-2 text-[10px] font-black uppercase text-white"
+                        >
+                          Registrar material / excepción
+                        </button>
                       </details>
 
                       <details className="mt-4 border-2 border-black bg-slate-50 p-3">
@@ -1690,18 +2706,34 @@ function OrdenesPage() {
                     </p>
 
                     <p className="text-xl font-black mt-2">
-                      {formatearMonto(o.monto_total)}
+                      {formatearMonto(montoFinal)}
                     </p>
 
                     <div className="mt-3 space-y-1 text-[10px] font-bold uppercase text-gray-700">
+                      <p>
+                        Tipo comercial:{" "}
+                        {pagoConfirmado ? "Pagado / venta real" : "Trabajo ingresado"}
+                      </p>
                       <p>
                         Estado operativo:{" "}
                         {getOperationalStatusLabel(o.estado || "Pendiente")}
                       </p>
                       <p>Estado pago: {o.estado_pago || "Pendiente"}</p>
                       <p>Medio de pago: {o.medio_pago || "Pendiente"}</p>
-                      <p>Monto total: {formatearMonto(o.monto_total)}</p>
+                      <p>Presupuesto / monto final: {formatearMonto(montoFinal)}</p>
+                      <p>
+                        Monto original:{" "}
+                        {formatearMonto(o.monto_original || o.monto_total)}
+                      </p>
                       <p>Monto pagado: {formatearMonto(o.monto_pagado)}</p>
+                      <p>
+                        Pendiente de pago:{" "}
+                        {pagoConfirmado
+                          ? "No"
+                          : formatearMonto(
+                              Math.max(montoFinal - Number(o.monto_pagado || 0), 0)
+                            )}
+                      </p>
                       <p>Fecha pago: {formatearFecha(o.fecha_pago)}</p>
                       <p>Cobrado por: {o.cobrado_por || "No registrado"}</p>
                       <p>Entregado por: {o.entregado_por || "No registrado"}</p>

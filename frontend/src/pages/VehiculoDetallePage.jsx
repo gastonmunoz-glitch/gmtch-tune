@@ -53,6 +53,31 @@ const formatearMonto = (valor) => {
   return numero > 0 ? `$${numero.toLocaleString("es-CL")}` : "Pendiente";
 };
 
+const montoFinalOrden = (orden) => Number(orden?.monto_final ?? orden?.monto_total ?? 0);
+
+const materialCumpleRegistro = (material) => {
+  const peso = Number(material?.peso_kg ?? material?.kilos ?? 0);
+  const excepcion = String(material?.motivo_excepcion_material || "").trim();
+  return peso > 0 || Boolean(excepcion);
+};
+
+const itemsMaterialPendiente = (items = [], materiales = []) => {
+  return items.filter((item) => {
+    if (item.estado === "ANULADO" || item.material_recuperado_obligatorio !== true) {
+      return false;
+    }
+
+    const materialItem = materiales.find(
+      (material) => String(material.itemId || "") === String(item.id)
+    );
+    const materialOrden = materiales.find(
+      (material) => !material.itemId || String(material.itemId) === "0"
+    );
+
+    return !materialCumpleRegistro(materialItem) && !materialCumpleRegistro(materialOrden);
+  });
+};
+
 const texto = (valor, fallback = "No registrado") => {
   const limpio = String(valor ?? "").trim();
   return limpio || fallback;
@@ -156,7 +181,7 @@ function VehiculoDetallePage() {
 
   const metricas = useMemo(() => {
     const totalFacturado = ordenes.reduce(
-      (acc, orden) => acc + Number(orden.monto_total || 0),
+      (acc, orden) => acc + montoFinalOrden(orden),
       0
     );
     const totalPagado = ordenes.reduce(
@@ -495,6 +520,23 @@ function VehiculoDetallePage() {
             const diagnosticos = normalizarLista(orden.Diagnosticos, orden.Diagnostico);
             const fotos = normalizarLista(orden.FotoVehiculos, orden.FotosVehiculo);
             const archivos = normalizarLista(orden.ArchivoECUs, orden.ArchivosECU);
+            const itemsServicio = normalizarLista(
+              orden.OrdenServicioItems,
+              orden.ItemsServicio
+            );
+            const materialesOrden = [
+              ...normalizarLista(orden.MaterialRecuperados, orden.MaterialRecuperado),
+              ...materialesRecuperados.filter(
+                (item) => String(item.ordenId || "") === String(orden.id)
+              ),
+            ];
+            const historialAjustes = Array.isArray(orden.historial_ajustes)
+              ? orden.historial_ajustes
+              : [];
+            const pendientesMaterial = itemsMaterialPendiente(
+              itemsServicio,
+              materialesOrden
+            );
             const historialCorreccion = Array.isArray(orden.correccion_historial)
               ? orden.correccion_historial
               : [];
@@ -576,21 +618,76 @@ function VehiculoDetallePage() {
 
                   <div className="text-left xl:text-right">
                     <p className="text-[10px] font-black uppercase text-gray-500">
-                      Monto total
+                      Presupuesto / monto final
                     </p>
                     <p className="text-2xl font-black">
-                      {formatearMonto(orden.monto_total)}
+                      {formatearMonto(montoFinalOrden(orden))}
                     </p>
                   </div>
                 </div>
 
-                <div id="ordenes" className="scroll-mt-24 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div id="ordenes" className="scroll-mt-24 grid grid-cols-1 md:grid-cols-5 gap-4">
                   <MiniBox title="Diagnosticos" value={`${diagnosticos.length} registro(s)`} />
                   <MiniBox title="Fotos" value={`${fotos.length} archivo(s)`} />
                   <MiniBox title="Archivos ECU" value={`${archivos.length} archivo(s)`} />
+                  <MiniBox title="Items servicio" value={`${itemsServicio.length} item(s)`} />
+                  <MiniBox title="Material" value={`${materialesOrden.length} registro(s)`} />
                 </div>
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <Panel title="Resumen comercial">
+                    <Info
+                      label="Monto original"
+                      value={formatearMonto(orden.monto_original || orden.monto_total)}
+                    />
+                    <Info
+                      label="Presupuesto / monto final"
+                      value={formatearMonto(montoFinalOrden(orden))}
+                    />
+                    <Info
+                      label="Monto pagado"
+                      value={formatearMonto(orden.monto_pagado)}
+                    />
+                    <Info
+                      label="Estado comercial"
+                      value={
+                        orden.estado_pago === "PAGADO"
+                          ? "Pagado / venta real"
+                          : "Trabajo ingresado / pendiente de pago"
+                      }
+                    />
+                    <Info label="Ajustado por" value={orden.ajustado_por} />
+                    <Info
+                      label="Fecha ajuste"
+                      value={formatearFecha(orden.ajustado_at)}
+                    />
+                    <Info label="Motivo ajuste" value={orden.motivo_ajuste} />
+
+                    {historialAjustes.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-[10px] font-black uppercase text-gray-500">
+                          Historial ajustes
+                        </p>
+                        {historialAjustes.slice(-5).map((evento, index) => (
+                          <div
+                            key={`${evento.fecha || index}-${index}`}
+                            className="border-2 border-black bg-white p-3 text-xs font-bold uppercase"
+                          >
+                            <p>
+                              {formatearFecha(evento.fecha)} |{" "}
+                              {evento.ajustado_por || "No registrado"}
+                            </p>
+                            <p>
+                              {formatearMonto(evento.monto_anterior)} a{" "}
+                              {formatearMonto(evento.monto_final)}
+                            </p>
+                            <p>{evento.motivo_ajuste || "Sin motivo"}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Panel>
+
                   <Panel title="Pago y entrega">
                     <Info label="Estado pago" value={orden.estado_pago || "Pendiente"} />
                     <Info label="Medio pago" value={orden.medio_pago || "Pendiente"} />
@@ -630,6 +727,91 @@ function VehiculoDetallePage() {
                     <Info label="Observacion pago" value={orden.observacion_pago} />
                   </Panel>
                 </div>
+
+                {(itemsServicio.length > 0 || pendientesMaterial.length > 0) && (
+                  <Panel title="Items de servicio">
+                    {pendientesMaterial.length > 0 && (
+                      <div className="border-2 border-red-700 bg-red-50 p-3 text-xs font-black uppercase text-red-900">
+                        Material pendiente: registra peso o motivo de excepción
+                        antes de cierre técnico.
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      {itemsServicio.map((item) => (
+                        <div
+                          key={item.id}
+                          className="border-2 border-black bg-white p-3 text-xs font-bold uppercase"
+                        >
+                          <div className="flex flex-wrap justify-between gap-2">
+                            <p className="font-black">
+                              #{item.id} {item.tipo_servicio || "Servicio"}
+                            </p>
+                            <p>{formatearMonto(item.subtotal)}</p>
+                          </div>
+                          <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-3">
+                            <Info label="Categoria" value={item.categoria} />
+                            <Info label="Estado" value={item.estado} />
+                            <Info label="Responsable" value={item.responsable} />
+                            <Info label="Cantidad" value={item.cantidad} />
+                            <Info
+                              label="Precio unitario"
+                              value={formatearMonto(item.precio_unitario)}
+                            />
+                            <Info
+                              label="Material obligatorio"
+                              value={
+                                item.material_recuperado_obligatorio ? "Si" : "No"
+                              }
+                            />
+                          </div>
+                          <p className="mt-2">{texto(item.descripcion)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </Panel>
+                )}
+
+                {materialesOrden.length > 0 && (
+                  <Panel title="Material recuperado de la orden">
+                    <div className="space-y-3">
+                      {materialesOrden.map((material, index) => (
+                        <div
+                          key={material.id || `${material.ordenId}-${index}`}
+                          className="border-2 border-black bg-white p-3 text-xs font-bold uppercase"
+                        >
+                          <div className="flex flex-wrap justify-between gap-2">
+                            <p className="font-black">
+                              {material.tipo_material || "Material"} /{" "}
+                              {material.peso_kg ?? material.kilos ?? 0} kg
+                            </p>
+                            <p>{formatearMonto(material.valor_estimado)}</p>
+                          </div>
+                          <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-3">
+                            <Info label="Item" value={material.itemId || "Orden general"} />
+                            <Info label="Responsable" value={material.responsable} />
+                            <Info label="Destino" value={material.destino} />
+                            <Info
+                              label="Registrado por"
+                              value={material.registrado_por || material.creado_por}
+                            />
+                            <Info
+                              label="Fecha"
+                              value={formatearFecha(
+                                material.registrado_at || material.createdAt
+                              )}
+                            />
+                            <Info
+                              label="Excepcion"
+                              value={material.motivo_excepcion_material}
+                            />
+                          </div>
+                          <p className="mt-2">{texto(material.observacion)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </Panel>
+                )}
 
                 {tieneIntervencionFisica && (
                   <Panel title="Intervencion fisica / mecanica">
