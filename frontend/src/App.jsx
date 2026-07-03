@@ -204,6 +204,7 @@ const puedeVerAutomatizaciones = (usuario) =>
     "ADMIN",
     "SUPERVISOR",
     "RECEPCION",
+    "OPERADOR_SCANNER",
     "OPERADOR_ECU",
     "MECANICO",
     "TUNER",
@@ -240,6 +241,11 @@ const obtenerPerfilDashboardRol = (usuario) => {
     OPERADOR_ECU: {
       titulo: "Vista operador ECU",
       foco: "Ordenes relacionadas, diagnostico, MOD listo, post escritura, correcciones y recepcion de emergencia.",
+      operacion: "Sin ventas ni caja global",
+    },
+    OPERADOR_SCANNER: {
+      titulo: "Vista scanner",
+      foco: "Diagnosticos asignados, recepcion tecnica y ordenes que requieren revision.",
       operacion: "Sin ventas ni caja global",
     },
     MECANICO: {
@@ -1923,6 +1929,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const mostrarCumplimientoOperativo = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
     rol
   );
+  const mostrarMisPendientes = puedeVerOperacion(usuario);
   const puedeGenerarReportesAutomatizacion = ["OWNER", "ADMIN"].includes(
     rol
   );
@@ -2001,6 +2008,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     error: "",
   });
   const [cumplimientoOperativo, setCumplimientoOperativo] = useState({
+    data: null,
+    error: "",
+  });
+  const [misPendientes, setMisPendientes] = useState({
     data: null,
     error: "",
   });
@@ -3353,6 +3364,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         mostrarCumplimientoOperativo
           ? api.get("/automatizaciones/cumplimiento-operativo")
           : Promise.resolve({ data: null }),
+        mostrarMisPendientes
+          ? api.get("/automatizaciones/mis-pendientes")
+          : Promise.resolve({ data: null }),
       ]);
 
       const [
@@ -3364,6 +3378,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         finanzasRes,
         leadsRes,
         cumplimientoRes,
+        misPendientesRes,
       ] =
         respuestas;
 
@@ -3385,6 +3400,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         cumplimientoRes.status === "fulfilled"
           ? cumplimientoRes.value?.data || null
           : null;
+      const misPendientesData =
+        misPendientesRes.status === "fulfilled"
+          ? misPendientesRes.value?.data || null
+          : null;
       const ordenesDashboard = filtrarOrdenesPorRol(ordenes);
       const archivosDashboard = filtrarArchivosPorRol(archivos);
 
@@ -3405,6 +3424,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         error:
           mostrarCumplimientoOperativo && cumplimientoRes.status !== "fulfilled"
             ? "No se pudo cargar cumplimiento operativo."
+            : "",
+      });
+
+      setMisPendientes({
+        data: misPendientesData,
+        error:
+          mostrarMisPendientes && misPendientesRes.status !== "fulfilled"
+            ? "No se pudo cargar Mis pendientes."
             : "",
       });
 
@@ -3557,10 +3584,24 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
       <SemaforoOperativo semaforo={stats.semaforoOperativo} />
 
+      {mostrarMisPendientes && !mostrarCumplimientoOperativo && (
+        <MisPendientesSection
+          data={misPendientes.data}
+          error={misPendientes.error}
+        />
+      )}
+
       {mostrarCumplimientoOperativo && (
         <CumplimientoOperativoSection
           data={cumplimientoOperativo.data}
           error={cumplimientoOperativo.error}
+        />
+      )}
+
+      {mostrarMisPendientes && mostrarCumplimientoOperativo && (
+        <MisPendientesSection
+          data={misPendientes.data}
+          error={misPendientes.error}
         />
       )}
 
@@ -3855,6 +3896,141 @@ const CumplimientoOperativoSection = ({ data, error }) => {
           </div>
         </div>
       </div>
+    </section>
+  );
+};
+
+const misPendientesSeveridadClass = (severidad) => {
+  const valor = String(severidad || "").toUpperCase();
+  if (valor === "CRITICO") return "border-red-600 bg-red-50 text-red-900";
+  if (valor === "ATENCION") return "border-amber-500 bg-amber-50 text-amber-900";
+  if (valor === "SEGUIMIENTO") return "border-blue-500 bg-blue-50 text-blue-900";
+  return "border-slate-400 bg-slate-50 text-slate-800";
+};
+
+const labelAccionPendiente = (url = "") => {
+  if (url.includes("/ordenes")) return "Ver orden";
+  if (url.includes("/archivos-ecu")) return "Ver File Service";
+  if (url.includes("/flujo")) return "Ir a recepcion";
+  if (url.includes("/fotos")) return "Ver fotos";
+  return "Revisar";
+};
+
+const MisPendientesSection = ({ data, error }) => {
+  const resumen = data?.resumen || {};
+  const pendientes = Array.isArray(data?.pendientes) ? data.pendientes.slice(0, 6) : [];
+  const total = numeroDashboard(resumen.total);
+  const tarjetas = [
+    ["Ordenes asignadas", resumen.ordenes_asignadas],
+    ["Sin feedback", resumen.ordenes_sin_feedback],
+    ["Post escritura", resumen.post_escritura_pendiente],
+    ["Correcciones", resumen.correcciones_pendientes],
+    ["Material", resumen.material_recuperado_pendiente],
+    ["Servicios", resumen.servicios_sin_cerrar],
+  ];
+
+  return (
+    <section className="rounded-3xl border-4 border-slate-950 bg-slate-950 p-5 text-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">
+            Pendientes asociados a tu usuario
+          </p>
+          <h2 className="mt-1 text-2xl font-black uppercase">
+            Mis pendientes
+          </h2>
+          <p className="mt-2 text-xs font-bold uppercase text-slate-400">
+            No es ranking ni sancion; es una lista de tareas operativas.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-right">
+          <p className="text-[10px] font-black uppercase text-slate-400">
+            Total
+          </p>
+          <p className="text-3xl font-black text-white">{total}</p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-950/60 p-3 text-xs font-black uppercase text-red-100">
+          {error}
+        </div>
+      )}
+
+      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {tarjetas.map(([label, valor]) => (
+          <div key={label} className="rounded-2xl border border-white/10 bg-white/10 p-3">
+            <p className="text-[10px] font-black uppercase text-slate-400">{label}</p>
+            <p className="mt-1 text-2xl font-black text-white">
+              {numeroDashboard(valor)}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {pendientes.length === 0 ? (
+          <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
+            <p className="text-xs font-black uppercase text-slate-300">
+              Sin pendientes operativos asignados.
+            </p>
+          </div>
+        ) : (
+          pendientes.map((pendiente) => (
+            <div
+              key={`${pendiente.tipo}-${pendiente.ordenId || "sin-orden"}-${pendiente.archivoECUId || "sin-file"}-${pendiente.itemId || "sin-item"}`}
+              className={`rounded-2xl border-4 p-4 ${misPendientesSeveridadClass(
+                pendiente.severidad
+              )}`}
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-black px-3 py-1 text-[10px] font-black uppercase text-white">
+                      {pendiente.severidad || "INFO"}
+                    </span>
+                    <span className="text-[10px] font-black uppercase opacity-70">
+                      {pendiente.tipo}
+                    </span>
+                  </div>
+                  <h3 className="mt-2 text-sm font-black uppercase">
+                    {pendiente.titulo || "Pendiente operativo"}
+                  </h3>
+                  <p className="mt-1 text-xs font-bold opacity-80">
+                    {pendiente.descripcion || "Requiere revision operativa."}
+                  </p>
+                  <p className="mt-2 text-[11px] font-black uppercase opacity-75">
+                    Orden #{pendiente.ordenId || "-"} - File #{pendiente.archivoECUId || "-"} -{" "}
+                    {pendiente.patente || "Sin patente"}
+                  </p>
+                  <p className="mt-1 text-[11px] font-bold uppercase opacity-75">
+                    {pendiente.cliente || "Cliente no registrado"} -{" "}
+                    {pendiente.vehiculo || "Vehiculo no registrado"} - Estado:{" "}
+                    {pendiente.estado || "-"}
+                  </p>
+                </div>
+
+                {pendiente.accion_url ? (
+                  <Link
+                    to={pendiente.accion_url}
+                    className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-[10px] font-black uppercase text-white transition hover:bg-blue-700"
+                  >
+                    {labelAccionPendiente(pendiente.accion_url)}
+                  </Link>
+                ) : (
+                  <span className="rounded-xl border-2 border-current px-4 py-3 text-[10px] font-black uppercase opacity-70">
+                    Sin accion directa
+                  </span>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <p className="mt-4 text-[10px] font-black uppercase text-slate-500">
+        Generado: {data?.generado_at ? formatoFechaCorta(data.generado_at) : "Pendiente"}
+      </p>
     </section>
   );
 };

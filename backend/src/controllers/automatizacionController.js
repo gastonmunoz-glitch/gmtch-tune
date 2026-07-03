@@ -1329,6 +1329,401 @@ const crearCumplimientoOperativoData = (ctx) => {
   };
 };
 
+const normalizarClaveUsuario = (valor) => limpiarTexto(valor).toLowerCase();
+
+const crearIdentidadUsuario = (req) => {
+  const usuario = req.usuario || req.user || {};
+  const username = limpiarTexto(usuario.username);
+  const nombre = limpiarTexto(usuario.nombre);
+  const email = limpiarTexto(usuario.email);
+  const rol = upper(usuario.rol);
+  const claves = new Set(
+    [username, nombre, email]
+      .map(normalizarClaveUsuario)
+      .filter(Boolean)
+  );
+
+  return {
+    username,
+    nombre,
+    email,
+    rol,
+    claves,
+  };
+};
+
+const coincideIdentidad = (identidad, ...valores) =>
+  valores.some((valor) => {
+    const clave = normalizarClaveUsuario(valor);
+    return Boolean(clave && identidad.claves.has(clave));
+  });
+
+const datosOrdenOperativa = (orden) => {
+  const vehiculo = orden?._vehiculo || {};
+  const cliente = orden?._cliente || {};
+  const partesVehiculo = [vehiculo.marca, vehiculo.modelo, vehiculo.anio || vehiculo.year]
+    .map(limpiarTexto)
+    .filter(Boolean);
+
+  return {
+    cliente: cliente.nombre || "Cliente no registrado",
+    vehiculo: partesVehiculo.join(" ") || "Vehiculo no registrado",
+    patente: vehiculo.patente || "",
+  };
+};
+
+const prioridadPendiente = (pendiente) => {
+  const severidadPeso = {
+    CRITICO: 4,
+    ATENCION: 3,
+    SEGUIMIENTO: 2,
+    INFO: 1,
+  };
+  const prioridadPeso = {
+    URGENTE: 4,
+    ALTA: 3,
+    MEDIA: 2,
+    BAJA: 1,
+  };
+
+  return (
+    (severidadPeso[upper(pendiente.severidad)] || 0) * 10 +
+    (prioridadPeso[upper(pendiente.prioridad)] || 0)
+  );
+};
+
+const crearMisPendientesData = (ctx, req) => {
+  const identidad = crearIdentidadUsuario(req);
+  const rol = identidad.rol;
+  const fotosPorOrden = new Map();
+  const itemsPorOrden = new Map();
+  const materialesPorOrden = new Map();
+  const materialesPorItem = new Map();
+  const pendientesMap = new Map();
+  const resumen = {
+    total: 0,
+    ordenes_asignadas: 0,
+    ordenes_sin_feedback: 0,
+    post_escritura_pendiente: 0,
+    correcciones_pendientes: 0,
+    material_recuperado_pendiente: 0,
+    servicios_sin_cerrar: 0,
+    recepciones_emergencia_sin_fotos: 0,
+    listas_para_entrega: 0,
+  };
+
+  ctx.fotos.forEach((foto) => {
+    const ordenId = Number(foto.ordenId || foto.orden_id || foto.ordenTrabajoId);
+    if (!ordenId) return;
+    if (!fotosPorOrden.has(ordenId)) fotosPorOrden.set(ordenId, []);
+    fotosPorOrden.get(ordenId).push(foto);
+  });
+
+  ctx.items.forEach((item) => {
+    const ordenId = Number(item.ordenId || item.orden_id);
+    if (!ordenId) return;
+    if (!itemsPorOrden.has(ordenId)) itemsPorOrden.set(ordenId, []);
+    itemsPorOrden.get(ordenId).push(item);
+  });
+
+  ctx.materiales.forEach((material) => {
+    const ordenId = Number(material.ordenId || material.orden_id);
+    const itemId = Number(material.itemId || material.item_id || 0);
+    if (ordenId) {
+      if (!materialesPorOrden.has(ordenId)) materialesPorOrden.set(ordenId, []);
+      materialesPorOrden.get(ordenId).push(material);
+    }
+    if (itemId) {
+      if (!materialesPorItem.has(itemId)) materialesPorItem.set(itemId, []);
+      materialesPorItem.get(itemId).push(material);
+    }
+  });
+
+  const itemMaterialCumplido = (item, ordenId) => {
+    const itemId = Number(item.id);
+    const materialesItem = materialesPorItem.get(itemId) || [];
+    const materialesOrden = (materialesPorOrden.get(Number(ordenId)) || []).filter(
+      (material) => !Number(material.itemId || material.item_id || 0)
+    );
+    return [...materialesItem, ...materialesOrden].some(materialCumpleCumplimiento);
+  };
+
+  const agregarPendiente = (pendiente) => {
+    const key = [
+      pendiente.tipo,
+      pendiente.ordenId || "",
+      pendiente.archivoECUId || "",
+      pendiente.itemId || "",
+    ].join(":");
+
+    if (pendientesMap.has(key)) return;
+    pendientesMap.set(key, {
+      tipo: pendiente.tipo,
+      severidad: pendiente.severidad || "INFO",
+      titulo: pendiente.titulo,
+      descripcion: pendiente.descripcion,
+      ordenId: pendiente.ordenId || null,
+      archivoECUId: pendiente.archivoECUId || null,
+      itemId: pendiente.itemId || null,
+      estado: pendiente.estado || "",
+      prioridad: pendiente.prioridad || "",
+      cliente: pendiente.cliente || "Cliente no registrado",
+      vehiculo: pendiente.vehiculo || "Vehiculo no registrado",
+      patente: pendiente.patente || "",
+      accion_url: pendiente.accion_url || "/",
+    });
+
+    if (Object.prototype.hasOwnProperty.call(resumen, pendiente.contador)) {
+      resumen[pendiente.contador] += 1;
+    }
+  };
+
+  const ordenesActivas = ctx.ordenes.filter(
+    (orden) => upper(orden.estado) !== "ENTREGADO" && !booleano(orden.archivada)
+  );
+
+  ordenesActivas.forEach((orden) => {
+    const ordenId = Number(orden.id);
+    const estado = upper(orden.estado);
+    const datos = datosOrdenOperativa(orden);
+    const fotosOrden = fotosPorOrden.get(ordenId) || [];
+    const emergencia = upper(orden.origen_recepcion) === "RECEPCION_EMERGENCIA_OPERADOR";
+    const asignadaAlUsuario = coincideIdentidad(
+      identidad,
+      orden.recepcionado_por,
+      orden.diagnostico_asignado_a,
+      orden.operador_ecu_asignado_a,
+      orden.mecanico_asignado_a,
+      orden.supervisor_asignado_a
+    );
+    const esColaRecepcion = rol === "RECEPCION" && estado === "LISTO_PARA_ENTREGA";
+    const esColaScanner =
+      rol === "OPERADOR_SCANNER" &&
+      (coincideIdentidad(identidad, orden.diagnostico_asignado_a) ||
+        ["PARA_DIAGNOSTICO", "RECEPCIONADO"].includes(estado));
+
+    if (asignadaAlUsuario || esColaScanner) {
+      agregarPendiente({
+        tipo: estado === "PARA_DIAGNOSTICO" ? "DIAGNOSTICO_PENDIENTE" : "ORDEN_ASIGNADA",
+        severidad: ["URGENTE", "ALTA"].includes(upper(orden.prioridad))
+          ? "ATENCION"
+          : "SEGUIMIENTO",
+        titulo: estado === "PARA_DIAGNOSTICO" ? "Diagnostico pendiente" : "Orden asignada",
+        descripcion: "Orden asociada a tu usuario requiere seguimiento operativo.",
+        ordenId,
+        estado: orden.estado || "SIN_ESTADO",
+        prioridad: orden.prioridad || "",
+        ...datos,
+        accion_url: `/ordenes?ordenId=${ordenId}`,
+        contador: "ordenes_asignadas",
+      });
+    }
+
+    if (
+      (asignadaAlUsuario || esColaScanner) &&
+      !limpiarTexto(orden.feedback_por) &&
+      !limpiarTexto(orden.feedback_operario)
+    ) {
+      agregarPendiente({
+        tipo: "SIN_FEEDBACK",
+        severidad: "SEGUIMIENTO",
+        titulo: "Feedback operativo pendiente",
+        descripcion: "La orden asociada no tiene feedback operativo registrado.",
+        ordenId,
+        estado: orden.estado || "SIN_ESTADO",
+        prioridad: orden.prioridad || "",
+        ...datos,
+        accion_url: `/ordenes?ordenId=${ordenId}#feedback`,
+        contador: "ordenes_sin_feedback",
+      });
+    }
+
+    if (
+      (coincideIdentidad(identidad, orden.recepcionado_por) || rol === "RECEPCION") &&
+      emergencia &&
+      fotosOrden.length === 0
+    ) {
+      agregarPendiente({
+        tipo: "RECEPCION_EMERGENCIA_SIN_FOTOS",
+        severidad: "ATENCION",
+        titulo: "Recepcion de emergencia sin fotos",
+        descripcion: "Completa evidencia fotografica de la recepcion de emergencia.",
+        ordenId,
+        estado: orden.estado || "SIN_ESTADO",
+        prioridad: orden.prioridad || "",
+        ...datos,
+        accion_url: `/fotos?ordenId=${ordenId}`,
+        contador: "recepciones_emergencia_sin_fotos",
+      });
+    }
+
+    if (esColaRecepcion && upper(orden.estado_pago) !== "PAGADO") {
+      agregarPendiente({
+        tipo: "LISTO_PARA_ENTREGA",
+        severidad: "ATENCION",
+        titulo: "Lista para entrega con pago pendiente",
+        descripcion: "Orden lista para entrega requiere cierre comercial antes de entregar.",
+        ordenId,
+        estado: orden.estado || "SIN_ESTADO",
+        prioridad: orden.prioridad || "",
+        ...datos,
+        accion_url: `/ordenes?ordenId=${ordenId}#entrega`,
+        contador: "listas_para_entrega",
+      });
+    }
+  });
+
+  ctx.items.forEach((item) => {
+    const ordenId = Number(item.ordenId || item.orden_id);
+    if (!ordenId) return;
+    const orden = ctx.ordenes.find((actual) => Number(actual.id) === ordenId) || {};
+    if (upper(orden.estado) === "ENTREGADO" || booleano(orden.archivada)) return;
+    const datos = datosOrdenOperativa(orden);
+    const asignadoItem = coincideIdentidad(identidad, item.responsable);
+    const asignadoMecanico = rol === "MECANICO" && coincideIdentidad(identidad, orden.mecanico_asignado_a);
+    const estadoItem = upper(item.estado || "PENDIENTE");
+    const cerrado = ["CERRADO", "COMPLETADO", "FINALIZADO", "ANULADO"].includes(estadoItem);
+    const requiereMaterial =
+      booleano(item.material_recuperado_obligatorio) ||
+      booleano(item.requiere_material_recuperado);
+
+    if ((asignadoItem || asignadoMecanico) && !cerrado) {
+      agregarPendiente({
+        tipo: "SERVICIO_SIN_CERRAR",
+        severidad: "SEGUIMIENTO",
+        titulo: "Servicio sin cerrar",
+        descripcion: item.tipo_servicio
+          ? `Item pendiente: ${item.tipo_servicio}.`
+          : "Item de servicio pendiente de cierre operativo.",
+        ordenId,
+        itemId: item.id || null,
+        estado: item.estado || "PENDIENTE",
+        prioridad: orden.prioridad || "",
+        ...datos,
+        accion_url: `/ordenes?ordenId=${ordenId}#items`,
+        contador: "servicios_sin_cerrar",
+      });
+    }
+
+    if ((asignadoItem || asignadoMecanico) && requiereMaterial && !itemMaterialCumplido(item, ordenId)) {
+      agregarPendiente({
+        tipo: "MATERIAL_PENDIENTE",
+        severidad: "ATENCION",
+        titulo: "Material recuperado pendiente",
+        descripcion: "Registra peso recuperado o motivo de excepcion del item.",
+        ordenId,
+        itemId: item.id || null,
+        estado: item.estado || "PENDIENTE",
+        prioridad: orden.prioridad || "",
+        ...datos,
+        accion_url: `/ordenes?ordenId=${ordenId}#material`,
+        contador: "material_recuperado_pendiente",
+      });
+    }
+  });
+
+  ctx.archivos.filter(esArchivoActivo).forEach((archivo) => {
+    const estadoArchivo = upper(archivo.estado);
+    const orden = archivo._orden || {};
+    const datos = datosOrdenOperativa(orden);
+    const asignadoArchivo = coincideIdentidad(
+      identidad,
+      archivo.tuner_asignado_a,
+      archivo.operador_ecu_asignado_a,
+      archivo.slave_asignado_a,
+      archivo.proceso_guard_responsable_id
+    );
+    const colaOperador =
+      rol === "OPERADOR_ECU" &&
+      (asignadoArchivo ||
+        ["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
+          estadoArchivo
+        ));
+    const colaTuner =
+      rol === "TUNER" &&
+      (asignadoArchivo ||
+        ["REQUIERE_CORRECCION", "CORRECCION_SOLICITADA", "EN_REVISION"].includes(
+          estadoArchivo
+        ));
+
+    if (asignadoArchivo || colaOperador || colaTuner) {
+      agregarPendiente({
+        tipo: "FILE_SERVICE_PENDIENTE",
+        severidad: estadoArchivo === "REQUIERE_CORRECCION" ? "CRITICO" : "SEGUIMIENTO",
+        titulo: "File Service pendiente",
+        descripcion: "Archivo ECU asociado a tu usuario requiere seguimiento.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        estado: archivo.estado || "SIN_ESTADO",
+        prioridad: archivo.prioridad || orden.prioridad || "",
+        ...datos,
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}`,
+        contador: "ordenes_asignadas",
+      });
+    }
+
+    if (
+      (asignadoArchivo || colaOperador) &&
+      upper(archivo.post_escritura_estado) !== "OK" &&
+      (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
+        estadoArchivo
+      ) ||
+        Boolean(archivo.archivo_modificado))
+    ) {
+      agregarPendiente({
+        tipo: "POST_ESCRITURA_PENDIENTE",
+        severidad: "ATENCION",
+        titulo: "Post escritura pendiente",
+        descripcion: "Archivo/orden requiere post escritura o validacion.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        estado: archivo.estado || "SIN_ESTADO",
+        prioridad: archivo.prioridad || orden.prioridad || "",
+        ...datos,
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+        contador: "post_escritura_pendiente",
+      });
+    }
+
+    if (
+      (asignadoArchivo || colaTuner || colaOperador) &&
+      (booleano(archivo.correccion_pendiente) || estadoArchivo === "REQUIERE_CORRECCION")
+    ) {
+      agregarPendiente({
+        tipo: "CORRECCION_PENDIENTE",
+        severidad: "CRITICO",
+        titulo: "Correccion pendiente",
+        descripcion: "File Service requiere revision o correccion tecnica.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        estado: archivo.estado || "SIN_ESTADO",
+        prioridad: archivo.prioridad || orden.prioridad || "",
+        ...datos,
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}#correccion`,
+        contador: "correcciones_pendientes",
+      });
+    }
+  });
+
+  const pendientes = [...pendientesMap.values()]
+    .sort((a, b) => prioridadPendiente(b) - prioridadPendiente(a))
+    .slice(0, 50);
+  resumen.total = pendientes.length;
+
+  return {
+    generado_at: new Date().toISOString(),
+    usuario: {
+      username: identidad.username,
+      nombre: identidad.nombre,
+      rol,
+    },
+    resumen,
+    pendientes,
+    solo_lectura: true,
+    enfoque: "mis_pendientes_v1",
+  };
+};
+
 const crearNotificacionAntiSpam = async ({
   rolesDestino,
   tipo,
@@ -1561,6 +1956,21 @@ const cumplimientoOperativo = async (req, res) => {
   }
 };
 
+const misPendientes = async (req, res) => {
+  try {
+    const ctx = await cargarContexto();
+    const resultado = crearMisPendientesData(ctx, req);
+
+    return res.json(resultado);
+  } catch (error) {
+    console.error("ERROR MIS PENDIENTES:", error);
+    return res.status(500).json({
+      error: "No se pudo cargar Mis pendientes.",
+      detalle: process.env.NODE_ENV === "production" ? undefined : error.message,
+    });
+  }
+};
+
 const revisarProcessGuard = async (req, res) => {
   try {
     const ctx = await cargarContexto();
@@ -1692,6 +2102,7 @@ module.exports = {
   revisionProcessGuard,
   revisarProcessGuard,
   cumplimientoOperativo,
+  misPendientes,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,

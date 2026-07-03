@@ -9,6 +9,7 @@ const {
   revisionProcessGuard,
   revisarProcessGuard,
   cumplimientoOperativo,
+  misPendientes,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,
@@ -26,9 +27,11 @@ const rolesOperativos = [
   "OPERADOR_ECU",
   "MECANICO",
   "TUNER",
+  "OPERADOR_SCANNER",
 ];
 
 router.get("/revision-operativa", permitirRoles(...rolesOperativos), revisionOperativa);
+router.get("/mis-pendientes", permitirRoles(...rolesOperativos), misPendientes);
 router.get(
   "/cumplimiento-operativo",
   permitirRoles("OWNER", "ADMIN", "SUPERVISOR"),
