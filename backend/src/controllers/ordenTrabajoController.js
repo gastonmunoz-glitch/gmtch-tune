@@ -211,8 +211,15 @@ const CATEGORIAS_ITEM_SERVICIO = [
 ];
 
 const ROLES_AJUSTE_COMERCIAL = ["OWNER", "ADMIN"];
-const ROLES_CREAR_ORDEN = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"];
-const ROLES_CIERRE_COMERCIAL = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"];
+const ROLES_CREAR_ORDEN = [
+  "OWNER",
+  "ADMIN",
+  "SUPERVISOR",
+  "RECEPCION",
+  "OPERADOR_ECU",
+];
+const ROLES_CIERRE_COMERCIAL = ["OWNER", "ADMIN", "RECEPCION"];
+const ROLES_PATCH_COMERCIAL = ["OWNER", "ADMIN", "RECEPCION"];
 const ROLES_GESTION_ITEMS = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"];
 const ROLES_MATERIAL_RECUPERADO = [
   "OWNER",
@@ -221,6 +228,57 @@ const ROLES_MATERIAL_RECUPERADO = [
   "RECEPCION",
   "MECANICO",
 ];
+
+const CAMPOS_COMERCIALES_SENSIBLES = [
+  "estado_pago",
+  "medio_pago",
+  "monto_pagado",
+  "fecha_pago",
+  "cobrado_por",
+  "observacion_pago",
+  "entregado_por",
+  "entregado_at",
+  "observacion_cierre",
+  "monto_total",
+  "monto_final",
+  "monto_original",
+  "motivo_ajuste",
+  "historial_ajustes",
+];
+
+const camposPresentes = (body = {}, campos = []) =>
+  campos.filter((campo) => Object.prototype.hasOwnProperty.call(body, campo));
+
+const camposComercialesPatchRecibidos = (body = {}) => {
+  const campos = camposPresentes(body, CAMPOS_COMERCIALES_SENSIBLES);
+  const estadoSolicitado = limpiarTexto(body.estado).toUpperCase();
+
+  if (estadoSolicitado === "ENTREGADO") {
+    campos.push("estado=ENTREGADO");
+  }
+
+  return campos;
+};
+
+const intentoCobroEntregaEnCreacion = (body = {}) => {
+  const estadoSolicitado = limpiarTexto(body.estado).toUpperCase();
+  const estadoPagoSolicitado = limpiarTexto(body.estado_pago).toUpperCase();
+  const medioPagoSolicitado = limpiarTexto(body.medio_pago).toUpperCase();
+  const montoPagadoSolicitado = normalizarNumero(body.monto_pagado, 0);
+
+  return (
+    estadoSolicitado === "ENTREGADO" ||
+    (estadoPagoSolicitado && estadoPagoSolicitado !== "PENDIENTE") ||
+    (medioPagoSolicitado && medioPagoSolicitado !== "PENDIENTE") ||
+    montoPagadoSolicitado > 0 ||
+    Boolean(limpiarTexto(body.fecha_pago)) ||
+    Boolean(limpiarTexto(body.cobrado_por)) ||
+    Boolean(limpiarTexto(body.observacion_pago)) ||
+    Boolean(limpiarTexto(body.entregado_por)) ||
+    Boolean(limpiarTexto(body.entregado_at)) ||
+    Boolean(limpiarTexto(body.observacion_cierre))
+  );
+};
 
 const normalizarEstadoItem = (valor) => {
   const estado = limpiarTexto(valor || "PENDIENTE").toUpperCase();
@@ -441,6 +499,9 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "recepcionado_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "origen_recepcion" VARCHAR(100);
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "diagnostico_asignado_a" VARCHAR(100);
@@ -791,6 +852,7 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     intervencion_fisica_at: row.intervencion_fisica_at,
 
     recepcionado_por: row.recepcionado_por,
+    origen_recepcion: row.origen_recepcion,
     diagnostico_asignado_a: row.diagnostico_asignado_a,
     operador_ecu_asignado_a: row.operador_ecu_asignado_a,
     mecanico_asignado_a: row.mecanico_asignado_a,
@@ -947,6 +1009,15 @@ const crearOrden = async (req, res) => {
       return enviarErrorPermiso(res);
     }
 
+    const esRecepcionEmergenciaOperador = rolActual(req) === "OPERADOR_ECU";
+
+    if (esRecepcionEmergenciaOperador && intentoCobroEntregaEnCreacion(req.body)) {
+      return res.status(403).json({
+        error:
+          "Recepcion de emergencia no permite crear ordenes cobradas, pagadas o entregadas.",
+      });
+    }
+
     const vehiculoId = Number(req.body.vehiculoId || req.body.vehiculo_id);
 
     if (!vehiculoId || Number.isNaN(vehiculoId)) {
@@ -972,9 +1043,15 @@ const crearOrden = async (req, res) => {
       vehiculoId,
       prioridad: prioridadFinal,
       estado: limpiarTexto(req.body.estado) || "RECEPCIONADO",
-      estado_pago: limpiarTexto(req.body.estado_pago) || "PENDIENTE",
-      medio_pago: limpiarTexto(req.body.medio_pago) || "PENDIENTE",
-      monto_pagado: normalizarNumero(req.body.monto_pagado, 0),
+      estado_pago: esRecepcionEmergenciaOperador
+        ? "PENDIENTE"
+        : limpiarTexto(req.body.estado_pago) || "PENDIENTE",
+      medio_pago: esRecepcionEmergenciaOperador
+        ? "PENDIENTE"
+        : limpiarTexto(req.body.medio_pago) || "PENDIENTE",
+      monto_pagado: esRecepcionEmergenciaOperador
+        ? 0
+        : normalizarNumero(req.body.monto_pagado, 0),
       kilometraje: req.body.kilometraje ? Number(req.body.kilometraje) : null,
       motivo_ingreso: limpiarTexto(req.body.motivo_ingreso),
       monto_total: montoInicial,
@@ -991,12 +1068,16 @@ const crearOrden = async (req, res) => {
 
     const recepcionadoPor =
       limpiarTexto(req.body.recepcionado_por) || usuarioActual(req);
+    const origenRecepcion = esRecepcionEmergenciaOperador
+      ? "RECEPCION_EMERGENCIA_OPERADOR"
+      : limpiarTexto(req.body.origen_recepcion);
 
     await sequelize.query(
       `
       UPDATE "ordenes_trabajo"
       SET
         "recepcionado_por" = :recepcionadoPor,
+        "origen_recepcion" = NULLIF(:origenRecepcion, ''),
         "updatedAt" = NOW()
       WHERE "id" = :id;
       `,
@@ -1004,13 +1085,18 @@ const crearOrden = async (req, res) => {
         replacements: {
           id: nuevaOrden.id,
           recepcionadoPor,
+          origenRecepcion,
         },
       }
     );
 
     res.status(201).json({
       mensaje: "Orden creada correctamente",
-      orden: nuevaOrden,
+      orden: {
+        ...nuevaOrden.toJSON(),
+        recepcionado_por: recepcionadoPor,
+        origen_recepcion: origenRecepcion || null,
+      },
       id: nuevaOrden.id,
     });
   } catch (error) {
@@ -1038,6 +1124,16 @@ const actualizarOrden = async (req, res) => {
     if (orden.archivada) {
       return res.status(400).json({
         error: "No puedes modificar una orden archivada",
+      });
+    }
+
+    const camposComerciales = camposComercialesPatchRecibidos(req.body);
+
+    if (camposComerciales.length > 0 && !tieneRol(req, ROLES_PATCH_COMERCIAL)) {
+      return res.status(403).json({
+        error:
+          "No tienes permisos para modificar campos comerciales de pago, cobro, entrega o montos.",
+        campos: camposComerciales,
       });
     }
 
@@ -2107,6 +2203,12 @@ const actualizarEstado = async (req, res) => {
     if (!estado) {
       return res.status(400).json({
         error: "Debes indicar estado",
+      });
+    }
+
+    if (estado === "ENTREGADO" && !tieneRol(req, ROLES_PATCH_COMERCIAL)) {
+      return res.status(403).json({
+        error: "No tienes permisos para entregar ordenes por cambio de estado.",
       });
     }
 

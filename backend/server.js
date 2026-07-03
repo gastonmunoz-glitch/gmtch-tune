@@ -350,7 +350,7 @@ app.use(
       "OPERADOR_SCANNER",
       "OPERADOR_ECU",
     ],
-    POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
+    POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION", "OPERADOR_ECU"],
     PUT: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
     PATCH: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
     DELETE: ["OWNER"],
@@ -578,7 +578,7 @@ app.post(
   "/api/vehiculos",
   autenticar,
   permitirPorMetodo({
-    POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
+    POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION", "OPERADOR_ECU"],
   }),
   async (req, res) => {
     try {
@@ -1276,7 +1276,14 @@ app.use(
       "MECANICO",
       "TUNER",
     ],
-    POST: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION", "MECANICO"],
+    POST: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "RECEPCION",
+      "OPERADOR_ECU",
+      "MECANICO",
+    ],
     PUT: [
       "OWNER",
       "ADMIN",
