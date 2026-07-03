@@ -26,6 +26,7 @@ const TABLAS = {
   fotos: "fotos_vehiculo",
   diagnosticos: "diagnosticos",
   items: "orden_servicio_items",
+  eventosOrden: "orden_eventos_operativos",
 };
 
 const LIMITE_LECTURA = 800;
@@ -60,6 +61,13 @@ const horasDesde = (valor, base = new Date()) => {
   const fecha = fechaValida(valor);
   if (!fecha) return 0;
   return Math.max(0, (base.getTime() - fecha.getTime()) / 36e5);
+};
+
+const horasEntre = (fechaA, fechaB) => {
+  const inicio = fechaValida(fechaA);
+  const fin = fechaValida(fechaB);
+  if (!inicio || !fin) return 0;
+  return Math.max(0, (fin.getTime() - inicio.getTime()) / 36e5);
 };
 
 const inicioDia = (base = new Date()) => {
@@ -203,6 +211,7 @@ const cargarContexto = async () => {
     fotos,
     diagnosticos,
     items,
+    eventosOrden,
   ] = await Promise.all([
     leerTabla(TABLAS.ordenes),
     leerTabla(TABLAS.archivos),
@@ -218,6 +227,7 @@ const cargarContexto = async () => {
     leerTabla(TABLAS.fotos, 800),
     leerTabla(TABLAS.diagnosticos, 800),
     leerTabla(TABLAS.items, 800),
+    leerTabla(TABLAS.eventosOrden, 2000),
   ]);
 
   const clientesPorId = new Map(clientes.map((cliente) => [Number(cliente.id), cliente]));
@@ -253,6 +263,7 @@ const cargarContexto = async () => {
     fotos: ordenarPorFecha(fotos),
     diagnosticos: ordenarPorFecha(diagnosticos),
     items: ordenarPorFecha(items),
+    eventosOrden: ordenarPorFecha(eventosOrden),
   };
 };
 
@@ -1724,6 +1735,474 @@ const crearMisPendientesData = (ctx, req) => {
   };
 };
 
+const normalizarEstado = (estado) => upper(estado || "SIN_ESTADO");
+
+const redondearHoras = (valor) => Number(Math.max(0, valor || 0).toFixed(1));
+
+const crearEventosPorOrden = (eventos = []) => {
+  const mapa = new Map();
+
+  eventos.forEach((evento) => {
+    const ordenId = Number(evento.ordenId || evento.orden_id);
+    if (!ordenId) return;
+    if (!mapa.has(ordenId)) mapa.set(ordenId, []);
+    mapa.get(ordenId).push(evento);
+  });
+
+  mapa.forEach((items) => {
+    items.sort((a, b) => {
+      const fechaA = fechaValida(a.createdAt)?.getTime() || 0;
+      const fechaB = fechaValida(b.createdAt)?.getTime() || 0;
+      return fechaA - fechaB;
+    });
+  });
+
+  return mapa;
+};
+
+const obtenerUltimoEventoOrden = (eventosPorOrden, ordenId) => {
+  const eventos = eventosPorOrden.get(Number(ordenId)) || [];
+  return eventos[eventos.length - 1] || null;
+};
+
+const obtenerUltimoCambioEstado = (eventosPorOrden, ordenId, estadoNuevo = "") => {
+  const estadoObjetivo = normalizarEstado(estadoNuevo);
+  const eventos = (eventosPorOrden.get(Number(ordenId)) || []).filter((evento) => {
+    if (upper(evento.tipo_evento) !== "ESTADO_CAMBIADO") return false;
+    return !estadoNuevo || normalizarEstado(evento.estado_nuevo) === estadoObjetivo;
+  });
+
+  return eventos[eventos.length - 1] || null;
+};
+
+const obtenerFechaEstadoActual = (orden, eventosPorOrden) => {
+  const ordenId = Number(orden.id);
+  const estado = normalizarEstado(orden.estado);
+  const cambioActual = obtenerUltimoCambioEstado(eventosPorOrden, ordenId, estado);
+  if (cambioActual?.createdAt) return cambioActual.createdAt;
+
+  const ultimoCambio = obtenerUltimoCambioEstado(eventosPorOrden, ordenId);
+  if (ultimoCambio?.createdAt) return ultimoCambio.createdAt;
+
+  const eventos = eventosPorOrden.get(ordenId) || [];
+  const eventoCreacion = eventos.find((evento) => upper(evento.tipo_evento) === "ORDEN_CREADA");
+  if (eventoCreacion?.createdAt) return eventoCreacion.createdAt;
+
+  return orden.updatedAt || orden.createdAt;
+};
+
+const obtenerDatosOrdenSLA = (orden) => {
+  const vehiculo = orden?._vehiculo || {};
+  const cliente = orden?._cliente || {};
+  const vehiculoTexto = [vehiculo.marca, vehiculo.modelo, vehiculo.anio || vehiculo.year]
+    .map(limpiarTexto)
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    cliente: cliente.nombre || "Cliente no registrado",
+    vehiculo: vehiculoTexto || "Vehiculo no registrado",
+    patente: vehiculo.patente || "",
+  };
+};
+
+const responsableOrdenSLA = (orden) =>
+  limpiarTexto(
+    orden.operador_ecu_asignado_a ||
+      orden.diagnostico_asignado_a ||
+      orden.mecanico_asignado_a ||
+      orden.supervisor_asignado_a ||
+      orden.recepcionado_por
+  ) || "Sin responsable";
+
+const responsableArchivoSLA = (archivo) =>
+  limpiarTexto(
+    archivo.operador_ecu_asignado_a ||
+      archivo.tuner_asignado_a ||
+      archivo.slave_asignado_a ||
+      archivo.proceso_guard_responsable_id
+  ) || "Sin responsable";
+
+const crearTiemposOperativosData = (ctx) => {
+  const ahora = new Date();
+  const eventosPorOrden = crearEventosPorOrden(ctx.eventosOrden || []);
+  const fotosPorOrden = new Map();
+  const diagnosticosPorOrden = new Map();
+  const itemsPorOrden = new Map();
+  const materialesPorOrden = new Map();
+  const materialesPorItem = new Map();
+  const alertasMap = new Map();
+  const ordenesSet = new Set();
+  const archivosSet = new Set();
+
+  const resumen = {
+    ordenes_atrasadas: 0,
+    recepcion_sin_diagnostico: 0,
+    programacion_atrasada: 0,
+    listas_sin_entrega: 0,
+    file_service_atrasado: 0,
+    post_escritura_atrasada: 0,
+    correccion_atrasada: 0,
+    material_pendiente_atrasado: 0,
+    recepcion_emergencia_atrasada: 0,
+    feedback_pendiente_atrasado: 0,
+  };
+
+  ctx.fotos.forEach((foto) => {
+    const ordenId = Number(foto.ordenId || foto.orden_id || foto.ordenTrabajoId);
+    if (!ordenId) return;
+    if (!fotosPorOrden.has(ordenId)) fotosPorOrden.set(ordenId, []);
+    fotosPorOrden.get(ordenId).push(foto);
+  });
+
+  ctx.diagnosticos.forEach((diagnostico) => {
+    const ordenId = Number(
+      diagnostico.ordenId || diagnostico.orden_id || diagnostico.ordenTrabajoId
+    );
+    if (!ordenId) return;
+    if (!diagnosticosPorOrden.has(ordenId)) diagnosticosPorOrden.set(ordenId, []);
+    diagnosticosPorOrden.get(ordenId).push(diagnostico);
+  });
+
+  ctx.items.forEach((item) => {
+    const ordenId = Number(item.ordenId || item.orden_id);
+    if (!ordenId) return;
+    if (!itemsPorOrden.has(ordenId)) itemsPorOrden.set(ordenId, []);
+    itemsPorOrden.get(ordenId).push(item);
+  });
+
+  ctx.materiales.forEach((material) => {
+    const ordenId = Number(material.ordenId || material.orden_id);
+    const itemId = Number(material.itemId || material.item_id || 0);
+    if (ordenId) {
+      if (!materialesPorOrden.has(ordenId)) materialesPorOrden.set(ordenId, []);
+      materialesPorOrden.get(ordenId).push(material);
+    }
+    if (itemId) {
+      if (!materialesPorItem.has(itemId)) materialesPorItem.set(itemId, []);
+      materialesPorItem.get(itemId).push(material);
+    }
+  });
+
+  const itemMaterialCumplido = (item, ordenId) => {
+    const itemId = Number(item.id);
+    const materialesItem = materialesPorItem.get(itemId) || [];
+    const materialesOrden = (materialesPorOrden.get(Number(ordenId)) || []).filter(
+      (material) => !Number(material.itemId || material.item_id || 0)
+    );
+    return [...materialesItem, ...materialesOrden].some(materialCumpleCumplimiento);
+  };
+
+  const agregarAlertaTiempo = ({
+    tipo,
+    severidad,
+    titulo,
+    descripcion,
+    ordenId = null,
+    archivoECUId = null,
+    itemId = null,
+    usuario_responsable,
+    estado,
+    horas_sin_movimiento,
+    accion_url,
+    contador,
+    extra = {},
+  }) => {
+    const key = [tipo, ordenId || "", archivoECUId || "", itemId || ""].join(":");
+    if (alertasMap.has(key)) return;
+
+    const alertaTiempo = {
+      tipo,
+      severidad,
+      titulo,
+      descripcion,
+      ordenId,
+      archivoECUId,
+      itemId,
+      usuario_responsable: usuario_responsable || "Sin responsable",
+      estado: estado || "SIN_ESTADO",
+      horas_sin_movimiento: redondearHoras(horas_sin_movimiento),
+      accion_url: accion_url || "/",
+      ...extra,
+    };
+
+    alertasMap.set(key, alertaTiempo);
+    if (contador && Object.prototype.hasOwnProperty.call(resumen, contador)) {
+      resumen[contador] += 1;
+    }
+    if (ordenId) ordenesSet.add(Number(ordenId));
+    if (archivoECUId) archivosSet.add(Number(archivoECUId));
+  };
+
+  const ordenesActivas = ctx.ordenes.filter(
+    (orden) => normalizarEstado(orden.estado) !== "ENTREGADO" && !booleano(orden.archivada)
+  );
+
+  ordenesActivas.forEach((orden) => {
+    const ordenId = Number(orden.id);
+    const estado = normalizarEstado(orden.estado);
+    const datos = obtenerDatosOrdenSLA(orden);
+    const fechaEstado = obtenerFechaEstadoActual(orden, eventosPorOrden);
+    const horasEstado = horasDesde(fechaEstado, ahora);
+    const ultimoEvento = obtenerUltimoEventoOrden(eventosPorOrden, ordenId);
+    const horasSinMovimiento = horasDesde(
+      ultimoEvento?.createdAt || orden.updatedAt || orden.createdAt,
+      ahora
+    );
+    const diagnosticos = diagnosticosPorOrden.get(ordenId) || [];
+    const fotos = fotosPorOrden.get(ordenId) || [];
+    const items = itemsPorOrden.get(ordenId) || [];
+    const responsable = responsableOrdenSLA(orden);
+    const accionOrden = `/ordenes?ordenId=${ordenId}`;
+
+    if (estado === "RECEPCIONADO" && diagnosticos.length === 0 && horasEstado > 2) {
+      agregarAlertaTiempo({
+        tipo: "RECEPCION_SIN_DIAGNOSTICO",
+        severidad: "ATENCION",
+        titulo: "Recepcion sin diagnostico",
+        descripcion: "Orden recepcionada sin diagnostico registrado dentro del SLA referencial.",
+        ordenId,
+        usuario_responsable: responsable,
+        estado: orden.estado,
+        horas_sin_movimiento: horasEstado,
+        accion_url: `${accionOrden}#diagnostico`,
+        contador: "recepcion_sin_diagnostico",
+        extra: datos,
+      });
+    }
+
+    if (estado === "PARA_DIAGNOSTICO" && horasEstado > 4) {
+      agregarAlertaTiempo({
+        tipo: "DIAGNOSTICO_ATRASADO",
+        severidad: "ATENCION",
+        titulo: "Diagnostico atrasado",
+        descripcion: "Orden en PARA_DIAGNOSTICO por mas de 4 horas corridas.",
+        ordenId,
+        usuario_responsable: responsable,
+        estado: orden.estado,
+        horas_sin_movimiento: horasEstado,
+        accion_url: `${accionOrden}#diagnostico`,
+        contador: "recepcion_sin_diagnostico",
+        extra: datos,
+      });
+    }
+
+    if (estado === "EN_PROGRAMACION" && horasEstado > 24) {
+      agregarAlertaTiempo({
+        tipo: "PROGRAMACION_ATRASADA",
+        severidad: "CRITICO",
+        titulo: "Programacion atrasada",
+        descripcion: "Orden en programacion por mas de 24 horas corridas.",
+        ordenId,
+        usuario_responsable: responsable,
+        estado: orden.estado,
+        horas_sin_movimiento: horasEstado,
+        accion_url: accionOrden,
+        contador: "programacion_atrasada",
+        extra: datos,
+      });
+    }
+
+    if (estado === "LISTO_PARA_ENTREGA" && !orden.entregado_at && horasEstado > 24) {
+      agregarAlertaTiempo({
+        tipo: "LISTO_SIN_ENTREGA",
+        severidad: "CRITICO",
+        titulo: "Lista sin entrega",
+        descripcion: "Orden lista para entrega por mas de 24 horas corridas.",
+        ordenId,
+        usuario_responsable: responsable,
+        estado: orden.estado,
+        horas_sin_movimiento: horasEstado,
+        accion_url: `${accionOrden}#entrega`,
+        contador: "listas_sin_entrega",
+        extra: datos,
+      });
+    }
+
+    if (
+      upper(orden.origen_recepcion) === "RECEPCION_EMERGENCIA_OPERADOR" &&
+      (fotos.length === 0 || items.length === 0) &&
+      horasDesde(orden.createdAt, ahora) > 2
+    ) {
+      agregarAlertaTiempo({
+        tipo: "RECEPCION_EMERGENCIA_ATRASADA",
+        severidad: "ATENCION",
+        titulo: "Recepcion emergencia incompleta",
+        descripcion: "Recepcion de emergencia sin fotos o items despues de 2 horas corridas.",
+        ordenId,
+        usuario_responsable: orden.recepcionado_por || responsable,
+        estado: orden.estado,
+        horas_sin_movimiento: horasDesde(orden.createdAt, ahora),
+        accion_url: accionOrden,
+        contador: "recepcion_emergencia_atrasada",
+        extra: datos,
+      });
+    }
+
+    if (
+      orden.tecnico_finalizado_at &&
+      !limpiarTexto(orden.feedback_por) &&
+      !limpiarTexto(orden.feedback_operario) &&
+      horasDesde(orden.tecnico_finalizado_at, ahora) > 12
+    ) {
+      agregarAlertaTiempo({
+        tipo: "FEEDBACK_PENDIENTE_ATRASADO",
+        severidad: "SEGUIMIENTO",
+        titulo: "Feedback pendiente",
+        descripcion: "Orden finalizada tecnicamente sin feedback operativo despues de 12 horas.",
+        ordenId,
+        usuario_responsable: responsable,
+        estado: orden.estado,
+        horas_sin_movimiento: horasDesde(orden.tecnico_finalizado_at, ahora),
+        accion_url: `${accionOrden}#feedback`,
+        contador: "feedback_pendiente_atrasado",
+        extra: datos,
+      });
+    }
+
+    if (horasSinMovimiento > 24 && !["LISTO_PARA_ENTREGA", "EN_PROGRAMACION"].includes(estado)) {
+      agregarAlertaTiempo({
+        tipo: "SIN_MOVIMIENTO_RECIENTE",
+        severidad: "SEGUIMIENTO",
+        titulo: "Orden sin movimiento reciente",
+        descripcion: "Orden activa sin eventos o actualizaciones recientes por mas de 24 horas.",
+        ordenId,
+        usuario_responsable: responsable,
+        estado: orden.estado,
+        horas_sin_movimiento: horasSinMovimiento,
+        accion_url: accionOrden,
+        extra: datos,
+      });
+    }
+  });
+
+  ctx.items.forEach((item) => {
+    const ordenId = Number(item.ordenId || item.orden_id);
+    const orden = ctx.ordenes.find((actual) => Number(actual.id) === ordenId);
+    if (!orden || normalizarEstado(orden.estado) === "ENTREGADO" || booleano(orden.archivada)) {
+      return;
+    }
+
+    const obligatorio =
+      booleano(item.material_recuperado_obligatorio) ||
+      booleano(item.requiere_material_recuperado);
+    if (!obligatorio || normalizarEstado(item.estado) === "ANULADO") return;
+    if (itemMaterialCumplido(item, ordenId)) return;
+
+    const horasItem = horasDesde(item.updatedAt || item.createdAt || orden.createdAt, ahora);
+    if (horasItem <= 24) return;
+
+    agregarAlertaTiempo({
+      tipo: "MATERIAL_PENDIENTE_ATRASADO",
+      severidad: "ATENCION",
+      titulo: "Material obligatorio pendiente",
+      descripcion: "Item con material recuperado obligatorio pendiente por mas de 24 horas.",
+      ordenId,
+      itemId: item.id || null,
+      usuario_responsable: item.responsable || responsableOrdenSLA(orden),
+      estado: item.estado || "PENDIENTE",
+      horas_sin_movimiento: horasItem,
+      accion_url: `/ordenes?ordenId=${ordenId}#material`,
+      contador: "material_pendiente_atrasado",
+      extra: obtenerDatosOrdenSLA(orden),
+    });
+  });
+
+  ctx.archivos.filter(esArchivoActivo).forEach((archivo) => {
+    const estadoArchivo = normalizarEstado(archivo.estado);
+    const horasArchivo = horasDesde(archivo.updatedAt || archivo.createdAt, ahora);
+    const orden = archivo._orden || {};
+    const datos = obtenerDatosOrdenSLA(orden);
+    const responsable = responsableArchivoSLA(archivo);
+    const accion = `/archivos-ecu?archivoId=${archivo.id}`;
+    const postPendiente =
+      upper(archivo.post_escritura_estado) !== "OK" &&
+      (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
+        estadoArchivo
+      ) ||
+        Boolean(archivo.archivo_modificado));
+    const correccionPendiente =
+      booleano(archivo.correccion_pendiente) || estadoArchivo === "REQUIERE_CORRECCION";
+
+    if (postPendiente && horasArchivo > 24) {
+      agregarAlertaTiempo({
+        tipo: "POST_ESCRITURA_ATRASADA",
+        severidad: "CRITICO",
+        titulo: "Post escritura atrasada",
+        descripcion: "File Service sin post escritura OK por mas de 24 horas.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        usuario_responsable: responsable,
+        estado: archivo.estado,
+        horas_sin_movimiento: horasArchivo,
+        accion_url: `${accion}#post-escritura`,
+        contador: "post_escritura_atrasada",
+        extra: datos,
+      });
+    }
+
+    if (correccionPendiente && horasArchivo > 12) {
+      agregarAlertaTiempo({
+        tipo: "CORRECCION_ATRASADA",
+        severidad: "CRITICO",
+        titulo: "Correccion atrasada",
+        descripcion: "File Service con correccion pendiente por mas de 12 horas.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        usuario_responsable: responsable,
+        estado: archivo.estado,
+        horas_sin_movimiento: horasArchivo,
+        accion_url: `${accion}#correccion`,
+        contador: "correccion_atrasada",
+        extra: datos,
+      });
+    }
+
+    if (!postPendiente && !correccionPendiente && horasArchivo > 24) {
+      agregarAlertaTiempo({
+        tipo: "FILE_SERVICE_ATRASADO",
+        severidad: "ATENCION",
+        titulo: "File Service activo atrasado",
+        descripcion: "File Service activo por mas de 24 horas corridas.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        usuario_responsable: responsable,
+        estado: archivo.estado,
+        horas_sin_movimiento: horasArchivo,
+        accion_url: accion,
+        extra: datos,
+      });
+    }
+  });
+
+  const alertas_tiempo = [...alertasMap.values()].sort((a, b) => {
+    const peso = { CRITICO: 3, ATENCION: 2, SEGUIMIENTO: 1 };
+    const severidad = (peso[upper(b.severidad)] || 0) - (peso[upper(a.severidad)] || 0);
+    if (severidad !== 0) return severidad;
+    return numero(b.horas_sin_movimiento) - numero(a.horas_sin_movimiento);
+  });
+
+  resumen.ordenes_atrasadas = ordenesSet.size;
+  resumen.file_service_atrasado = archivosSet.size;
+
+  return {
+    generado_at: new Date().toISOString(),
+    enfoque: "sla_operativo_referencial_v1",
+    solo_lectura: true,
+    resumen,
+    alertas_tiempo: alertas_tiempo.slice(0, 100),
+    ordenes_atrasadas: alertas_tiempo
+      .filter((alertaItem) => alertaItem.ordenId && !alertaItem.archivoECUId && !alertaItem.itemId)
+      .slice(0, 100),
+    file_service_atrasado: alertas_tiempo
+      .filter((alertaItem) => alertaItem.archivoECUId)
+      .slice(0, 100),
+    material_atrasado: alertas_tiempo
+      .filter((alertaItem) => alertaItem.itemId)
+      .slice(0, 100),
+  };
+};
+
 const crearNotificacionAntiSpam = async ({
   rolesDestino,
   tipo,
@@ -1971,6 +2450,21 @@ const misPendientes = async (req, res) => {
   }
 };
 
+const tiemposOperativos = async (req, res) => {
+  try {
+    const ctx = await cargarContexto();
+    const resultado = crearTiemposOperativosData(ctx);
+
+    return res.json(resultado);
+  } catch (error) {
+    console.error("ERROR TIEMPOS OPERATIVOS:", error);
+    return res.status(500).json({
+      error: "No se pudo cargar tiempos operativos.",
+      detalle: process.env.NODE_ENV === "production" ? undefined : error.message,
+    });
+  }
+};
+
 const revisarProcessGuard = async (req, res) => {
   try {
     const ctx = await cargarContexto();
@@ -2103,6 +2597,7 @@ module.exports = {
   revisarProcessGuard,
   cumplimientoOperativo,
   misPendientes,
+  tiemposOperativos,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,

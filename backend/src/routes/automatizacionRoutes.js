@@ -10,6 +10,7 @@ const {
   revisarProcessGuard,
   cumplimientoOperativo,
   misPendientes,
+  tiemposOperativos,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,
@@ -32,6 +33,11 @@ const rolesOperativos = [
 
 router.get("/revision-operativa", permitirRoles(...rolesOperativos), revisionOperativa);
 router.get("/mis-pendientes", permitirRoles(...rolesOperativos), misPendientes);
+router.get(
+  "/tiempos-operativos",
+  permitirRoles("OWNER", "ADMIN", "SUPERVISOR"),
+  tiemposOperativos
+);
 router.get(
   "/cumplimiento-operativo",
   permitirRoles("OWNER", "ADMIN", "SUPERVISOR"),

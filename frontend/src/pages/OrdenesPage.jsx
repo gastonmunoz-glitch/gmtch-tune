@@ -321,6 +321,17 @@ const obtenerTiempo = (valor) => {
   return Number.isNaN(tiempo) ? 0 : tiempo;
 };
 
+const horasDesdeOrden = (valor) => {
+  const tiempo = obtenerTiempo(valor);
+  if (!tiempo) return 0;
+  return Math.max(0, (Date.now() - tiempo) / 36e5);
+};
+
+const formatearHorasBadge = (horas) => {
+  if (horas >= 24) return `${Math.round(horas)}h`;
+  return `${Math.max(1, Math.round(horas))}h`;
+};
+
 const ordenarActivas = (a, b) => {
   const pa = PRIORIDAD_PESO[a.prioridad] || 99;
   const pb = PRIORIDAD_PESO[b.prioridad] || 99;
@@ -1296,6 +1307,26 @@ function OrdenesPage() {
                 o.detalle_pendiente ||
                 o.recomendacion_futura
             );
+            const estadoOrden = String(o.estado || "").toUpperCase();
+            const horasDesdeActualizacion = horasDesdeOrden(o.updatedAt || o.createdAt);
+            const horasDesdeEntrada = horasDesdeOrden(o.createdAt);
+            const horasListoEntrega = horasDesdeOrden(
+              o.tecnico_finalizado_at || o.updatedAt || o.createdAt
+            );
+            const badgesTiempos = [
+              estadoOrden !== "ENTREGADO" && horasDesdeActualizacion > 24
+                ? `Sin movimiento +${formatearHorasBadge(horasDesdeActualizacion)}`
+                : null,
+              estadoOrden === "RECEPCIONADO" && horasDesdeEntrada > 2
+                ? `Pendiente diagnostico +${formatearHorasBadge(horasDesdeEntrada)}`
+                : null,
+              estadoOrden === "PARA_DIAGNOSTICO" && horasDesdeActualizacion > 4
+                ? `Pendiente diagnostico +${formatearHorasBadge(horasDesdeActualizacion)}`
+                : null,
+              estadoOrden === "LISTO_PARA_ENTREGA" && horasListoEntrega > 24
+                ? `Listo sin entrega +${formatearHorasBadge(horasListoEntrega)}`
+                : null,
+            ].filter(Boolean);
             const badgesCumplimiento = [
               fotosOrden.length === 0 ? "Sin fotos" : null,
               itemsOrden.length === 0 ? "Sin items" : null,
@@ -1377,6 +1408,15 @@ function OrdenesPage() {
                           <span
                             key={`${o.id}-${badge}`}
                             className="bg-amber-100 text-amber-900 border-2 border-amber-500 px-3 py-1 text-[10px] font-black uppercase"
+                          >
+                            {badge}
+                          </span>
+                        ))}
+
+                        {badgesTiempos.map((badge) => (
+                          <span
+                            key={`${o.id}-${badge}`}
+                            className="bg-red-50 text-red-900 border-2 border-red-600 px-3 py-1 text-[10px] font-black uppercase"
                           >
                             {badge}
                           </span>

@@ -1929,6 +1929,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const mostrarCumplimientoOperativo = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
     rol
   );
+  const mostrarTiemposOperativos = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
+    rol
+  );
   const mostrarMisPendientes = puedeVerOperacion(usuario);
   const puedeGenerarReportesAutomatizacion = ["OWNER", "ADMIN"].includes(
     rol
@@ -2008,6 +2011,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     error: "",
   });
   const [cumplimientoOperativo, setCumplimientoOperativo] = useState({
+    data: null,
+    error: "",
+  });
+  const [tiemposOperativos, setTiemposOperativos] = useState({
     data: null,
     error: "",
   });
@@ -3364,6 +3371,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         mostrarCumplimientoOperativo
           ? api.get("/automatizaciones/cumplimiento-operativo")
           : Promise.resolve({ data: null }),
+        mostrarTiemposOperativos
+          ? api.get("/automatizaciones/tiempos-operativos")
+          : Promise.resolve({ data: null }),
         mostrarMisPendientes
           ? api.get("/automatizaciones/mis-pendientes")
           : Promise.resolve({ data: null }),
@@ -3378,6 +3388,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         finanzasRes,
         leadsRes,
         cumplimientoRes,
+        tiemposOperativosRes,
         misPendientesRes,
       ] =
         respuestas;
@@ -3399,6 +3410,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       const cumplimientoData =
         cumplimientoRes.status === "fulfilled"
           ? cumplimientoRes.value?.data || null
+          : null;
+      const tiemposOperativosData =
+        tiemposOperativosRes.status === "fulfilled"
+          ? tiemposOperativosRes.value?.data || null
           : null;
       const misPendientesData =
         misPendientesRes.status === "fulfilled"
@@ -3424,6 +3439,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         error:
           mostrarCumplimientoOperativo && cumplimientoRes.status !== "fulfilled"
             ? "No se pudo cargar cumplimiento operativo."
+            : "",
+      });
+
+      setTiemposOperativos({
+        data: tiemposOperativosData,
+        error:
+          mostrarTiemposOperativos && tiemposOperativosRes.status !== "fulfilled"
+            ? "No se pudo cargar tiempos operativos."
             : "",
       });
 
@@ -3595,6 +3618,13 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         <CumplimientoOperativoSection
           data={cumplimientoOperativo.data}
           error={cumplimientoOperativo.error}
+        />
+      )}
+
+      {mostrarTiemposOperativos && (
+        <TiemposMuertosSection
+          data={tiemposOperativos.data}
+          error={tiemposOperativos.error}
         />
       )}
 
@@ -3894,6 +3924,132 @@ const CumplimientoOperativoSection = ({ data, error }) => {
               ))
             )}
           </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+const tiempoSeveridadClass = (severidad) => {
+  const valor = String(severidad || "").toUpperCase();
+  if (valor === "CRITICO") return "border-red-700 bg-red-700 text-white";
+  if (valor === "ATENCION") return "border-amber-500 bg-amber-100 text-amber-950";
+  return "border-blue-500 bg-blue-50 text-blue-950";
+};
+
+const labelAccionTiempo = (url = "") => {
+  if (url.includes("/archivos-ecu")) return "Ver File Service";
+  if (url.includes("/ordenes")) return "Ver orden";
+  return "Revisar";
+};
+
+const TiemposMuertosSection = ({ data, error }) => {
+  const resumen = data?.resumen || {};
+  const alertas = Array.isArray(data?.alertas_tiempo)
+    ? data.alertas_tiempo.slice(0, 5)
+    : [];
+  const tarjetas = [
+    ["Ordenes atrasadas", resumen.ordenes_atrasadas, "border-red-700"],
+    ["Recepcion sin diagnostico", resumen.recepcion_sin_diagnostico, "border-amber-500"],
+    ["Programacion >24h", resumen.programacion_atrasada, "border-red-600"],
+    ["Listas sin entrega", resumen.listas_sin_entrega, "border-red-700"],
+    ["File Service atrasado", resumen.file_service_atrasado, "border-blue-600"],
+    ["Material pendiente", resumen.material_pendiente_atrasado, "border-orange-500"],
+  ];
+
+  return (
+    <section className="rounded-3xl border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-700">
+            Tiempos muertos
+          </p>
+          <h2 className="mt-1 text-2xl font-black uppercase text-black">
+            SLA operativo referencial
+          </h2>
+          <p className="mt-2 text-xs font-bold uppercase text-gray-500">
+            SLA operativo referencial - horas corridas. No es ranking, sancion ni bono.
+          </p>
+        </div>
+        <p className="text-[10px] font-black uppercase text-gray-400">
+          Generado: {data?.generado_at ? formatoFechaCorta(data.generado_at) : "Pendiente"}
+        </p>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-50 p-3 text-xs font-black uppercase text-red-800">
+          {error}
+        </div>
+      )}
+
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+        {tarjetas.map(([label, valor, color]) => (
+          <div key={label} className={`rounded-2xl border-4 ${color} bg-slate-50 p-4`}>
+            <p className="text-[10px] font-black uppercase text-gray-500">{label}</p>
+            <p className="mt-2 text-3xl font-black text-black">
+              {numeroDashboard(valor)}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 rounded-2xl border-4 border-slate-950 bg-slate-950 p-4 text-white">
+        <h3 className="text-sm font-black uppercase text-blue-300">
+          Top alertas SLA
+        </h3>
+        <div className="mt-3 space-y-3">
+          {alertas.length === 0 ? (
+            <p className="text-xs font-black uppercase text-slate-400">
+              Sin alertas de tiempos muertos.
+            </p>
+          ) : (
+            alertas.map((alerta) => (
+              <div
+                key={`${alerta.tipo}-${alerta.ordenId || "sin-orden"}-${alerta.archivoECUId || "sin-file"}-${alerta.itemId || "sin-item"}`}
+                className={`rounded-2xl border-4 p-4 ${tiempoSeveridadClass(
+                  alerta.severidad
+                )}`}
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-black px-3 py-1 text-[10px] font-black uppercase text-white">
+                        {alerta.severidad || "SEGUIMIENTO"}
+                      </span>
+                      <span className="text-[10px] font-black uppercase opacity-70">
+                        {alerta.tipo}
+                      </span>
+                      <span className="rounded-full border border-current px-3 py-1 text-[10px] font-black uppercase">
+                        +{Number(alerta.horas_sin_movimiento || 0).toFixed(1)}h
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm font-black uppercase">
+                      {alerta.titulo || "Alerta SLA"}
+                    </p>
+                    <p className="mt-1 text-xs font-bold opacity-80">
+                      {alerta.descripcion || "Requiere revision operativa."}
+                    </p>
+                    <p className="mt-2 text-[10px] font-black uppercase opacity-75">
+                      Orden #{alerta.ordenId || "-"} - File #{alerta.archivoECUId || "-"} -{" "}
+                      {alerta.usuario_responsable || "Sin responsable"}
+                    </p>
+                  </div>
+                  {alerta.accion_url ? (
+                    <Link
+                      to={alerta.accion_url}
+                      className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-[10px] font-black uppercase text-white transition hover:bg-blue-700"
+                    >
+                      {labelAccionTiempo(alerta.accion_url)}
+                    </Link>
+                  ) : (
+                    <span className="rounded-xl border-2 border-current px-4 py-3 text-[10px] font-black uppercase opacity-70">
+                      Revisar
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </section>
