@@ -1159,6 +1159,11 @@ function VehiculoDetallePage() {
                           archivo.servicios_solicitados
                         );
                         const dtcsSnapshot = normalizarJsonLista(archivo.dtc_snapshot);
+                        const responsableFile =
+                          archivo.operador_ecu_asignado_a ||
+                          archivo.tuner_asignado_a ||
+                          archivo.slave_asignado_a ||
+                          "Sin responsable";
 
                         return (
                           <div key={archivo.id || index} className="border-2 border-black p-3 bg-white">
@@ -1212,9 +1217,25 @@ function VehiculoDetallePage() {
                               <Info label="DTC post" value={archivo.post_escritura_dtc || "Pendiente"} />
                               <Info label="Post por" value={archivo.post_escritura_por} />
                               <Info label="Fecha post" value={formatearFecha(archivo.post_escritura_at)} />
+                              <Info label="Responsable File" value={responsableFile} />
+                              <Info label="Tuner / Master" value={archivo.tuner_asignado_a || "-"} />
+                              <Info label="Operador ECU" value={archivo.operador_ecu_asignado_a || "-"} />
                               <Info label="Process Guard" value={archivo.proceso_guard_estado || "Sin riesgo"} />
                               <Info label="Cierre tecnico" value={archivo.cierre_tecnico_at ? formatearFecha(archivo.cierre_tecnico_at) : "Pendiente"} />
+                              <Info label="Cierre por" value={archivo.cierre_tecnico_por || "-"} />
+                              <Info label="Resultado tecnico" value={archivo.resultado_tecnico || "Pendiente"} />
                             </div>
+
+                            {archivo.observacion_cierre_tecnico && (
+                              <div className="mt-3 border border-gray-300 bg-gray-50 p-3 text-xs">
+                                <p className="font-black uppercase text-gray-500">
+                                  Observacion cierre tecnico
+                                </p>
+                                <p className="mt-1 font-semibold text-gray-900">
+                                  {archivo.observacion_cierre_tecnico}
+                                </p>
+                              </div>
+                            )}
 
                             {archivo.archivo_modificado &&
                               !archivo.cierre_tecnico_at &&

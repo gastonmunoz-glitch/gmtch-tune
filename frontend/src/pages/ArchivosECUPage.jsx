@@ -21,6 +21,7 @@ const ESTADOS = {
 
 const RESULTADOS_POST_ESCRITURA = [
   { value: "OK", label: "OK - Sin problemas" },
+  { value: "NO_APLICA", label: "No aplica - revision simple" },
   { value: "REQUIERE_CORRECCION", label: "Requiere corrección ECU" },
   { value: "FALLO_ESCRITURA", label: "Falló escritura" },
   { value: "EN_PRUEBA", label: "Vehículo en prueba" },
@@ -72,16 +73,19 @@ const HERRAMIENTAS_PROCESAMIENTO_EXTERNO = [
 const RESPONSABLES_FILE_SERVICE = [
   {
     campo: "tuner_asignado_a",
+    campoId: "tuner_asignado_a_id",
     label: "Tuner / Master",
     roles: ["TUNER", "SUPERVISOR", "OWNER"],
   },
   {
     campo: "operador_ecu_asignado_a",
+    campoId: "operador_ecu_asignado_a_id",
     label: "Operador ECU",
     roles: ["OPERADOR_ECU", "TUNER", "SUPERVISOR", "OWNER"],
   },
   {
     campo: "slave_asignado_a",
+    campoId: "slave_asignado_a_id",
     label: "Slave / operador externo",
     roles: ["OPERADOR_ECU", "TUNER", "OWNER"],
   },
@@ -318,6 +322,105 @@ const obtenerResponsablePrincipal = (archivo) => {
   );
 };
 
+const snapshotUsuario = (usuario) =>
+  limpiar(usuario?.username || usuario?.nombre || usuario?.email || usuario?.id);
+
+const requiereModParaCierre = (archivo) => {
+  const estado = String(archivo?.estado || "").toUpperCase();
+  const servicios = normalizarLista(archivo?.servicios_solicitados)
+    .map((servicio) => String(servicio?.value || servicio || "").toUpperCase())
+    .join(" ");
+  const servicioTexto = [
+    archivo?.tipo_servicio,
+    archivo?.servicio_principal,
+    servicios,
+  ]
+    .map((valor) => String(valor || "").toUpperCase())
+    .join(" ");
+
+  if (archivo?.archivo_modificado) return true;
+  if (
+    [
+      "MODIFICADO_LISTO",
+      "NOTIFICADO_SLAVE",
+      "POST_ESCRITURA_PENDIENTE",
+      "POST_ESCRITURA_OK",
+    ].includes(estado)
+  ) {
+    return true;
+  }
+
+  if (!servicioTexto.trim()) return false;
+
+  return ![
+    "READINESS",
+    "CHECKSUM",
+    "BACKUP_ORIGINAL",
+    "RESTAURAR_ORIGINAL",
+    "REVISION",
+    "DIAGNOSTICO",
+    "LECTURA",
+  ].some((marcador) => servicioTexto.includes(marcador));
+};
+
+const checklistCierreTecnico = (archivo, cierreForm = {}) => {
+  const postEstado = String(archivo?.post_escritura_estado || "").toUpperCase();
+  const postNoAplica =
+    postEstado === "NO_APLICA" && limpiar(archivo?.post_escritura_observacion);
+  const responsableOk = Boolean(
+    limpiar(archivo?.tuner_asignado_a_id) ||
+      limpiar(archivo?.operador_ecu_asignado_a_id) ||
+      limpiar(archivo?.tuner_asignado_a) ||
+      limpiar(archivo?.operador_ecu_asignado_a)
+  );
+  const modRequerido = requiereModParaCierre(archivo);
+
+  return [
+    {
+      key: "original",
+      label: "Archivo original",
+      ok: Boolean(archivo?.archivo_original),
+    },
+    {
+      key: "servicios",
+      label: "Servicios solicitados",
+      ok:
+        normalizarLista(archivo?.servicios_solicitados).length > 0 ||
+        Boolean(limpiar(archivo?.tipo_servicio)),
+    },
+    {
+      key: "responsable",
+      label: "Responsable asignado",
+      ok: responsableOk,
+    },
+    {
+      key: "mod",
+      label: modRequerido ? "MOD cargado" : "MOD no aplica",
+      ok: !modRequerido || Boolean(archivo?.archivo_modificado),
+    },
+    {
+      key: "post",
+      label: "Post escritura OK / No aplica",
+      ok: postEstado === "OK" || postNoAplica,
+    },
+    {
+      key: "dtc",
+      label: "DTC final revisado",
+      ok: Boolean(limpiar(archivo?.post_escritura_dtc) || archivo?.post_escritura_sin_dtc),
+    },
+    {
+      key: "observacion",
+      label: "Observacion final",
+      ok: Boolean(limpiar(cierreForm.observacion_cierre_tecnico)),
+    },
+    {
+      key: "cierre",
+      label: "Cierre tecnico",
+      ok: Boolean(archivo?.cierre_tecnico_at),
+    },
+  ];
+};
+
 const obtenerProximaAccion = (archivo) => {
   if (archivo.archivado || archivo.estado === "ARCHIVADO") return "Archivado";
   if (archivo.estado === "FINALIZADO_TECNICO" || archivo.estado === "FINALIZADO") {
@@ -411,6 +514,12 @@ export default function ArchivosECUPage() {
     notas_operador: "",
     instrucciones_tuner: "",
     observaciones: "",
+    tuner_asignado_a_id: "",
+    tuner_asignado_a: "",
+    operador_ecu_asignado_a_id: "",
+    operador_ecu_asignado_a: "",
+    slave_asignado_a_id: "",
+    slave_asignado_a: "",
     archivo: null,
   });
 
@@ -647,6 +756,23 @@ export default function ArchivosECUPage() {
     [usuarios]
   );
 
+  const buscarUsuarioPorId = useCallback(
+    (usuarioId) =>
+      usuarios.find((usuario) => String(usuario.id) === String(usuarioId)) ||
+      null,
+    [usuarios]
+  );
+
+  const actualizarResponsableNuevo = (responsable, usuarioId) => {
+    const usuario = buscarUsuarioPorId(usuarioId);
+
+    setNuevo((prev) => ({
+      ...prev,
+      [responsable.campoId]: usuario?.id || "",
+      [responsable.campo]: usuario ? snapshotUsuario(usuario) : "",
+    }));
+  };
+
   const mostrarError = (err, fallback = "Error inesperado") => {
     console.error(err);
 
@@ -655,6 +781,27 @@ export default function ArchivosECUPage() {
     if (data?.bloqueo === "DIAGNOSTICO_OBLIGATORIO") {
       setBloqueoDiagnostico(data);
       setError(data.error || fallback);
+      return;
+    }
+
+    if (data?.error === "RESPONSABLE_BLOQUEADO") {
+      const detalle = normalizarLista(data.pendientes_criticos)
+        .slice(0, 3)
+        .map((item) => item.titulo || item.tipo || item.descripcion)
+        .filter(Boolean)
+        .join(" / ");
+      setError(
+        `${data.message || "Responsable bloqueado por pendientes criticos."}${
+          detalle ? ` Pendientes: ${detalle}` : ""
+        }`
+      );
+      return;
+    }
+
+    if (Array.isArray(data?.faltantes) && data.faltantes.length > 0) {
+      setError(
+        `${data.message || data.error || fallback}: ${data.faltantes.join(", ")}`
+      );
       return;
     }
 
@@ -774,6 +921,11 @@ export default function ArchivosECUPage() {
       return;
     }
 
+    if (!nuevo.tuner_asignado_a_id && !nuevo.operador_ecu_asignado_a_id) {
+      setError("Debes asignar Tuner/Master u Operador ECU activo.");
+      return;
+    }
+
     if (!nuevo.archivo) {
       setError("Debes cargar el archivo original");
       return;
@@ -832,6 +984,12 @@ export default function ArchivosECUPage() {
         notas_operador: "",
         instrucciones_tuner: "",
         observaciones: "",
+        tuner_asignado_a_id: "",
+        tuner_asignado_a: "",
+        operador_ecu_asignado_a_id: "",
+        operador_ecu_asignado_a: "",
+        slave_asignado_a_id: "",
+        slave_asignado_a: "",
         archivo: null,
       });
 
@@ -974,12 +1132,14 @@ export default function ArchivosECUPage() {
     }
   };
 
-  const asignarResponsableFileService = async (archivoId, campo, valor) => {
+  const asignarResponsableFileService = async (archivoId, responsable, usuarioId) => {
     limpiarMensajes();
+    const usuario = buscarUsuarioPorId(usuarioId);
 
     try {
       await api.patch(`/archivos-ecu/${archivoId}`, {
-        [campo]: valor,
+        [responsable.campoId]: usuario?.id || "",
+        [responsable.campo]: usuario ? snapshotUsuario(usuario) : "",
       });
 
       setMensaje("Responsable File Service actualizado");
@@ -1148,13 +1308,21 @@ export default function ArchivosECUPage() {
       ...(postForms[archivoId] || {}),
     };
 
-    if (!form.scanner_post_escritura) {
+    if (form.post_escritura_estado !== "NO_APLICA" && !form.scanner_post_escritura) {
       setError("La foto/captura del scanner post escritura es obligatoria");
       return;
     }
 
     if (!form.post_escritura_estado) {
       setError("Debes seleccionar resultado post escritura");
+      return;
+    }
+
+    if (
+      form.post_escritura_estado === "NO_APLICA" &&
+      !limpiar(form.post_escritura_observacion)
+    ) {
+      setError("Debes indicar observacion tecnica cuando post escritura no aplica.");
       return;
     }
 
@@ -1178,7 +1346,9 @@ export default function ArchivosECUPage() {
         "post_escritura_observacion",
         form.post_escritura_observacion || ""
       );
-      fd.append("scanner_post_escritura", form.scanner_post_escritura);
+      if (form.scanner_post_escritura) {
+        fd.append("scanner_post_escritura", form.scanner_post_escritura);
+      }
 
       await api.post(`/archivos-ecu/${archivoId}/post-escritura`, fd, {
         headers: {
@@ -1230,8 +1400,18 @@ export default function ArchivosECUPage() {
       return;
     }
 
-    if (form.resultado_tecnico === "OK" && archivo.post_escritura_estado !== "OK") {
-      setError("Para cerrar OK debes registrar post escritura OK primero.");
+    const checklist = checklistCierreTecnico(archivo, form);
+    const faltantes = checklist
+      .filter((item) => item.key !== "cierre" && !item.ok)
+      .map((item) => item.label);
+
+    if (form.resultado_tecnico === "OK" && faltantes.length > 0) {
+      setError(`Para cerrar OK faltan: ${faltantes.join(", ")}.`);
+      return;
+    }
+
+    if (form.resultado_tecnico !== "OK" && !limpiar(form.observacion_cierre_tecnico)) {
+      setError("Debes indicar observacion tecnica para cierre no OK.");
       return;
     }
 
@@ -1289,9 +1469,18 @@ export default function ArchivosECUPage() {
   const finalizarTecnico = async (archivo) => {
     limpiarMensajes();
 
-    if (archivo.post_escritura_estado !== "OK") {
+    const cierreForm = {
+      resultado_tecnico: "OK",
+      observacion_cierre_tecnico: archivo.observacion_cierre_tecnico || "",
+      ...(cierreTecnicoForms[archivo.id] || {}),
+    };
+    const faltantes = checklistCierreTecnico(archivo, cierreForm)
+      .filter((item) => item.key !== "cierre" && !item.ok)
+      .map((item) => item.label);
+
+    if (faltantes.length > 0) {
       setError(
-        "No puedes finalizar sin post escritura OK, scanner post escritura y DTC registrados"
+        `No puedes finalizar tecnicamente. Faltan: ${faltantes.join(", ")}.`
       );
       return;
     }
@@ -1306,6 +1495,7 @@ export default function ArchivosECUPage() {
       await api.patch(`/archivos-ecu/${archivo.id}`, {
         estado: "FINALIZADO_TECNICO",
         correccion_pendiente: false,
+        observacion_cierre_tecnico: cierreForm.observacion_cierre_tecnico,
       });
 
       setMensaje("File Service finalizado técnicamente");
@@ -1496,6 +1686,50 @@ export default function ArchivosECUPage() {
                 <option value="ALTA">Alta</option>
                 <option value="URGENTE">Urgente</option>
               </select>
+            </div>
+
+            <div className="md:col-span-3 rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+              <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase text-slate-300">
+                    Responsables File Service
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Debe existir Tuner/Master u Operador ECU asignado antes de enviar.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                {RESPONSABLES_FILE_SERVICE.map((responsable) => {
+                  const opciones = usuariosPorRoles(responsable.roles);
+                  return (
+                    <label
+                      key={`nuevo-${responsable.campoId}`}
+                      className="text-sm text-slate-300"
+                    >
+                      <span className="mb-1 block text-xs text-slate-500">
+                        {responsable.label}
+                      </span>
+                      <select
+                        value={nuevo[responsable.campoId] || ""}
+                        onChange={(e) =>
+                          actualizarResponsableNuevo(responsable, e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 outline-none focus:border-blue-500"
+                      >
+                        <option value="">Sin asignar</option>
+                        {opciones.map((usuario) => (
+                          <option key={usuario.id} value={usuario.id}>
+                            {usuario.nombre || usuario.username || usuario.email}
+                            {usuario.rol ? ` (${usuario.rol})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="md:col-span-3 space-y-4">
@@ -1951,7 +2185,11 @@ export default function ArchivosECUPage() {
                 ...(cierreTecnicoForms[archivo.id] || {}),
               };
 
-              const puedeFinalizar = archivo.post_escritura_estado === "OK";
+              const checklistTecnico = checklistCierreTecnico(archivo, cierreForm);
+              const faltantesCierreOk = checklistTecnico.filter(
+                (item) => item.key !== "cierre" && !item.ok
+              );
+              const puedeFinalizar = faltantesCierreOk.length === 0;
               const responsablePrincipal = obtenerResponsablePrincipal(archivo);
               const proximaAccion = obtenerProximaAccion(archivo);
               const serviciosArchivo = normalizarLista(archivo.servicios_solicitados);
@@ -2189,12 +2427,11 @@ export default function ArchivosECUPage() {
                     <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
                       {RESPONSABLES_FILE_SERVICE.map((responsable) => {
                         const opciones = usuariosPorRoles(responsable.roles);
-                        const valorActual = archivo[responsable.campo] || "";
-                        const existeActual = opciones.some((usuario) => {
-                          const username =
-                            usuario.username || usuario.nombre || usuario.email;
-                          return username === valorActual;
-                        });
+                        const valorActualId = archivo[responsable.campoId] || "";
+                        const valorActualTexto = archivo[responsable.campo] || "";
+                        const existeActual = opciones.some(
+                          (usuario) => String(usuario.id) === String(valorActualId)
+                        );
 
                         return (
                           <label
@@ -2205,40 +2442,37 @@ export default function ArchivosECUPage() {
                               {responsable.label}
                             </span>
                             <select
-                              value={valorActual}
+                              value={valorActualId}
                               onChange={(e) =>
                                 asignarResponsableFileService(
                                   archivo.id,
-                                  responsable.campo,
+                                  responsable,
                                   e.target.value
                                 )
                               }
                               className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
                             >
                               <option value="">Sin asignar</option>
-                              {valorActual && !existeActual && (
-                                <option value={valorActual}>{valorActual}</option>
+                              {!valorActualId && valorActualTexto && !existeActual && (
+                                <option value="" disabled>
+                                  Actual: {valorActualTexto}
+                                </option>
                               )}
-                              {opciones.map((usuario) => {
-                                const username =
-                                  usuario.username ||
-                                  usuario.nombre ||
-                                  usuario.email ||
-                                  "";
-
-                                if (!username) return null;
-
-                                return (
-                                  <option
-                                    key={`${responsable.campo}-${usuario.id || username}`}
-                                    value={username}
-                                  >
-                                    {usuario.nombre || username}
-                                    {usuario.rol ? ` (${usuario.rol})` : ""}
-                                  </option>
-                                );
-                              })}
+                              {opciones.map((usuario) => (
+                                <option
+                                  key={`${responsable.campo}-${usuario.id}`}
+                                  value={usuario.id}
+                                >
+                                  {usuario.nombre || usuario.username || usuario.email}
+                                  {usuario.rol ? ` (${usuario.rol})` : ""}
+                                </option>
+                              ))}
                             </select>
+                            {valorActualTexto && (
+                              <span className="mt-1 block text-[11px] text-slate-500">
+                                Actual: {valorActualTexto}
+                              </span>
+                            )}
                           </label>
                         );
                       })}
@@ -3010,12 +3244,31 @@ export default function ArchivosECUPage() {
                         </label>
                       </div>
 
+                      <div className="mt-3 rounded-2xl border border-slate-700 bg-slate-950/70 p-3">
+                        <p className="mb-2 text-xs font-black uppercase text-slate-300">
+                          Checklist cierre tecnico
+                        </p>
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                          {checklistTecnico.map((item) => (
+                            <div
+                              key={`${archivo.id}-check-${item.key}`}
+                              className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                                item.ok
+                                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                                  : "border-amber-500/30 bg-amber-500/10 text-amber-100"
+                              }`}
+                            >
+                              {item.ok ? "OK" : "Pendiente"} - {item.label}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
                       <button
                         type="button"
                         onClick={() => registrarCierreTecnico(archivo)}
                         disabled={
-                          cierreForm.resultado_tecnico === "OK" &&
-                          archivo.post_escritura_estado !== "OK"
+                          cierreForm.resultado_tecnico === "OK" && !puedeFinalizar
                         }
                         className="mt-3 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
@@ -3026,7 +3279,10 @@ export default function ArchivosECUPage() {
                     <div className="flex flex-col md:flex-row gap-2">
                       <button
                         onClick={() => registrarPostEscritura(archivo.id)}
-                        disabled={!archivo.archivo_modificado}
+                        disabled={
+                          !archivo.archivo_modificado &&
+                          postForm.post_escritura_estado !== "NO_APLICA"
+                        }
                         className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40"
                       >
                         Registrar post escritura

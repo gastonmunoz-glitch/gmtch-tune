@@ -202,13 +202,28 @@ const ArchivoECU = sequelize.define(
       allowNull: true,
     },
 
+    tuner_asignado_a_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
     operador_ecu_asignado_a: {
       type: DataTypes.STRING(100),
       allowNull: true,
     },
 
+    operador_ecu_asignado_a_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
     slave_asignado_a: {
       type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    slave_asignado_a_id: {
+      type: DataTypes.UUID,
       allowNull: true,
     },
 
@@ -279,6 +294,11 @@ const ArchivoECU = sequelize.define(
       allowNull: true,
     },
 
+    post_escritura_por_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
     post_escritura_at: {
       type: DataTypes.DATE,
       allowNull: true,
@@ -328,6 +348,11 @@ const ArchivoECU = sequelize.define(
 
     cierre_tecnico_por: {
       type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    cierre_tecnico_por_id: {
+      type: DataTypes.UUID,
       allowNull: true,
     },
 

@@ -10,6 +10,9 @@ const {
   obtenerEstadoScheduler,
   ejecutarRevisionInterna,
 } = require("../services/internalScheduler");
+const {
+  verificarGuardiaOperativaUsuario: verificarGuardiaOperativaUsuarioService,
+} = require("../services/guardiaOperativaService");
 
 const TABLAS = {
   ordenes: "ordenes_trabajo",
@@ -341,6 +344,9 @@ const crearRevisionBase = (ctx) => {
   );
   const archivosSinResponsable = archivosActivos.filter(
     (archivo) =>
+      !limpiarTexto(archivo.tuner_asignado_a_id) &&
+      !limpiarTexto(archivo.operador_ecu_asignado_a_id) &&
+      !limpiarTexto(archivo.slave_asignado_a_id) &&
       !limpiarTexto(archivo.tuner_asignado_a) &&
       !limpiarTexto(archivo.operador_ecu_asignado_a) &&
       !limpiarTexto(archivo.slave_asignado_a)
@@ -402,6 +408,9 @@ const estadoProcessGuardVisible = (estado) =>
 const responsableProcessGuard = (archivo) =>
   limpiarTexto(
     archivo.proceso_guard_responsable_id ||
+      archivo.operador_ecu_asignado_a_id ||
+      archivo.tuner_asignado_a_id ||
+      archivo.slave_asignado_a_id ||
       archivo.operador_ecu_asignado_a ||
       archivo.tuner_asignado_a ||
       archivo.slave_asignado_a ||
@@ -1259,7 +1268,10 @@ const crearCumplimientoOperativoData = (ctx) => {
 
       const responsable =
         limpiarTexto(
-          archivo.operador_ecu_asignado_a ||
+          archivo.operador_ecu_asignado_a_id ||
+            archivo.tuner_asignado_a_id ||
+            archivo.slave_asignado_a_id ||
+            archivo.operador_ecu_asignado_a ||
             archivo.tuner_asignado_a ||
             archivo.slave_asignado_a ||
             archivo.proceso_guard_responsable_id
@@ -1681,8 +1693,11 @@ const crearMisPendientesData = (ctx, req) => {
     const datos = datosOrdenOperativa(orden);
     const asignadoArchivo = coincideIdentidad(
       identidad,
+      archivo.tuner_asignado_a_id,
       archivo.tuner_asignado_a,
+      archivo.operador_ecu_asignado_a_id,
       archivo.operador_ecu_asignado_a,
+      archivo.slave_asignado_a_id,
       archivo.slave_asignado_a,
       archivo.proceso_guard_responsable_id
     );
@@ -1862,9 +1877,16 @@ const responsableOrdenSLA = (orden) =>
 
 const responsableArchivoSLA = (archivo) =>
   limpiarTexto(
-    archivo.operador_ecu_asignado_a ||
+    archivo.operador_ecu_asignado_a_id ||
+      archivo.tuner_asignado_a_id ||
+      archivo.slave_asignado_a_id ||
+      archivo.operador_ecu_asignado_a ||
       archivo.tuner_asignado_a ||
       archivo.slave_asignado_a ||
+      archivo.post_escritura_por_id ||
+      archivo.post_escritura_por ||
+      archivo.cierre_tecnico_por_id ||
+      archivo.cierre_tecnico_por ||
       archivo.proceso_guard_responsable_id
   ) || "Sin responsable";
 
@@ -2396,9 +2418,16 @@ const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {
   const usuarioAsignadoArchivo = (archivo) =>
     coincideIdentidad(
       identidad,
+      archivo.tuner_asignado_a_id,
       archivo.tuner_asignado_a,
+      archivo.operador_ecu_asignado_a_id,
       archivo.operador_ecu_asignado_a,
+      archivo.slave_asignado_a_id,
       archivo.slave_asignado_a,
+      archivo.post_escritura_por_id,
+      archivo.post_escritura_por,
+      archivo.cierre_tecnico_por_id,
+      archivo.cierre_tecnico_por,
       archivo.proceso_guard_responsable_id
     );
 
@@ -2605,7 +2634,7 @@ const guardiaOperativa = async (req, res) => {
       });
     }
 
-    const resultado = await verificarGuardiaOperativaUsuario({ usuarioId });
+    const resultado = await verificarGuardiaOperativaUsuarioService({ usuarioId });
 
     return res.json({
       ...resultado,
@@ -3020,7 +3049,7 @@ module.exports = {
   misPendientes,
   tiemposOperativos,
   guardiaOperativa,
-  verificarGuardiaOperativaUsuario,
+  verificarGuardiaOperativaUsuario: verificarGuardiaOperativaUsuarioService,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,

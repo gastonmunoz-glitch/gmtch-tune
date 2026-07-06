@@ -105,6 +105,36 @@ ArchivoECU.belongsTo(OrdenTrabajo, {
   constraints: false,
 });
 
+ArchivoECU.belongsTo(Usuario, {
+  as: "TunerAsignadoUsuario",
+  foreignKey: "tuner_asignado_a_id",
+  constraints: false,
+});
+
+ArchivoECU.belongsTo(Usuario, {
+  as: "OperadorEcuFileAsignadoUsuario",
+  foreignKey: "operador_ecu_asignado_a_id",
+  constraints: false,
+});
+
+ArchivoECU.belongsTo(Usuario, {
+  as: "SlaveAsignadoUsuario",
+  foreignKey: "slave_asignado_a_id",
+  constraints: false,
+});
+
+ArchivoECU.belongsTo(Usuario, {
+  as: "PostEscrituraPorUsuario",
+  foreignKey: "post_escritura_por_id",
+  constraints: false,
+});
+
+ArchivoECU.belongsTo(Usuario, {
+  as: "CierreTecnicoPorUsuario",
+  foreignKey: "cierre_tecnico_por_id",
+  constraints: false,
+});
+
 // Orden / Fotos
 OrdenTrabajo.hasMany(FotoVehiculo, {
   foreignKey: "ordenTrabajoId",
