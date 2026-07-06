@@ -1,6 +1,6 @@
 const { QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
-const { ArchivoECU, OrdenTrabajo } = require("../models");
+const { ArchivoECU, OrdenTrabajo, OrdenEventoOperativo } = require("../models");
 const {
   crearNotificacionesInternas,
 } = require("./notificacionController");
@@ -12,6 +12,261 @@ let columnasPreparadas = false;
 const limpiarTexto = (valor) => {
   if (valor === null || valor === undefined) return "";
   return String(valor).trim();
+};
+
+const SERVICIOS_FILE_SERVICE_V1 = new Set([
+  "STAGE_1",
+  "STAGE_2",
+  "STAGE_3",
+  "ECO_TUNE",
+  "CUSTOM_TUNE",
+  "TCU_STAGE",
+  "TORQUE_LIMITER",
+  "VMAX_OFF",
+  "LAUNCH_CONTROL",
+  "ANTILAG",
+  "POPS_BANGS",
+  "HARDCUT",
+  "POPCORN_DIESEL",
+  "DPF_OFF",
+  "FAP_OFF",
+  "EGR_OFF",
+  "ADBLUE_SCR_OFF",
+  "DEF_OFF",
+  "NOX_OFF",
+  "LAMBDA_OFF",
+  "TVA_OFF",
+  "SWIRL_FLAPS_OFF",
+  "DTC_OFF",
+  "IMMO_OFF",
+  "START_STOP_OFF",
+  "READINESS_CHECK",
+  "CHECKSUM",
+  "CLONACION_ECU",
+  "VIRGINIZAR_ECU",
+  "BACKUP_ORIGINAL",
+  "RESTAURAR_ORIGINAL",
+  "OTRO",
+  "CUSTOM",
+]);
+
+const PRESETS_SERVICIOS_FILE_SERVICE = {
+  DPF_EGR: ["DPF_OFF", "EGR_OFF"],
+  ADBLUE_DPF_EGR: ["ADBLUE_SCR_OFF", "DPF_OFF", "EGR_OFF"],
+  DPF_EGR_TVA: ["DPF_OFF", "EGR_OFF", "TVA_OFF"],
+  EGR_DTC: ["EGR_OFF", "DTC_OFF"],
+  DPF_EGR_DTC: ["DPF_OFF", "EGR_OFF", "DTC_OFF"],
+  STAGE1_DTC: ["STAGE_1", "DTC_OFF"],
+  STAGE1_EGR: ["STAGE_1", "EGR_OFF"],
+  SOLO_DTC_OFF: ["DTC_OFF"],
+  SOLO_STAGE1: ["STAGE_1"],
+  CUSTOM: ["CUSTOM"],
+};
+
+const parsearJsonSeguro = (valor, fallback = null) => {
+  if (valor === null || valor === undefined || valor === "") return fallback;
+  if (Array.isArray(valor) || typeof valor === "object") return valor;
+
+  try {
+    return JSON.parse(String(valor));
+  } catch {
+    return fallback;
+  }
+};
+
+const normalizarArrayUnico = (valores = []) => {
+  const salida = [];
+  const vistos = new Set();
+
+  valores.forEach((valor) => {
+    const texto = limpiarTexto(valor).toUpperCase();
+    if (!texto || vistos.has(texto)) return;
+    vistos.add(texto);
+    salida.push(texto);
+  });
+
+  return salida;
+};
+
+const normalizarServiciosSolicitados = ({ servicios, tipoServicio, preset }) => {
+  const parsed = parsearJsonSeguro(servicios, servicios);
+  const lista = Array.isArray(parsed) ? parsed : [];
+  let normalizados = normalizarArrayUnico(lista);
+
+  if (!normalizados.length && preset && PRESETS_SERVICIOS_FILE_SERVICE[preset]) {
+    normalizados = [...PRESETS_SERVICIOS_FILE_SERVICE[preset]];
+  }
+
+  if (normalizados.length) {
+    const invalidos = normalizados.filter(
+      (servicio) => !SERVICIOS_FILE_SERVICE_V1.has(servicio)
+    );
+
+    if (invalidos.length) {
+      const error = new Error(
+        `Servicios File Service no permitidos: ${invalidos.join(", ")}`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  if (!normalizados.length && limpiarTexto(tipoServicio)) {
+    normalizados = [limpiarTexto(tipoServicio)];
+  }
+
+  return normalizados;
+};
+
+const parsearDtcDiagnostico = (diagnostico = {}) => {
+  const origen = [
+    diagnostico.codigos_dtc,
+    diagnostico.fallas_detectadas,
+    diagnostico.observaciones,
+  ]
+    .map(limpiarTexto)
+    .filter(Boolean)
+    .join("\n");
+
+  if (!origen || origen.toUpperCase().includes("SIN DTC")) return [];
+
+  const encontrados = origen.match(/\b[PCBU][0-9A-F]{4}\b/gi) || [];
+  return normalizarArrayUnico(encontrados).map((codigo) => ({
+    codigo,
+    fuente: "diagnostico",
+    activo: true,
+  }));
+};
+
+const normalizarDtcSnapshot = (valor) => {
+  const parsed = parsearJsonSeguro(valor, valor);
+  const lista = Array.isArray(parsed) ? parsed : [];
+  const codigos = new Set();
+
+  return lista
+    .map((item) => {
+      const codigo =
+        typeof item === "string" ? limpiarTexto(item) : limpiarTexto(item?.codigo);
+      const normalizado = codigo.toUpperCase();
+      if (!/^[PCBU][0-9A-F]{4}$/.test(normalizado) || codigos.has(normalizado)) {
+        return null;
+      }
+      codigos.add(normalizado);
+      return {
+        codigo: normalizado,
+        fuente: limpiarTexto(item?.fuente) || "diagnostico",
+        activo: item?.activo === false ? false : true,
+      };
+    })
+    .filter(Boolean);
+};
+
+const resumenDtc = (snapshot = []) =>
+  snapshot.map((item) => item.codigo).filter(Boolean).join(", ");
+
+const buscarDiagnosticoParaFileService = async ({ ordenId, vehiculoId } = {}) => {
+  const ordenIdNumero = Number(ordenId);
+  const vehiculoIdNumero = Number(vehiculoId);
+
+  if (ordenIdNumero && !Number.isNaN(ordenIdNumero)) {
+    const diagnosticos = await sequelize.query(
+      `
+      SELECT
+        "id",
+        "ordenId",
+        "fallas_detectadas",
+        "codigos_dtc",
+        "informe_scanner",
+        "foto_scanner",
+        "sin_dtc",
+        "observaciones",
+        "fase",
+        "createdAt",
+        "updatedAt"
+      FROM "diagnosticos"
+      WHERE "ordenId" = :ordenId
+      ORDER BY
+        CASE
+          WHEN "fase" IS NULL OR "fase" = '' OR "fase" = 'PRE_FILE_SERVICE' THEN 0
+          ELSE 1
+        END,
+        "id" DESC
+      LIMIT 1;
+      `,
+      {
+        replacements: { ordenId: ordenIdNumero },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    if (diagnosticos.length) return diagnosticos[0];
+  }
+
+  if (vehiculoIdNumero && !Number.isNaN(vehiculoIdNumero)) {
+    const diagnosticos = await sequelize.query(
+      `
+      SELECT
+        d."id",
+        d."ordenId",
+        d."fallas_detectadas",
+        d."codigos_dtc",
+        d."informe_scanner",
+        d."foto_scanner",
+        d."sin_dtc",
+        d."observaciones",
+        d."fase",
+        d."createdAt",
+        d."updatedAt"
+      FROM "diagnosticos" d
+      INNER JOIN "ordenes_trabajo" o ON o."id" = d."ordenId"
+      WHERE o."vehiculoId" = :vehiculoId
+      ORDER BY
+        CASE
+          WHEN d."fase" IS NULL OR d."fase" = '' OR d."fase" = 'PRE_FILE_SERVICE' THEN 0
+          ELSE 1
+        END,
+        d."id" DESC
+      LIMIT 1;
+      `,
+      {
+        replacements: { vehiculoId: vehiculoIdNumero },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    if (diagnosticos.length) return diagnosticos[0];
+  }
+
+  return null;
+};
+
+const registrarEventoFileServiceCreado = async ({
+  req,
+  ordenId,
+  servicios_solicitados,
+  dtc_snapshot,
+  servicios_preset,
+}) => {
+  try {
+    await OrdenEventoOperativo.create({
+      ordenId,
+      tipo_evento: "FILE_SERVICE_CREADO",
+      categoria: "FILE_SERVICE",
+      titulo: "File Service creado",
+      descripcion: "Se creo solicitud File Service con servicios y DTC importados.",
+      usuario: usuarioActual(req),
+      usuario_rol: req.usuario?.rol || req.user?.rol || null,
+      origen: "FILE_SERVICE",
+      metadata: {
+        servicios_solicitados,
+        tiene_dtc_snapshot: Array.isArray(dtc_snapshot) && dtc_snapshot.length > 0,
+        cantidad_dtcs: Array.isArray(dtc_snapshot) ? dtc_snapshot.length : 0,
+        servicios_preset: servicios_preset || null,
+      },
+    });
+  } catch (error) {
+    console.warn("No se pudo registrar evento FILE_SERVICE_CREADO:", error.message);
+  }
 };
 
 const NOTIFICACIONES_RESPONSABLES_FILE = {
@@ -269,6 +524,33 @@ const prepararColumnas = async () => {
     ADD COLUMN IF NOT EXISTS "ultima_version_modificada" INTEGER DEFAULT 0;
 
     ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "diagnosticoId" INTEGER;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "dtc_snapshot" JSONB DEFAULT '[]'::jsonb;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "dtc_resumen" TEXT;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "dtc_importado_at" TIMESTAMP WITH TIME ZONE;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "dtc_importado_por" VARCHAR(100);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "servicios_solicitados" JSONB DEFAULT '[]'::jsonb;
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "servicios_preset" VARCHAR(80);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "servicio_principal" VARCHAR(120);
+
+    ALTER TABLE "archivos_ecu"
+    ADD COLUMN IF NOT EXISTS "observacion_servicios" TEXT;
+
+    ALTER TABLE "archivos_ecu"
     ADD COLUMN IF NOT EXISTS "notificado_master_at" TIMESTAMP WITH TIME ZONE;
 
     ALTER TABLE "archivos_ecu"
@@ -381,6 +663,8 @@ const prepararColumnas = async () => {
 
     UPDATE "archivos_ecu"
     SET
+      "dtc_snapshot" = COALESCE("dtc_snapshot", '[]'::jsonb),
+      "servicios_solicitados" = COALESCE("servicios_solicitados", '[]'::jsonb),
       "proceso_guard_estado" = COALESCE("proceso_guard_estado", 'SIN_RIESGO'),
       "cierre_tecnico_obligatorio" = COALESCE("cierre_tecnico_obligatorio", false),
       "resultado_tecnico" = COALESCE("resultado_tecnico", 'PENDIENTE');
@@ -422,35 +706,9 @@ const prepararColumnas = async () => {
 const validarDiagnosticoObligatorio = async (ordenId) => {
   await prepararColumnas();
 
-  const diagnosticos = await sequelize.query(
-    `
-    SELECT
-      "id",
-      "ordenId",
-      "fallas_detectadas",
-      "codigos_dtc",
-      "informe_scanner",
-      "foto_scanner",
-      "sin_dtc",
-      "observaciones",
-      "fase"
-    FROM "diagnosticos"
-    WHERE "ordenId" = :ordenId
-    AND (
-      "fase" IS NULL
-      OR "fase" = 'PRE_FILE_SERVICE'
-      OR "fase" = ''
-    )
-    ORDER BY "id" DESC
-    LIMIT 1;
-    `,
-    {
-      replacements: { ordenId },
-      type: QueryTypes.SELECT,
-    }
-  );
+  const diag = await buscarDiagnosticoParaFileService({ ordenId });
 
-  if (!diagnosticos.length) {
+  if (!diag) {
     return {
       ok: false,
       faltantes: [
@@ -462,7 +720,6 @@ const validarDiagnosticoObligatorio = async (ordenId) => {
     };
   }
 
-  const diag = diagnosticos[0];
   const faltantes = [];
 
   const tieneScanner =
@@ -485,6 +742,7 @@ const validarDiagnosticoObligatorio = async (ordenId) => {
   return {
     ok: faltantes.length === 0,
     faltantes,
+    diagnostico: diag,
   };
 };
 
@@ -498,6 +756,15 @@ const mapearArchivoRow = (row) => {
     estado: row.estado,
     prioridad: row.prioridad,
     tipo_servicio: row.tipo_servicio,
+    diagnosticoId: row.diagnosticoId,
+    dtc_snapshot: normalizarVersiones(row.dtc_snapshot),
+    dtc_resumen: row.dtc_resumen,
+    dtc_importado_at: row.dtc_importado_at,
+    dtc_importado_por: row.dtc_importado_por,
+    servicios_solicitados: normalizarVersiones(row.servicios_solicitados),
+    servicios_preset: row.servicios_preset,
+    servicio_principal: row.servicio_principal,
+    observacion_servicios: row.observacion_servicios,
     metodo_lectura: row.metodo_lectura,
     herramienta_lectura: row.herramienta_lectura,
 
@@ -659,6 +926,105 @@ const obtenerArchivosECU = async (req, res) => {
   }
 };
 
+const obtenerContextoSolicitud = async (req, res) => {
+  try {
+    await prepararColumnas();
+
+    const ordenId = Number(req.params.ordenId);
+    if (!ordenId || Number.isNaN(ordenId)) {
+      return res.status(400).json({
+        error: "Falta ordenId valido",
+      });
+    }
+
+    const rows = await sequelize.query(
+      `
+      SELECT
+        o."id" AS "orden_id",
+        o."estado" AS "orden_estado",
+        o."prioridad" AS "orden_prioridad",
+        o."motivo_ingreso" AS "orden_motivo_ingreso",
+        o."vehiculoId" AS "vehiculo_id",
+        v."patente" AS "vehiculo_patente",
+        v."marca" AS "vehiculo_marca",
+        v."modelo" AS "vehiculo_modelo",
+        v."anio" AS "vehiculo_anio",
+        v."vin" AS "vehiculo_vin",
+        c."id" AS "cliente_id",
+        c."nombre" AS "cliente_nombre",
+        c."telefono" AS "cliente_telefono",
+        c."email" AS "cliente_email"
+      FROM "ordenes_trabajo" o
+      LEFT JOIN "vehiculos" v ON v."id" = o."vehiculoId"
+      LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+      WHERE o."id" = :ordenId
+      LIMIT 1;
+      `,
+      {
+        replacements: { ordenId },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+      });
+    }
+
+    const row = rows[0];
+    const diagnostico = await buscarDiagnosticoParaFileService({
+      ordenId,
+      vehiculoId: row.vehiculo_id,
+    });
+    const dtcs = parsearDtcDiagnostico(diagnostico || {});
+
+    res.json({
+      orden: {
+        id: row.orden_id,
+        estado: row.orden_estado,
+        prioridad: row.orden_prioridad,
+        motivo_ingreso: row.orden_motivo_ingreso,
+      },
+      vehiculo: row.vehiculo_id
+        ? {
+            id: row.vehiculo_id,
+            patente: row.vehiculo_patente,
+            marca: row.vehiculo_marca,
+            modelo: row.vehiculo_modelo,
+            anio: row.vehiculo_anio,
+            vin: row.vehiculo_vin,
+            cliente: row.cliente_id
+              ? {
+                  id: row.cliente_id,
+                  nombre: row.cliente_nombre,
+                  telefono: row.cliente_telefono,
+                  email: row.cliente_email,
+                }
+              : null,
+          }
+        : null,
+      diagnostico: diagnostico
+        ? {
+            id: diagnostico.id,
+            createdAt: diagnostico.createdAt,
+            codigos_dtc: diagnostico.codigos_dtc,
+            fallas_detectadas: diagnostico.fallas_detectadas,
+            observaciones: diagnostico.observaciones,
+          }
+        : null,
+      dtcs_activos: dtcs,
+      dtc_resumen: resumenDtc(dtcs),
+      servicios_sugeridos: [],
+    });
+  } catch (error) {
+    console.error("ERROR OBTENIENDO CONTEXTO FILE SERVICE:", error);
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+};
+
 const crearArchivoECU = async (req, res) => {
   try {
     await prepararColumnas();
@@ -695,12 +1061,62 @@ const crearArchivoECU = async (req, res) => {
       });
     }
 
+    const diagnostico = validacion.diagnostico || null;
+    const preset = limpiarTexto(req.body.servicios_preset).toUpperCase();
+
+    if (preset && !PRESETS_SERVICIOS_FILE_SERVICE[preset]) {
+      return res.status(400).json({
+        error: "Preset File Service no permitido",
+      });
+    }
+
+    const tipoServicioBody = limpiarTexto(req.body.tipo_servicio);
+    const serviciosSolicitados = normalizarServiciosSolicitados({
+      servicios: req.body.servicios_solicitados,
+      tipoServicio: tipoServicioBody,
+      preset,
+    });
+    const observacionServicios = limpiarTexto(req.body.observacion_servicios);
+    const requiereObservacionCustom = serviciosSolicitados.some((servicio) =>
+      ["CUSTOM", "OTRO"].includes(limpiarTexto(servicio).toUpperCase())
+    );
+
+    if (requiereObservacionCustom && !observacionServicios) {
+      return res.status(400).json({
+        error: "Debes describir el servicio custom / otro en observacion_servicios.",
+      });
+    }
+
+    const snapshotFrontend = normalizarDtcSnapshot(req.body.dtc_snapshot);
+    const snapshotDiagnostico = parsearDtcDiagnostico(diagnostico || {});
+    const dtcSnapshot = snapshotFrontend.length ? snapshotFrontend : snapshotDiagnostico;
+    const dtcResumen = limpiarTexto(req.body.dtc_resumen) || resumenDtc(dtcSnapshot);
+    const diagnosticoId =
+      Number(req.body.diagnosticoId || req.body.diagnostico_id || diagnostico?.id) ||
+      null;
+    const servicioPrincipal =
+      limpiarTexto(req.body.servicio_principal) ||
+      serviciosSolicitados[0] ||
+      tipoServicioBody ||
+      preset ||
+      "CUSTOM";
+    const tipoServicioFinal = tipoServicioBody || servicioPrincipal || preset;
+
     const nuevoArchivo = await ArchivoECU.create({
       ordenId,
 
       estado: "NOTIFICADO_MASTER",
       prioridad: limpiarTexto(req.body.prioridad) || "MEDIA",
-      tipo_servicio: limpiarTexto(req.body.tipo_servicio),
+      tipo_servicio: tipoServicioFinal,
+      diagnosticoId,
+      dtc_snapshot: dtcSnapshot,
+      dtc_resumen: dtcResumen,
+      dtc_importado_at: diagnostico ? new Date() : null,
+      dtc_importado_por: diagnostico ? usuarioActual(req) : null,
+      servicios_solicitados: serviciosSolicitados,
+      servicios_preset: preset || null,
+      servicio_principal: servicioPrincipal,
+      observacion_servicios: observacionServicios || null,
 
       metodo_lectura: limpiarTexto(req.body.metodo_lectura),
       herramienta_lectura: limpiarTexto(req.body.herramienta_lectura),
@@ -779,6 +1195,14 @@ const crearArchivoECU = async (req, res) => {
       archivoECUId: nuevoArchivo.id,
     });
 
+    await registrarEventoFileServiceCreado({
+      req,
+      ordenId,
+      servicios_solicitados: serviciosSolicitados,
+      dtc_snapshot: dtcSnapshot,
+      servicios_preset: preset || null,
+    });
+
     res.status(201).json({
       mensaje: "Archivo ECU guardado y Master notificado internamente",
       archivo: nuevoArchivo,
@@ -788,7 +1212,7 @@ const crearArchivoECU = async (req, res) => {
   } catch (error) {
     console.error("ERROR AL CREAR ARCHIVO ECU:", error);
 
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: error.message,
       detalle: error.errors?.map((e) => e.message) || null,
     });
@@ -1741,6 +2165,10 @@ const actualizarArchivoECU = async (req, res) => {
       "estado",
       "prioridad",
       "tipo_servicio",
+      "servicio_principal",
+      "servicios_preset",
+      "dtc_resumen",
+      "observacion_servicios",
       "metodo_lectura",
       "herramienta_lectura",
       "marca_ecu",
@@ -1763,6 +2191,23 @@ const actualizarArchivoECU = async (req, res) => {
         payload[campo] = limpiarTexto(req.body[campo]);
       }
     });
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "servicios_solicitados")) {
+      payload.servicios_solicitados = normalizarServiciosSolicitados({
+        servicios: req.body.servicios_solicitados,
+        tipoServicio: payload.tipo_servicio || archivo.tipo_servicio,
+        preset: payload.servicios_preset || archivo.servicios_preset,
+      });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "dtc_snapshot")) {
+      payload.dtc_snapshot = normalizarDtcSnapshot(req.body.dtc_snapshot);
+      payload.dtc_resumen = payload.dtc_resumen || resumenDtc(payload.dtc_snapshot);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "diagnosticoId")) {
+      payload.diagnosticoId = Number(req.body.diagnosticoId) || null;
+    }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "correccion_pendiente")) {
       payload.correccion_pendiente =
@@ -1934,6 +2379,7 @@ const eliminarArchivoECU = async (req, res) => {
 module.exports = {
   crearArchivoECU,
   obtenerArchivosECU,
+  obtenerContextoSolicitud,
   obtenerArchivoECUPorId,
   actualizarArchivoECU,
   subirArchivoModificado,

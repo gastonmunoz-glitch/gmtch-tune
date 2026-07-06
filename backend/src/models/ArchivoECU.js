@@ -32,6 +32,53 @@ const ArchivoECU = sequelize.define(
       allowNull: true,
     },
 
+    diagnosticoId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    dtc_snapshot: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
+
+    dtc_resumen: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    dtc_importado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    dtc_importado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    servicios_solicitados: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
+
+    servicios_preset: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    servicio_principal: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+    },
+
+    observacion_servicios: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
     metodo_lectura: {
       type: DataTypes.STRING(80),
       allowNull: true,

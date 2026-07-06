@@ -39,6 +39,58 @@ const normalizarLista = (...valores) => {
   return [];
 };
 
+const normalizarJsonLista = (valor) => {
+  if (Array.isArray(valor)) return valor;
+  if (!valor) return [];
+  if (typeof valor === "string") {
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const serviciosLabels = {
+  STAGE_1: "Stage 1",
+  STAGE_2: "Stage 2",
+  STAGE_3: "Stage 3",
+  ECO_TUNE: "Eco Tune",
+  CUSTOM_TUNE: "Custom Tune",
+  TCU_STAGE: "TCU Stage",
+  TORQUE_LIMITER: "Torque limiter",
+  VMAX_OFF: "Vmax off",
+  LAUNCH_CONTROL: "Launch Control",
+  ANTILAG: "Antilag",
+  POPS_BANGS: "Pops & Bangs",
+  HARDCUT: "Hardcut",
+  POPCORN_DIESEL: "Popcorn diesel",
+  DPF_OFF: "DPF off",
+  FAP_OFF: "FAP off",
+  EGR_OFF: "EGR off",
+  ADBLUE_SCR_OFF: "AdBlue / SCR off",
+  DEF_OFF: "DEF off",
+  NOX_OFF: "NOx off",
+  LAMBDA_OFF: "Lambda / O2 off",
+  TVA_OFF: "TVA off",
+  SWIRL_FLAPS_OFF: "Swirl flaps off",
+  DTC_OFF: "DTC off",
+  IMMO_OFF: "IMMO off",
+  START_STOP_OFF: "Start/Stop off",
+  READINESS_CHECK: "Readiness check",
+  CHECKSUM: "Checksum",
+  CLONACION_ECU: "Clonacion ECU",
+  VIRGINIZAR_ECU: "Virginizar ECU",
+  BACKUP_ORIGINAL: "Backup original",
+  RESTAURAR_ORIGINAL: "Restaurar original",
+  OTRO: "Otro",
+  CUSTOM: "Custom",
+};
+
+const servicioLabel = (codigo) => serviciosLabels[codigo] || codigo;
+
 const formatearFecha = (valor) => {
   if (!valor) return "No registrado";
 
@@ -1103,6 +1155,10 @@ function VehiculoDetallePage() {
                       {archivos.map((archivo, index) => {
                         const original = fileUrl(archivo.archivo_original);
                         const mod = fileUrl(archivo.archivo_modificado);
+                        const servicios = normalizarJsonLista(
+                          archivo.servicios_solicitados
+                        );
+                        const dtcsSnapshot = normalizarJsonLista(archivo.dtc_snapshot);
 
                         return (
                           <div key={archivo.id || index} className="border-2 border-black p-3 bg-white">
@@ -1111,8 +1167,44 @@ function VehiculoDetallePage() {
                                 {archivo.estado || "Sin estado"}
                               </span>
                               <span className="bg-blue-600 text-white px-2 py-1 text-[10px] font-black uppercase">
-                                {archivo.tipo_servicio || "Servicio no registrado"}
+                                {servicios.length
+                                  ? `${servicios.length} servicio(s)`
+                                  : archivo.tipo_servicio || "Servicio no registrado"}
                               </span>
+                            </div>
+
+                            <div className="mb-3 space-y-2">
+                              <div className="flex flex-wrap gap-2">
+                                {(servicios.length
+                                  ? servicios
+                                  : [archivo.tipo_servicio || "Servicio no registrado"]
+                                ).map((servicio) => (
+                                  <span
+                                    key={`${archivo.id || index}-svc-${servicio}`}
+                                    className="bg-blue-50 border border-blue-700 px-2 py-1 text-[10px] font-black uppercase text-blue-900"
+                                  >
+                                    {servicioLabel(servicio)}
+                                  </span>
+                                ))}
+                              </div>
+
+                              {dtcsSnapshot.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] font-black uppercase text-gray-500">
+                                    DTC importados
+                                  </p>
+                                  <div className="mt-1 flex flex-wrap gap-2">
+                                    {dtcsSnapshot.map((dtc) => (
+                                      <span
+                                        key={`${archivo.id || index}-dtc-${dtc.codigo || dtc}`}
+                                        className="bg-cyan-50 border border-cyan-700 px-2 py-1 text-[10px] font-black uppercase text-cyan-900"
+                                      >
+                                        {dtc.codigo || dtc}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-bold uppercase">

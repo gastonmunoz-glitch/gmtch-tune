@@ -96,65 +96,88 @@ const RESPONSABLES_CORRECCION = [
   { value: "SUPERVISOR", label: "Supervisor" },
 ];
 
-const SERVICIO_PERSONALIZADO = "Otro / personalizado";
-
 const SERVICIOS_FILE_SERVICE = [
   {
-    grupo: "Reprogramaci\u00F3n / Performance",
+    grupo: "Performance",
     opciones: [
-      { value: "Stage 1", label: "\u2699\uFE0F Stage 1" },
-      { value: "Stage 2", label: "\uD83D\uDD25 Stage 2" },
-      { value: "Stage 3 / Competici\u00F3n", label: "\uD83C\uDFC1 Stage 3 / Competici\u00F3n" },
-      { value: "Eco Tune / Consumo", label: "\uD83C\uDF31 Eco Tune / Consumo" },
-      { value: "Pops & Bangs", label: "\uD83D\uDCA5 Pops & Bangs" },
-      { value: "Hardcut / Limitador RPM", label: "\uD83E\uDDE8 Hardcut / Limitador RPM" },
-      { value: "Launch Control", label: "\uD83D\uDE80 Launch Control" },
-      { value: "Vmax / Limitador velocidad", label: "\uD83C\uDFCE\uFE0F Vmax / Limitador velocidad" },
+      { value: "STAGE_1", label: "Stage 1" },
+      { value: "STAGE_2", label: "Stage 2" },
+      { value: "STAGE_3", label: "Stage 3 / proyecto especial" },
+      { value: "ECO_TUNE", label: "Eco Tune" },
+      { value: "CUSTOM_TUNE", label: "Custom Tune" },
+      { value: "TCU_STAGE", label: "TCU Stage" },
+      { value: "TORQUE_LIMITER", label: "Torque limiter" },
+      { value: "VMAX_OFF", label: "Vmax off" },
+      { value: "LAUNCH_CONTROL", label: "Launch Control" },
+      { value: "ANTILAG", label: "Antilag" },
+      { value: "POPS_BANGS", label: "Pops & Bangs" },
+      { value: "HARDCUT", label: "Hardcut" },
+      { value: "POPCORN_DIESEL", label: "Popcorn / Hardcut diesel" },
     ],
   },
   {
-    grupo: "Sistemas anticontaminaci\u00F3n / gesti\u00F3n t\u00E9cnica",
+    grupo: "Emisiones / uso sujeto a normativa aplicable",
     opciones: [
-      { value: "DPF / FAP", label: "\uD83C\uDF2B\uFE0F DPF / FAP" },
-      { value: "EGR", label: "\u267B\uFE0F EGR" },
-      { value: "SCR / AdBlue / DEF", label: "\uD83D\uDCA7 SCR / AdBlue / DEF" },
-      { value: "NOx", label: "\uD83E\uDDEA NOx" },
-      { value: "TVA / Mariposa admisi\u00F3n", label: "\uD83E\uDEC1 TVA / Mariposa admisi\u00F3n" },
-      { value: "Lambda / O2", label: "\uD83E\uDDEF Lambda / O2" },
-      { value: "DTC / revisi\u00F3n de fallas", label: "\uD83E\uDDE0 DTC / revisi\u00F3n de fallas" },
+      { value: "DPF_OFF", label: "DPF off" },
+      { value: "FAP_OFF", label: "FAP off" },
+      { value: "EGR_OFF", label: "EGR off" },
+      { value: "ADBLUE_SCR_OFF", label: "AdBlue / SCR off" },
+      { value: "DEF_OFF", label: "DEF off" },
+      { value: "NOX_OFF", label: "NOx off" },
+      { value: "LAMBDA_OFF", label: "Lambda / O2 off" },
+      { value: "TVA_OFF", label: "TVA off" },
+      { value: "SWIRL_FLAPS_OFF", label: "Swirl flaps off" },
     ],
   },
   {
-    grupo: "Combinaciones frecuentes",
+    grupo: "Diagnostico / electronica",
     opciones: [
-      { value: "Stage 1 + DPF/FAP", label: "\u2699\uFE0F Stage 1 + DPF/FAP" },
-      { value: "Stage 1 + EGR", label: "\u2699\uFE0F Stage 1 + EGR" },
-      { value: "Stage 1 + DPF/FAP + EGR", label: "\u2699\uFE0F Stage 1 + DPF/FAP + EGR" },
-      { value: "Stage 1 + SCR/AdBlue", label: "\u2699\uFE0F Stage 1 + SCR/AdBlue" },
-      { value: "Stage 1 + DPF/FAP + EGR + SCR/AdBlue", label: "\u2699\uFE0F Stage 1 + DPF/FAP + EGR + SCR/AdBlue" },
-      { value: "Stage 2 + DPF/FAP", label: "\uD83D\uDD25 Stage 2 + DPF/FAP" },
-      { value: "Stage 2 + EGR", label: "\uD83D\uDD25 Stage 2 + EGR" },
-      { value: "Stage 2 + DPF/FAP + EGR", label: "\uD83D\uDD25 Stage 2 + DPF/FAP + EGR" },
-      { value: "Stage 2 + SCR/AdBlue", label: "\uD83D\uDD25 Stage 2 + SCR/AdBlue" },
-      { value: "Stage 2 + DPF/FAP + EGR + SCR/AdBlue", label: "\uD83D\uDD25 Stage 2 + DPF/FAP + EGR + SCR/AdBlue" },
-    ],
-  },
-  {
-    grupo: "Electr\u00F3nica / m\u00F3dulos",
-    opciones: [
-      { value: "Clonaci\u00F3n ECU", label: "\uD83E\uDDEC Clonaci\u00F3n ECU" },
-      { value: "Clonaci\u00F3n TCU", label: "\uD83E\uDDEC Clonaci\u00F3n TCU" },
-      { value: "IMMO / Inmovilizador", label: "\uD83D\uDD10 IMMO / Inmovilizador" },
-      { value: "Airbag / Crash Data", label: "\uD83E\uDDEF Airbag / Crash Data" },
-      { value: "Adaptaci\u00F3n ECU usada", label: "\uD83E\uDDE9 Adaptaci\u00F3n ECU usada" },
-      { value: "SW Update / Downgrade", label: "\uD83D\uDD01 SW Update / Downgrade" },
-      { value: "Correcci\u00F3n de archivo", label: "\uD83D\uDEE0\uFE0F Correcci\u00F3n de archivo" },
-      { value: "Archivo de prueba / revisi\u00F3n", label: "\uD83E\uDDEA Archivo de prueba / revisi\u00F3n" },
-      { value: "File Service personalizado", label: "\uD83E\uDDE9 File Service personalizado" },
-      { value: SERVICIO_PERSONALIZADO, label: "\u270D\uFE0F Otro / personalizado" },
+      { value: "DTC_OFF", label: "DTC off" },
+      { value: "IMMO_OFF", label: "IMMO off" },
+      { value: "START_STOP_OFF", label: "Start/Stop off" },
+      { value: "READINESS_CHECK", label: "Readiness check" },
+      { value: "CHECKSUM", label: "Checksum" },
+      { value: "CLONACION_ECU", label: "Clonacion ECU" },
+      { value: "VIRGINIZAR_ECU", label: "Virginizar ECU" },
+      { value: "BACKUP_ORIGINAL", label: "Backup original" },
+      { value: "RESTAURAR_ORIGINAL", label: "Restaurar original" },
+      { value: "OTRO", label: "Otro" },
+      { value: "CUSTOM", label: "Custom" },
     ],
   },
 ];
+
+const PRESETS_FILE_SERVICE = [
+  { value: "DPF_EGR", label: "DPF + EGR", servicios: ["DPF_OFF", "EGR_OFF"] },
+  {
+    value: "ADBLUE_DPF_EGR",
+    label: "AdBlue + DPF + EGR",
+    servicios: ["ADBLUE_SCR_OFF", "DPF_OFF", "EGR_OFF"],
+  },
+  {
+    value: "DPF_EGR_TVA",
+    label: "DPF + EGR + TVA",
+    servicios: ["DPF_OFF", "EGR_OFF", "TVA_OFF"],
+  },
+  { value: "EGR_DTC", label: "EGR + DTC", servicios: ["EGR_OFF", "DTC_OFF"] },
+  {
+    value: "DPF_EGR_DTC",
+    label: "DPF + EGR + DTC",
+    servicios: ["DPF_OFF", "EGR_OFF", "DTC_OFF"],
+  },
+  { value: "STAGE1_DTC", label: "Stage 1 + DTC", servicios: ["STAGE_1", "DTC_OFF"] },
+  { value: "STAGE1_EGR", label: "Stage 1 + EGR", servicios: ["STAGE_1", "EGR_OFF"] },
+  { value: "SOLO_DTC_OFF", label: "Solo DTC Off", servicios: ["DTC_OFF"] },
+  { value: "SOLO_STAGE1", label: "Solo Stage 1", servicios: ["STAGE_1"] },
+  { value: "CUSTOM", label: "Custom", servicios: ["CUSTOM"] },
+];
+
+const SERVICIO_LABELS = SERVICIOS_FILE_SERVICE.flatMap((grupo) => grupo.opciones).reduce(
+  (acc, servicio) => ({ ...acc, [servicio.value]: servicio.label }),
+  {}
+);
+
+const servicioLabel = (codigo) => SERVICIO_LABELS[codigo] || codigo;
 
 const RUTA_DIAGNOSTICO = "/diagnostico";
 
@@ -193,6 +216,26 @@ const limpiar = (valor) => {
   if (valor === null || valor === undefined) return "";
   return String(valor).trim();
 };
+
+const normalizarLista = (valor) => {
+  if (Array.isArray(valor)) return valor;
+  if (!valor) return [];
+  if (typeof valor === "string") {
+    try {
+      const parsed = JSON.parse(valor);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const resumenDtcSnapshot = (dtcs = []) =>
+  normalizarLista(dtcs)
+    .map((item) => item?.codigo || item)
+    .filter(Boolean)
+    .join(", ");
 
 const badgeClass = (estado) => {
   return getStatusColor(estado || "SIN_ESTADO", "dark");
@@ -340,6 +383,8 @@ export default function ArchivosECUPage() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
   const [bloqueoDiagnostico, setBloqueoDiagnostico] = useState(null);
+  const [contextoSolicitud, setContextoSolicitud] = useState(null);
+  const [cargandoContexto, setCargandoContexto] = useState(false);
 
   const [filtro, setFiltro] = useState("PENDIENTES");
   const [busqueda, setBusqueda] = useState("");
@@ -349,7 +394,13 @@ export default function ArchivosECUPage() {
     ordenId: "",
     prioridad: "MEDIA",
     tipo_servicio: "",
-    tipo_servicio_personalizado: "",
+    servicios_solicitados: [],
+    servicios_preset: "",
+    servicio_principal: "",
+    observacion_servicios: "",
+    diagnosticoId: "",
+    dtc_snapshot: [],
+    dtc_resumen: "",
     metodo_lectura: "",
     herramienta_lectura: "",
     marca_ecu: "",
@@ -481,6 +532,8 @@ export default function ArchivosECUPage() {
           archivo.ordenId,
           archivo.estado,
           archivo.tipo_servicio,
+          normalizarLista(archivo.servicios_solicitados).join(" "),
+          resumenDtcSnapshot(archivo.dtc_snapshot),
           archivo.metodo_lectura,
           archivo.herramienta_lectura,
           archivo.marca_ecu,
@@ -614,6 +667,84 @@ export default function ArchivosECUPage() {
     setBloqueoDiagnostico(null);
   };
 
+  const cargarContextoSolicitud = async (ordenId) => {
+    if (!ordenId) {
+      setContextoSolicitud(null);
+      setNuevo((prev) => ({
+        ...prev,
+        diagnosticoId: "",
+        dtc_snapshot: [],
+        dtc_resumen: "",
+      }));
+      return;
+    }
+
+    try {
+      setCargandoContexto(true);
+      const res = await api.get(`/archivos-ecu/contexto-solicitud/${ordenId}`);
+      const contexto = res.data || {};
+      const dtcs = normalizarLista(contexto.dtcs_activos);
+
+      setContextoSolicitud(contexto);
+      setNuevo((prev) => ({
+        ...prev,
+        diagnosticoId: contexto.diagnostico?.id || "",
+        dtc_snapshot: dtcs,
+        dtc_resumen: contexto.dtc_resumen || resumenDtcSnapshot(dtcs),
+      }));
+    } catch (err) {
+      console.warn("No se pudo cargar contexto File Service:", err.response?.data || err.message);
+      setContextoSolicitud(null);
+      setNuevo((prev) => ({
+        ...prev,
+        diagnosticoId: "",
+        dtc_snapshot: [],
+        dtc_resumen: "",
+      }));
+    } finally {
+      setCargandoContexto(false);
+    }
+  };
+
+  const seleccionarOrdenSolicitud = (ordenId) => {
+    setNuevo((prev) => ({
+      ...prev,
+      ordenId,
+      diagnosticoId: "",
+      dtc_snapshot: [],
+      dtc_resumen: "",
+    }));
+    cargarContextoSolicitud(ordenId);
+  };
+
+  const toggleServicioSolicitado = (codigo) => {
+    setNuevo((prev) => {
+      const actual = normalizarLista(prev.servicios_solicitados);
+      const existe = actual.includes(codigo);
+      const siguientes = existe
+        ? actual.filter((servicio) => servicio !== codigo)
+        : [...actual, codigo];
+
+      return {
+        ...prev,
+        servicios_solicitados: siguientes,
+        servicios_preset: "",
+        servicio_principal: siguientes[0] || "",
+        tipo_servicio: siguientes[0] || "",
+      };
+    });
+  };
+
+  const aplicarPresetServicios = (preset) => {
+    setNuevo((prev) => ({
+      ...prev,
+      servicios_solicitados: preset.servicios,
+      servicios_preset: preset.value,
+      servicio_principal: preset.servicios[0] || preset.value,
+      tipo_servicio: preset.servicios[0] || preset.value,
+    }));
+  };
+
   const crearArchivo = async (e) => {
     e.preventDefault();
     limpiarMensajes();
@@ -623,21 +754,23 @@ export default function ArchivosECUPage() {
       return;
     }
 
-    const tipoServicio =
-      nuevo.tipo_servicio === SERVICIO_PERSONALIZADO
-        ? limpiar(nuevo.tipo_servicio_personalizado)
-        : limpiar(nuevo.tipo_servicio);
+    const serviciosSeleccionados = normalizarLista(nuevo.servicios_solicitados);
+    const tipoServicio = limpiar(
+      nuevo.servicio_principal || serviciosSeleccionados[0] || nuevo.tipo_servicio
+    );
 
-    if (!tipoServicio) {
-      setError("Debes seleccionar un tipo de servicio para File Service.");
+    if (!serviciosSeleccionados.length) {
+      setError("Debes seleccionar al menos un servicio para File Service.");
       return;
     }
 
     if (
-      nuevo.tipo_servicio === SERVICIO_PERSONALIZADO &&
-      !limpiar(nuevo.tipo_servicio_personalizado)
+      serviciosSeleccionados.some((servicio) =>
+        ["CUSTOM", "OTRO"].includes(String(servicio).toUpperCase())
+      ) &&
+      !limpiar(nuevo.observacion_servicios)
     ) {
-      setError("Debes escribir el servicio personalizado para File Service.");
+      setError("Debes describir el servicio Custom / Otro para File Service.");
       return;
     }
 
@@ -653,13 +786,20 @@ export default function ArchivosECUPage() {
 
       Object.entries(nuevo).forEach(([key, value]) => {
         if (key === "archivo") return;
-        if (key === "tipo_servicio_personalizado") return;
         if (key === "tipo_servicio") {
           fd.append(key, tipoServicio);
           return;
         }
+        if (key === "servicios_solicitados" || key === "dtc_snapshot") {
+          fd.append(key, JSON.stringify(normalizarLista(value)));
+          return;
+        }
         fd.append(key, value ?? "");
       });
+
+      fd.set("tipo_servicio", tipoServicio);
+      fd.set("servicio_principal", tipoServicio);
+      fd.set("dtc_resumen", nuevo.dtc_resumen || resumenDtcSnapshot(nuevo.dtc_snapshot));
 
       fd.append("archivo", nuevo.archivo);
 
@@ -675,7 +815,13 @@ export default function ArchivosECUPage() {
         ordenId: "",
         prioridad: "MEDIA",
         tipo_servicio: "",
-        tipo_servicio_personalizado: "",
+        servicios_solicitados: [],
+        servicios_preset: "",
+        servicio_principal: "",
+        observacion_servicios: "",
+        diagnosticoId: "",
+        dtc_snapshot: [],
+        dtc_resumen: "",
         metodo_lectura: "",
         herramienta_lectura: "",
         marca_ecu: "",
@@ -815,6 +961,7 @@ export default function ArchivosECUPage() {
         ...form,
         archivo_ecu_id: archivo.id,
       });
+      setContextoSolicitud(null);
 
       setMensaje("Postventa técnica registrada y notificada internamente");
       setCorreccionForms((prev) => ({
@@ -1281,9 +1428,7 @@ export default function ArchivosECUPage() {
               <label className="text-xs text-slate-400 ml-1">Orden de trabajo</label>
               <select
                 value={nuevo.ordenId}
-                onChange={(e) =>
-                  setNuevo((prev) => ({ ...prev, ordenId: e.target.value }))
-                }
+                onChange={(e) => seleccionarOrdenSolicitud(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
               >
                 <option value="">-- Selecciona una orden --</option>
@@ -1299,6 +1444,43 @@ export default function ArchivosECUPage() {
                 </p>
               )}
             </div>
+
+            {nuevo.ordenId && (
+              <div className="md:col-span-3 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-4">
+                {cargandoContexto ? (
+                  <p className="text-xs font-bold uppercase text-blue-100">
+                    Cargando DTC desde diagnostico...
+                  </p>
+                ) : contextoSolicitud?.diagnostico ? (
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold uppercase text-blue-100">
+                      Importado desde diagnostico #{contextoSolicitud.diagnostico.id} /{" "}
+                      {formatearFecha(contextoSolicitud.diagnostico.createdAt)}
+                    </p>
+                    {normalizarLista(nuevo.dtc_snapshot).length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {normalizarLista(nuevo.dtc_snapshot).map((dtc) => (
+                          <span
+                            key={`dtc-nuevo-${dtc.codigo || dtc}`}
+                            className="rounded-full border border-blue-400/50 bg-slate-950 px-3 py-1 text-xs font-black text-blue-100"
+                          >
+                            {dtc.codigo || dtc}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs font-semibold text-slate-300">
+                        Diagnostico encontrado sin DTC activos detectables.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs font-bold uppercase text-yellow-100">
+                    No hay diagnostico registrado para importar DTC.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="text-xs text-slate-400 ml-1">Prioridad</label>
@@ -1316,57 +1498,94 @@ export default function ArchivosECUPage() {
               </select>
             </div>
 
-            <div>
-              <label className="text-xs text-slate-400 ml-1">Tipo servicio</label>
-              <select
-                value={nuevo.tipo_servicio}
-                onChange={(e) =>
-                  setNuevo((prev) => ({
-                    ...prev,
-                    tipo_servicio: e.target.value,
-                    tipo_servicio_personalizado:
-                      e.target.value === SERVICIO_PERSONALIZADO
-                        ? prev.tipo_servicio_personalizado
-                        : "",
-                  }))
-                }
-                className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
-              >
-                <option value="">-- Selecciona servicio --</option>
-                {SERVICIOS_FILE_SERVICE.map((grupo) => (
-                  <optgroup key={grupo.grupo} label={grupo.grupo}>
-                    {grupo.opciones.map((servicio) => (
-                      <option key={servicio.value} value={servicio.value}>
-                        {servicio.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-              <p className="text-xs text-slate-500 mt-2">
-                Los servicios relacionados con sistemas de emisiones deben
-                {"gestionarse seg\u00FAn normativa aplicable y uso autorizado."}
-              </p>
-            </div>
-
-            {nuevo.tipo_servicio === SERVICIO_PERSONALIZADO && (
+            <div className="md:col-span-3 space-y-4">
               <div>
                 <label className="text-xs text-slate-400 ml-1">
-                  Servicio personalizado
+                  Presets rapidos
                 </label>
-                <input
-                  value={nuevo.tipo_servicio_personalizado}
-                  onChange={(e) =>
-                    setNuevo((prev) => ({
-                      ...prev,
-                      tipo_servicio_personalizado: e.target.value,
-                    }))
-                  }
-                  placeholder="Describe el servicio requerido"
-                  className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
-                />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {PRESETS_FILE_SERVICE.map((preset) => (
+                    <button
+                      type="button"
+                      key={preset.value}
+                      onClick={() => aplicarPresetServicios(preset)}
+                      className={`rounded-full border px-3 py-2 text-xs font-black uppercase transition ${
+                        nuevo.servicios_preset === preset.value
+                          ? "border-blue-400 bg-blue-500 text-white"
+                          : "border-slate-700 bg-slate-950 text-slate-200 hover:border-blue-400"
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
+
+              <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+                <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                  <label className="text-xs font-bold uppercase text-slate-300">
+                    Servicios solicitados
+                  </label>
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">
+                    Servicios internos sujetos a normativa aplicable y uso autorizado.
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  {SERVICIOS_FILE_SERVICE.map((grupo) => (
+                    <div key={grupo.grupo} className="space-y-2">
+                      <p className="text-[11px] font-black uppercase text-blue-200">
+                        {grupo.grupo}
+                      </p>
+                      {grupo.opciones.map((servicio) => {
+                        const checked = normalizarLista(nuevo.servicios_solicitados).includes(
+                          servicio.value
+                        );
+
+                        return (
+                          <label
+                            key={servicio.value}
+                            className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold ${
+                              checked
+                                ? "border-blue-400 bg-blue-500/20 text-blue-50"
+                                : "border-slate-800 bg-slate-900 text-slate-300"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleServicioSolicitado(servicio.value)}
+                            />
+                            {servicio.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {normalizarLista(nuevo.servicios_solicitados).some((servicio) =>
+                ["CUSTOM", "OTRO"].includes(String(servicio).toUpperCase())
+              ) && (
+                <div>
+                  <label className="text-xs text-slate-400 ml-1">
+                    Observacion servicio Custom / Otro
+                  </label>
+                  <input
+                    value={nuevo.observacion_servicios}
+                    onChange={(e) =>
+                      setNuevo((prev) => ({
+                        ...prev,
+                        observacion_servicios: e.target.value,
+                      }))
+                    }
+                    placeholder="Describe el servicio requerido"
+                    className="w-full bg-slate-950 border border-slate-700 p-3 rounded-xl outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
+            </div>
 
             <div>
               <label className="text-xs text-slate-400 ml-1">Método lectura</label>
@@ -1595,6 +1814,10 @@ export default function ArchivosECUPage() {
                   obtenerClienteVehiculo(archivo);
                 const seleccionado =
                   String(archivo.id) === String(archivoSeleccionadoId);
+                const serviciosArchivo = normalizarLista(
+                  archivo.servicios_solicitados
+                );
+                const dtcsArchivo = normalizarLista(archivo.dtc_snapshot);
 
                 return (
                   <button
@@ -1627,9 +1850,27 @@ export default function ArchivosECUPage() {
                     <p className="text-xs text-slate-400">{textoVehiculo}</p>
 
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <span className="rounded-full bg-slate-900 px-2 py-1 text-[10px] uppercase text-slate-300">
-                        {archivo.tipo_servicio || "Servicio no informado"}
-                      </span>
+                      {(serviciosArchivo.length
+                        ? serviciosArchivo.slice(0, 3)
+                        : [archivo.tipo_servicio || "Servicio no informado"]
+                      ).map((servicio) => (
+                        <span
+                          key={`${archivo.id}-svc-${servicio}`}
+                          className="rounded-full bg-slate-900 px-2 py-1 text-[10px] uppercase text-slate-300"
+                        >
+                          {servicioLabel(servicio)}
+                        </span>
+                      ))}
+                      {serviciosArchivo.length > 3 && (
+                        <span className="rounded-full bg-slate-900 px-2 py-1 text-[10px] uppercase text-slate-300">
+                          +{serviciosArchivo.length - 3}
+                        </span>
+                      )}
+                      {dtcsArchivo.length > 0 && (
+                        <span className="rounded-full bg-blue-950 px-2 py-1 text-[10px] uppercase text-blue-200">
+                          DTC: {resumenDtcSnapshot(dtcsArchivo)}
+                        </span>
+                      )}
                       <span className="rounded-full bg-blue-950 px-2 py-1 text-[10px] uppercase text-blue-200">
                         {obtenerProximaAccion(archivo)}
                       </span>
@@ -1713,6 +1954,8 @@ export default function ArchivosECUPage() {
               const puedeFinalizar = archivo.post_escritura_estado === "OK";
               const responsablePrincipal = obtenerResponsablePrincipal(archivo);
               const proximaAccion = obtenerProximaAccion(archivo);
+              const serviciosArchivo = normalizarLista(archivo.servicios_solicitados);
+              const dtcsArchivo = normalizarLista(archivo.dtc_snapshot);
               const guardEstado = archivo.proceso_guard_estado || "SIN_RIESGO";
               const guardAbierto = procesoTecnicoAbierto(archivo);
               const guardMinutos = minutosDesde(procesoGuardInicio(archivo));
@@ -1789,6 +2032,51 @@ export default function ArchivosECUPage() {
                         Orden #{archivo.ordenId} · Servicio:{" "}
                         {archivo.tipo_servicio || "-"}
                       </p>
+
+                      <div className="mt-3 space-y-2">
+                        <div className="flex flex-wrap gap-2">
+                          {(serviciosArchivo.length
+                            ? serviciosArchivo
+                            : [archivo.tipo_servicio || "Servicio no informado"]
+                          ).map((servicio) => (
+                            <span
+                              key={`${archivo.id}-detalle-svc-${servicio}`}
+                              className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-black uppercase text-blue-100"
+                            >
+                              {servicioLabel(servicio)}
+                            </span>
+                          ))}
+                        </div>
+
+                        {archivo.servicios_preset && (
+                          <p className="text-xs font-semibold uppercase text-slate-400">
+                            Preset: {archivo.servicios_preset}
+                          </p>
+                        )}
+
+                        {dtcsArchivo.length > 0 && (
+                          <div>
+                            <p className="mb-1 text-xs font-bold uppercase text-slate-400">
+                              DTC importados
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {dtcsArchivo.map((dtc) => (
+                                <span
+                                  key={`${archivo.id}-dtc-${dtc.codigo || dtc}`}
+                                  className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-black uppercase text-cyan-100"
+                                >
+                                  {dtc.codigo || dtc}
+                                </span>
+                              ))}
+                            </div>
+                            {archivo.diagnosticoId && (
+                              <p className="mt-1 text-[11px] font-semibold uppercase text-slate-500">
+                                Fuente diagnostico #{archivo.diagnosticoId}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
 
                       <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold uppercase">
                         {vehiculo?.id ? (

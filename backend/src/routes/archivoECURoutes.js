@@ -6,6 +6,7 @@ const fs = require("fs");
 const {
   crearArchivoECU,
   obtenerArchivosECU,
+  obtenerContextoSolicitud,
   obtenerArchivoECUPorId,
   actualizarArchivoECU,
   subirArchivoModificado,
@@ -57,6 +58,7 @@ const manejarProcesamientoExterno = upload.single("archivo_resultado");
 router.post("/", manejarSubidaArchivo, crearArchivoECU);
 
 router.get("/", obtenerArchivosECU);
+router.get("/contexto-solicitud/:ordenId", obtenerContextoSolicitud);
 router.get("/:id", obtenerArchivoECUPorId);
 
 router.put("/:id", actualizarArchivoECU);
