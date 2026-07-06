@@ -325,6 +325,13 @@ const obtenerResponsablePrincipal = (archivo) => {
 const snapshotUsuario = (usuario) =>
   limpiar(usuario?.username || usuario?.nombre || usuario?.email || usuario?.id);
 
+const ROLES_CIERRE_TECNICO_LEGACY = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"];
+
+const usuarioPuedeCerrarLegacy = () =>
+  ROLES_CIERRE_TECNICO_LEGACY.includes(
+    String(localStorage.getItem("rol") || "").toUpperCase()
+  );
+
 const requiereModParaCierre = (archivo) => {
   const estado = String(archivo?.estado || "").toUpperCase();
   const servicios = normalizarLista(archivo?.servicios_solicitados)
@@ -363,15 +370,24 @@ const requiereModParaCierre = (archivo) => {
   ].some((marcador) => servicioTexto.includes(marcador));
 };
 
-const checklistCierreTecnico = (archivo, cierreForm = {}) => {
+const checklistCierreTecnico = (archivo, cierreForm = {}, opciones = {}) => {
   const postEstado = String(archivo?.post_escritura_estado || "").toUpperCase();
   const postNoAplica =
     postEstado === "NO_APLICA" && limpiar(archivo?.post_escritura_observacion);
-  const responsableOk = Boolean(
+  const responsableIdOk = Boolean(
     limpiar(archivo?.tuner_asignado_a_id) ||
-      limpiar(archivo?.operador_ecu_asignado_a_id) ||
-      limpiar(archivo?.tuner_asignado_a) ||
+      limpiar(archivo?.operador_ecu_asignado_a_id)
+  );
+  const responsableTextoOk = Boolean(
+    limpiar(archivo?.tuner_asignado_a) ||
       limpiar(archivo?.operador_ecu_asignado_a)
+  );
+  const cierreLegacyAutorizado =
+    opciones.permitirLegacySinResponsable === true &&
+    !responsableIdOk &&
+    !responsableTextoOk;
+  const responsableOk = Boolean(
+    responsableIdOk || responsableTextoOk || cierreLegacyAutorizado
   );
   const modRequerido = requiereModParaCierre(archivo);
 
@@ -1400,7 +1416,9 @@ export default function ArchivosECUPage() {
       return;
     }
 
-    const checklist = checklistCierreTecnico(archivo, form);
+    const checklist = checklistCierreTecnico(archivo, form, {
+      permitirLegacySinResponsable: usuarioPuedeCerrarLegacy(),
+    });
     const faltantes = checklist
       .filter((item) => item.key !== "cierre" && !item.ok)
       .map((item) => item.label);
@@ -1474,7 +1492,9 @@ export default function ArchivosECUPage() {
       observacion_cierre_tecnico: archivo.observacion_cierre_tecnico || "",
       ...(cierreTecnicoForms[archivo.id] || {}),
     };
-    const faltantes = checklistCierreTecnico(archivo, cierreForm)
+    const faltantes = checklistCierreTecnico(archivo, cierreForm, {
+      permitirLegacySinResponsable: usuarioPuedeCerrarLegacy(),
+    })
       .filter((item) => item.key !== "cierre" && !item.ok)
       .map((item) => item.label);
 
@@ -2185,11 +2205,21 @@ export default function ArchivosECUPage() {
                 ...(cierreTecnicoForms[archivo.id] || {}),
               };
 
-              const checklistTecnico = checklistCierreTecnico(archivo, cierreForm);
+              const cierreLegacyAutorizado = usuarioPuedeCerrarLegacy();
+              const checklistTecnico = checklistCierreTecnico(archivo, cierreForm, {
+                permitirLegacySinResponsable: cierreLegacyAutorizado,
+              });
               const faltantesCierreOk = checklistTecnico.filter(
                 (item) => item.key !== "cierre" && !item.ok
               );
               const puedeFinalizar = faltantesCierreOk.length === 0;
+              const legacySinResponsableId =
+                !limpiar(archivo.tuner_asignado_a_id) &&
+                !limpiar(archivo.operador_ecu_asignado_a_id);
+              const legacySinResponsable =
+                legacySinResponsableId &&
+                !limpiar(archivo.tuner_asignado_a) &&
+                !limpiar(archivo.operador_ecu_asignado_a);
               const responsablePrincipal = obtenerResponsablePrincipal(archivo);
               const proximaAccion = obtenerProximaAccion(archivo);
               const serviciosArchivo = normalizarLista(archivo.servicios_solicitados);
@@ -3263,6 +3293,13 @@ export default function ArchivosECUPage() {
                           ))}
                         </div>
                       </div>
+
+                      {legacySinResponsable && cierreLegacyAutorizado && (
+                        <p className="mt-3 rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs font-semibold text-yellow-100">
+                          Orden antigua sin responsable por ID. Se permitira cierre
+                          autorizado y quedara registrado en bitacora.
+                        </p>
+                      )}
 
                       <button
                         type="button"

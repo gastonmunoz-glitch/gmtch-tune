@@ -20,6 +20,17 @@ const limpiarTexto = (valor) => {
 const normalizarTexto = limpiarTexto;
 
 const usuarioActualId = (req) => limpiarTexto(req.usuario?.id || req.user?.id);
+const rolActual = (req) => limpiarTexto(req.usuario?.rol || req.user?.rol).toUpperCase();
+
+const ROLES_CIERRE_TECNICO_LEGACY = new Set([
+  "OWNER",
+  "ADMIN",
+  "SUPERVISOR",
+  "RECEPCION",
+]);
+
+const puedeCerrarLegacySinResponsable = (req) =>
+  ROLES_CIERRE_TECNICO_LEGACY.has(rolActual(req));
 
 const obtenerSnapshotUsuario = (usuario) =>
   limpiarTexto(usuario?.username || usuario?.nombre || usuario?.email || usuario?.id);
@@ -484,13 +495,20 @@ const resultadoTecnicoDesdePost = (resultadoPost) => {
 
 const tieneListaOperativa = (valor) => normalizarVersiones(valor).length > 0;
 
-const tieneResponsableFileService = (archivo) =>
+const tieneResponsableIdFileService = (archivo) =>
   Boolean(
     limpiarTexto(archivo?.tuner_asignado_a_id) ||
-      limpiarTexto(archivo?.operador_ecu_asignado_a_id) ||
-      limpiarTexto(archivo?.tuner_asignado_a) ||
+      limpiarTexto(archivo?.operador_ecu_asignado_a_id)
+  );
+
+const tieneResponsableTextoFileService = (archivo) =>
+  Boolean(
+    limpiarTexto(archivo?.tuner_asignado_a) ||
       limpiarTexto(archivo?.operador_ecu_asignado_a)
   );
+
+const tieneResponsableFileService = (archivo) =>
+  tieneResponsableIdFileService(archivo) || tieneResponsableTextoFileService(archivo);
 
 const requiereModParaCierre = (archivo) => {
   const estado = limpiarTexto(archivo?.estado).toUpperCase();
@@ -533,12 +551,21 @@ const requiereModParaCierre = (archivo) => {
   return !marcadoresSoloRevision.some((marcador) => servicioTexto.includes(marcador));
 };
 
-const validarChecklistCierreTecnicoOK = (archivo, observacion) => {
+const validarChecklistCierreTecnicoOK = (archivo, observacion, opciones = {}) => {
   const faltantes = [];
   const postEstado = limpiarTexto(archivo?.post_escritura_estado).toUpperCase();
   const postNoAplica =
     postEstado === "NO_APLICA" && limpiarTexto(archivo?.post_escritura_observacion);
   const postOk = postEstado === "OK" || postNoAplica;
+  const tieneResponsableId = tieneResponsableIdFileService(archivo);
+  const tieneResponsableTexto = tieneResponsableTextoFileService(archivo);
+  const permiteLegacySinResponsable =
+    opciones.permitirLegacySinResponsable === true;
+  const legacySinResponsableId = !tieneResponsableId;
+  const responsableAceptado =
+    tieneResponsableId ||
+    tieneResponsableTexto ||
+    permiteLegacySinResponsable;
 
   if (!limpiarTexto(archivo?.archivo_original)) {
     faltantes.push("Archivo original");
@@ -548,7 +575,7 @@ const validarChecklistCierreTecnicoOK = (archivo, observacion) => {
     faltantes.push("Servicios solicitados");
   }
 
-  if (!tieneResponsableFileService(archivo)) {
+  if (!responsableAceptado) {
     faltantes.push("Responsable File Service");
   }
 
@@ -575,6 +602,10 @@ const validarChecklistCierreTecnicoOK = (archivo, observacion) => {
   return {
     ok: faltantes.length === 0,
     faltantes,
+    legacy_sin_responsable_id: legacySinResponsableId,
+    legacy_sin_responsable: !tieneResponsableId && !tieneResponsableTexto,
+    cierre_legacy_autorizado:
+      !tieneResponsableId && !tieneResponsableTexto && permiteLegacySinResponsable,
   };
 };
 
@@ -2199,8 +2230,13 @@ const registrarCierreTecnico = async (req, res) => {
       });
     }
 
+    let checklistCierre = null;
+
     if (resultado === "OK") {
-      const { faltantes } = validarChecklistCierreTecnicoOK(archivo, observacion);
+      checklistCierre = validarChecklistCierreTecnicoOK(archivo, observacion, {
+        permitirLegacySinResponsable: puedeCerrarLegacySinResponsable(req),
+      });
+      const { faltantes } = checklistCierre;
 
       if (faltantes.length > 0) {
         await transaction.rollback();
@@ -2311,6 +2347,12 @@ const registrarCierreTecnico = async (req, res) => {
       usuario_rol: req.usuario?.rol || req.user?.rol || null,
       metadata: {
         resultado_tecnico: resultado,
+        legacy_sin_responsable_id:
+          checklistCierre?.legacy_sin_responsable_id || false,
+        legacy_sin_responsable:
+          checklistCierre?.legacy_sin_responsable || false,
+        cierre_legacy_autorizado:
+          checklistCierre?.cierre_legacy_autorizado || false,
       },
     });
 
@@ -2503,12 +2545,17 @@ const actualizarArchivoECU = async (req, res) => {
       limpiarTexto(req.body.observacion) ||
       archivo.observacion_cierre_tecnico ||
       "";
+    let checklistCierre = null;
 
     if (quiereFinalizarTecnico) {
-      const { faltantes } = validarChecklistCierreTecnicoOK(
+      checklistCierre = validarChecklistCierreTecnicoOK(
         archivo,
-        observacionCierreSolicitada
+        observacionCierreSolicitada,
+        {
+          permitirLegacySinResponsable: puedeCerrarLegacySinResponsable(req),
+        }
       );
+      const { faltantes } = checklistCierre;
 
       if (faltantes.length > 0) {
         await transaction.rollback();
@@ -2711,6 +2758,12 @@ const actualizarArchivoECU = async (req, res) => {
         usuario_rol: req.usuario?.rol || req.user?.rol || null,
         metadata: {
           resultado_tecnico: "OK",
+          legacy_sin_responsable_id:
+            checklistCierre?.legacy_sin_responsable_id || false,
+          legacy_sin_responsable:
+            checklistCierre?.legacy_sin_responsable || false,
+          cierre_legacy_autorizado:
+            checklistCierre?.cierre_legacy_autorizado || false,
         },
       });
     }
