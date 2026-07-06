@@ -11,6 +11,7 @@ const {
   cumplimientoOperativo,
   misPendientes,
   tiemposOperativos,
+  guardiaOperativa,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,
@@ -33,6 +34,11 @@ const rolesOperativos = [
 
 router.get("/revision-operativa", permitirRoles(...rolesOperativos), revisionOperativa);
 router.get("/mis-pendientes", permitirRoles(...rolesOperativos), misPendientes);
+router.get(
+  "/guardia-operativa/:usuarioId",
+  permitirRoles(...rolesOperativos),
+  guardiaOperativa
+);
 router.get(
   "/tiempos-operativos",
   permitirRoles("OWNER", "ADMIN", "SUPERVISOR"),

@@ -4075,6 +4075,9 @@ const labelAccionPendiente = (url = "") => {
 const MisPendientesSection = ({ data, error }) => {
   const resumen = data?.resumen || {};
   const pendientes = Array.isArray(data?.pendientes) ? data.pendientes.slice(0, 6) : [];
+  const hayCriticos = pendientes.some(
+    (pendiente) => String(pendiente.severidad || "").toUpperCase() === "CRITICO"
+  );
   const total = numeroDashboard(resumen.total);
   const tarjetas = [
     ["Ordenes asignadas", resumen.ordenes_asignadas],
@@ -4110,6 +4113,12 @@ const MisPendientesSection = ({ data, error }) => {
       {error && (
         <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-950/60 p-3 text-xs font-black uppercase text-red-100">
           {error}
+        </div>
+      )}
+
+      {hayCriticos && (
+        <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-100 p-3 text-xs font-black uppercase text-red-900">
+          Debes resolver los pendientes criticos antes de recibir nuevos trabajos.
         </div>
       )}
 

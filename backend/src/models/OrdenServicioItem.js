@@ -54,6 +54,11 @@ const OrdenServicioItem = sequelize.define(
       allowNull: true,
     },
 
+    responsable_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
     estado: {
       type: DataTypes.STRING(30),
       allowNull: false,

@@ -101,6 +101,7 @@ const itemServicioInicial = {
   cantidad: "1",
   precio_unitario: "",
   responsable: "",
+  responsable_id: "",
   requiere_material_recuperado: false,
   material_recuperado_obligatorio: false,
   observaciones: "",
@@ -116,6 +117,7 @@ const materialInicial = {
   tipo_material: "LOZA_DPF",
   peso_kg: "",
   responsable: "",
+  responsable_id: "",
   destino: "",
   valor_estimado: "",
   observacion: "",
@@ -125,25 +127,83 @@ const materialInicial = {
 const RESPONSABLES_ETAPAS = [
   {
     campo: "diagnostico_asignado_a",
+    campoId: "diagnostico_asignado_a_id",
     label: "Diagnóstico / scanner",
     roles: ["OPERADOR_SCANNER", "OPERADOR_ECU", "SUPERVISOR", "OWNER"],
   },
   {
     campo: "operador_ecu_asignado_a",
+    campoId: "operador_ecu_asignado_a_id",
     label: "Operador ECU",
     roles: ["OPERADOR_ECU", "TUNER", "SUPERVISOR", "OWNER"],
   },
   {
     campo: "mecanico_asignado_a",
+    campoId: "mecanico_asignado_a_id",
     label: "Mecánico",
     roles: ["MECANICO", "SUPERVISOR", "OWNER"],
   },
   {
     campo: "supervisor_asignado_a",
+    campoId: "supervisor_asignado_a_id",
     label: "Supervisor",
     roles: ["SUPERVISOR", "ADMIN", "OWNER"],
   },
 ];
+
+const ROLES_RESPONSABLE_TRABAJO = [
+  "OPERADOR_SCANNER",
+  "OPERADOR_ECU",
+  "TUNER",
+  "MECANICO",
+  "SUPERVISOR",
+  "OWNER",
+];
+
+const obtenerCampoResponsablePorTrabajo = (textoTrabajo = "") => {
+  const valor = String(textoTrabajo || "").toUpperCase();
+
+  if (
+    valor.includes("MECAN") ||
+    valor.includes("MANTEN") ||
+    valor.includes("ACEITE") ||
+    valor.includes("LIMPIEZA DPF") ||
+    valor.includes("REGENER")
+  ) {
+    return {
+      campoId: "mecanico_asignado_a_id",
+      campoTexto: "mecanico_asignado_a",
+    };
+  }
+
+  if (
+    valor.includes("ECU") ||
+    valor.includes("TCU") ||
+    valor.includes("FILE SERVICE") ||
+    valor.includes("STAGE") ||
+    valor.includes("DPF") ||
+    valor.includes("EGR") ||
+    valor.includes("SCR") ||
+    valor.includes("ADBLUE") ||
+    valor.includes("NOX") ||
+    valor.includes("LAMBDA") ||
+    valor.includes("IMMO") ||
+    valor.includes("VMAX") ||
+    valor.includes("POPS") ||
+    valor.includes("LAUNCH") ||
+    valor.includes("HARDCUT")
+  ) {
+    return {
+      campoId: "operador_ecu_asignado_a_id",
+      campoTexto: "operador_ecu_asignado_a",
+    };
+  }
+
+  return {
+    campoId: "diagnostico_asignado_a_id",
+    campoTexto: "diagnostico_asignado_a",
+  };
+};
 
 const ESTADOS_CORRECCION_TECNICA = [
   "CORRECCION_SOLICITADA",
@@ -389,6 +449,7 @@ function OrdenesPage() {
     motivo_ingreso: "",
     monto_total: "",
     prioridad: "MEDIA",
+    responsable_tecnico_id: "",
   });
 
   useEffect(() => {
@@ -566,13 +627,23 @@ function OrdenesPage() {
       return;
     }
 
+    const responsable = usuarioPorId(formData.responsable_tecnico_id);
+
+    if (!responsable) {
+      alert("Debes seleccionar un responsable activo para la orden.");
+      return;
+    }
+
     try {
       setCargando(true);
+      const campoResponsable = obtenerCampoResponsablePorTrabajo(motivo);
 
       await api.post("/ordenes", {
         ...formData,
         motivo_ingreso: motivo,
         estado: "RECEPCIONADO",
+        [campoResponsable.campoId]: responsable.id,
+        [campoResponsable.campoTexto]: snapshotUsuario(responsable),
       });
 
       setFormData({
@@ -581,6 +652,7 @@ function OrdenesPage() {
         motivo_ingreso: "",
         monto_total: "",
         prioridad: "MEDIA",
+        responsable_tecnico_id: "",
       });
 
       await recargar();
@@ -588,7 +660,7 @@ function OrdenesPage() {
       alert("Orden técnica generada.");
     } catch (err) {
       console.error("ERROR EMITIENDO ORDEN:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "Error creando orden.");
+      alert(mensajeErrorResponsable(err, "Error creando orden."));
     } finally {
       setCargando(false);
     }
@@ -652,6 +724,34 @@ function OrdenesPage() {
     return usuarios.filter(
       (usuario) => usuario.activo !== false && roles.includes(usuario.rol)
     );
+  };
+
+  const usuarioPorId = (usuarioId) =>
+    usuarios.find((usuario) => String(usuario.id) === String(usuarioId));
+
+  const snapshotUsuario = (usuario) =>
+    usuario?.username || usuario?.nombre || usuario?.email || "";
+
+  const mensajeErrorResponsable = (err, fallback) => {
+    const data = err.response?.data || {};
+    if (data.error === "RESPONSABLE_BLOQUEADO") {
+      const pendientes = Array.isArray(data.pendientes_criticos)
+        ? data.pendientes_criticos.slice(0, 3)
+        : [];
+      const detalle = pendientes
+        .map((item) => `- ${item.titulo || item.tipo}: ${item.accion_url || ""}`)
+        .join("\n");
+
+      return [
+        data.message ||
+          "No puedes asignar mÃ¡s trabajo a este responsable porque tiene pendientes crÃ­ticos sin resolver.",
+        detalle,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    return data.message || data.error || fallback;
   };
 
   const archivosOrdenSinCierreTecnico = (orden) => {
@@ -825,16 +925,24 @@ function OrdenesPage() {
     }
   };
 
-  const asignarResponsable = async (orden, campo, valor) => {
+  const asignarResponsable = async (orden, etapa, usuarioId) => {
+    const usuario = usuarioPorId(usuarioId);
+
+    if (!usuario) {
+      alert("Debes seleccionar un responsable activo.");
+      return;
+    }
+
     try {
       await api.patch(`/ordenes/${orden.id}`, {
-        [campo]: valor,
+        [etapa.campoId]: usuario.id,
+        [etapa.campo]: snapshotUsuario(usuario),
       });
 
       await recargar();
     } catch (err) {
       console.error("ERROR ASIGNANDO RESPONSABLE:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudo asignar responsable.");
+      alert(mensajeErrorResponsable(err, "No se pudo asignar responsable."));
     }
   };
 
@@ -876,6 +984,7 @@ function OrdenesPage() {
       cantidad: item.cantidad || "1",
       precio_unitario: item.precio_unitario || "",
       responsable: item.responsable || "",
+      responsable_id: item.responsable_id || "",
       estado: item.estado || "PENDIENTE",
       requiere_material_recuperado: item.requiere_material_recuperado === true,
       material_recuperado_obligatorio:
@@ -902,9 +1011,17 @@ function OrdenesPage() {
       return;
     }
 
+    const responsable = usuarioPorId(item.responsable_id);
+    if (!responsable) {
+      alert("Debes seleccionar un responsable activo para el item.");
+      return;
+    }
+
     try {
       await api.post(`/ordenes/${orden.id}/items`, {
         ...item,
+        responsable_id: responsable.id,
+        responsable: snapshotUsuario(responsable),
         cantidad: Number(item.cantidad || 1),
         precio_unitario: Number(item.precio_unitario || 0),
       });
@@ -918,16 +1035,24 @@ function OrdenesPage() {
       alert("Ítem agregado a la orden.");
     } catch (err) {
       console.error("ERROR AGREGANDO ITEM:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudo agregar el ítem.");
+      alert(mensajeErrorResponsable(err, "No se pudo agregar el item."));
     }
   };
 
   const guardarItemOrden = async (orden, item) => {
     const edicion = itemEdicionActual(orden, item);
+    const responsable = usuarioPorId(edicion.responsable_id);
+
+    if (!responsable) {
+      alert("Debes seleccionar un responsable activo para el item.");
+      return;
+    }
 
     try {
       await api.patch(`/ordenes/${orden.id}/items/${item.id}`, {
         ...edicion,
+        responsable_id: responsable.id,
+        responsable: snapshotUsuario(responsable),
         cantidad: Number(edicion.cantidad || 0),
         precio_unitario: Number(edicion.precio_unitario || 0),
       });
@@ -941,7 +1066,7 @@ function OrdenesPage() {
       alert("Ítem actualizado.");
     } catch (err) {
       console.error("ERROR ACTUALIZANDO ITEM:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudo actualizar el ítem.");
+      alert(mensajeErrorResponsable(err, "No se pudo actualizar el item."));
     }
   };
 
@@ -1031,9 +1156,20 @@ function OrdenesPage() {
       return;
     }
 
+    const responsable = material.responsable_id
+      ? usuarioPorId(material.responsable_id)
+      : null;
+
+    if (material.responsable_id && !responsable) {
+      alert("Debes seleccionar un responsable activo para el material.");
+      return;
+    }
+
     try {
       await api.post(`/ordenes/${orden.id}/material-recuperado`, {
         ...material,
+        responsable_id: responsable?.id || undefined,
+        responsable: responsable ? snapshotUsuario(responsable) : undefined,
         itemId: material.itemId || null,
         peso_kg: Number(material.peso_kg || 0),
         valor_estimado:
@@ -1049,7 +1185,7 @@ function OrdenesPage() {
       alert("Material recuperado registrado.");
     } catch (err) {
       console.error("ERROR REGISTRANDO MATERIAL:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudo registrar el material.");
+      alert(mensajeErrorResponsable(err, "No se pudo registrar el material."));
     }
   };
 
@@ -1159,9 +1295,19 @@ function OrdenesPage() {
             </p>
           )}
 
-          <p className="text-[10px] font-black uppercase text-gray-500">
-            Responsable si aplica: asignalo en la tarjeta de la orden despues de crearla.
-          </p>
+          <select
+            className="w-full border-4 border-black p-4 font-black bg-white"
+            value={formData.responsable_tecnico_id}
+            onChange={(e) => actualizarForm("responsable_tecnico_id", e.target.value)}
+            required
+          >
+            <option value="">Responsable técnico obligatorio</option>
+            {usuariosPorRoles(ROLES_RESPONSABLE_TRABAJO).map((usuario) => (
+              <option key={`nueva-orden-${usuario.id}`} value={usuario.id}>
+                {usuario.nombre || usuario.username} ({usuario.rol})
+              </option>
+            ))}
+          </select>
 
           <div className="space-y-2">
             <label className="block text-[10px] font-black uppercase text-gray-500">
@@ -1522,7 +1668,8 @@ function OrdenesPage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                           {RESPONSABLES_ETAPAS.map((etapa) => {
                             const opciones = usuariosPorRoles(etapa.roles);
-                            const valorActual = o[etapa.campo] || "";
+                            const valorActual = o[etapa.campoId] || "";
+                            const textoLegacy = o[etapa.campo] || "";
 
                             return (
                               <label
@@ -1536,24 +1683,27 @@ function OrdenesPage() {
                                   onChange={(event) =>
                                     asignarResponsable(
                                       o,
-                                      etapa.campo,
+                                      etapa,
                                       event.target.value
                                     )
                                   }
                                 >
-                                  <option value="">Sin asignar</option>
-                                  {valorActual &&
+                                  <option value="">Seleccionar responsable</option>
+                                  {!valorActual &&
+                                    textoLegacy &&
                                     !opciones.some(
-                                      (usuario) => usuario.username === valorActual
+                                      (usuario) =>
+                                        usuario.username === textoLegacy ||
+                                        usuario.nombre === textoLegacy
                                     ) && (
-                                      <option value={valorActual}>
-                                        {valorActual}
+                                      <option value="" disabled>
+                                        Actual: {textoLegacy}
                                       </option>
                                     )}
                                   {opciones.map((usuario) => (
                                     <option
                                       key={`${etapa.campo}-${usuario.id}`}
-                                      value={usuario.username}
+                                      value={usuario.id}
                                     >
                                       {usuario.nombre || usuario.username} ({usuario.rol})
                                     </option>
@@ -1839,19 +1989,32 @@ function OrdenesPage() {
                                       }
                                     />
 
-                                    <input
-                                      className="border-2 border-black p-2 text-[10px] font-bold"
-                                      placeholder="Responsable"
-                                      value={edicion.responsable}
+                                    <select
+                                      className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                                      value={edicion.responsable_id}
                                       onChange={(event) =>
                                         actualizarItemEdicionLocal(
                                           o,
                                           item,
-                                          "responsable",
+                                          "responsable_id",
                                           event.target.value
                                         )
                                       }
-                                    />
+                                    >
+                                      <option value="">Responsable obligatorio</option>
+                                      {!edicion.responsable_id && edicion.responsable && (
+                                        <option value="" disabled>
+                                          Actual: {edicion.responsable}
+                                        </option>
+                                      )}
+                                      {usuariosPorRoles(ROLES_RESPONSABLE_TRABAJO).map(
+                                        (usuario) => (
+                                          <option key={`item-${item.id}-${usuario.id}`} value={usuario.id}>
+                                            {usuario.nombre || usuario.username} ({usuario.rol})
+                                          </option>
+                                        )
+                                      )}
+                                    </select>
 
                                     <textarea
                                       className="border-2 border-black p-2 text-[10px] font-bold md:col-span-3"
@@ -1987,18 +2150,24 @@ function OrdenesPage() {
                               ))}
                             </select>
 
-                            <input
-                              className="border-2 border-black p-2 text-[10px] font-bold"
-                              placeholder="Responsable opcional"
-                              value={itemNuevo.responsable}
+                            <select
+                              className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                              value={itemNuevo.responsable_id}
                               onChange={(event) =>
                                 actualizarItemNuevoLocal(
                                   o,
-                                  "responsable",
+                                  "responsable_id",
                                   event.target.value
                                 )
                               }
-                            />
+                            >
+                              <option value="">Responsable obligatorio</option>
+                              {usuariosPorRoles(ROLES_RESPONSABLE_TRABAJO).map((usuario) => (
+                                <option key={`nuevo-item-${usuario.id}`} value={usuario.id}>
+                                  {usuario.nombre || usuario.username} ({usuario.rol})
+                                </option>
+                              ))}
+                            </select>
 
                             <input
                               type="number"
@@ -2295,18 +2464,24 @@ function OrdenesPage() {
                             }
                           />
 
-                          <input
-                            className="border-2 border-black p-2 text-[10px] font-bold"
-                            placeholder="Responsable"
-                            value={materialForm.responsable}
+                          <select
+                            className="border-2 border-black bg-white p-2 text-[10px] font-bold uppercase text-black"
+                            value={materialForm.responsable_id}
                             onChange={(event) =>
                               actualizarMaterialLocal(
                                 o,
-                                "responsable",
+                                "responsable_id",
                                 event.target.value
                               )
                             }
-                          />
+                          >
+                            <option value="">Responsable: usuario actual</option>
+                            {usuariosPorRoles(ROLES_RESPONSABLE_TRABAJO).map((usuario) => (
+                              <option key={`material-${usuario.id}`} value={usuario.id}>
+                                {usuario.nombre || usuario.username} ({usuario.rol})
+                              </option>
+                            ))}
+                          </select>
 
                           <input
                             className="border-2 border-black p-2 text-[10px] font-bold"

@@ -1,6 +1,6 @@
 const { Op, QueryTypes } = require("sequelize");
 const sequelize = require("../config/database");
-const { AutomatizacionReporte, Notificacion } = require("../models");
+const { AutomatizacionReporte, Notificacion, Usuario } = require("../models");
 const { crearNotificacionesInternas } = require("./notificacionController");
 const {
   prepararColumnasArchivoECU,
@@ -1010,10 +1010,12 @@ const crearReporteData = (ctx, tipo) => {
   };
 };
 
-const agregarPendienteUsuario = (usuarios, username, campo, cantidad = 1) => {
-  const nombre = limpiarTexto(username) || "Sin responsable";
-  if (!usuarios[nombre]) {
-    usuarios[nombre] = {
+const agregarPendienteUsuario = (usuarios, username, campo, cantidad = 1, etiqueta = null) => {
+  const clave = limpiarTexto(username) || "Sin responsable";
+  const nombre = limpiarTexto(etiqueta) || clave;
+  if (!usuarios[clave]) {
+    usuarios[clave] = {
+      usuario_id: clave === nombre ? null : clave,
       username: nombre,
       ordenes_pendientes: 0,
       file_service_pendientes: 0,
@@ -1024,8 +1026,8 @@ const agregarPendienteUsuario = (usuarios, username, campo, cantidad = 1) => {
     };
   }
 
-  usuarios[nombre][campo] = numero(usuarios[nombre][campo]) + cantidad;
-  return usuarios[nombre];
+  usuarios[clave][campo] = numero(usuarios[clave][campo]) + cantidad;
+  return usuarios[clave];
 };
 
 const materialCumpleCumplimiento = (material) => {
@@ -1116,8 +1118,10 @@ const crearCumplimientoOperativoData = (ctx) => {
 
       const usuario = agregarPendienteUsuario(
         usuariosPendientes,
-        item.responsable,
-        "material_pendiente"
+        item.responsable_id || item.responsable,
+        "material_pendiente",
+        1,
+        item.responsable
       );
       usuario.detalles.push(`Material pendiente Orden #${ordenId}`);
     }
@@ -1150,24 +1154,43 @@ const crearCumplimientoOperativoData = (ctx) => {
 
       const responsables = {
         diagnostico_asignado_a: orden.diagnostico_asignado_a || null,
+        diagnostico_asignado_a_id: orden.diagnostico_asignado_a_id || null,
         operador_ecu_asignado_a: orden.operador_ecu_asignado_a || null,
+        operador_ecu_asignado_a_id: orden.operador_ecu_asignado_a_id || null,
         mecanico_asignado_a: orden.mecanico_asignado_a || null,
+        mecanico_asignado_a_id: orden.mecanico_asignado_a_id || null,
         supervisor_asignado_a: orden.supervisor_asignado_a || null,
+        supervisor_asignado_a_id: orden.supervisor_asignado_a_id || null,
       };
       const usuariosOrden = [
-        orden.recepcionado_por,
-        orden.operador_ecu_asignado_a,
-        orden.mecanico_asignado_a,
-        orden.supervisor_asignado_a,
-      ].filter(Boolean);
+        [orden.recepcionado_por_id || orden.recepcionado_por, orden.recepcionado_por],
+        [
+          orden.diagnostico_asignado_a_id || orden.diagnostico_asignado_a,
+          orden.diagnostico_asignado_a,
+        ],
+        [
+          orden.operador_ecu_asignado_a_id || orden.operador_ecu_asignado_a,
+          orden.operador_ecu_asignado_a,
+        ],
+        [orden.mecanico_asignado_a_id || orden.mecanico_asignado_a, orden.mecanico_asignado_a],
+        [
+          orden.supervisor_asignado_a_id || orden.supervisor_asignado_a,
+          orden.supervisor_asignado_a,
+        ],
+      ].filter(([clave]) => Boolean(clave));
 
       if (!usuariosOrden.length) usuariosOrden.push("Sin responsable");
 
-      usuariosOrden.forEach((username) => {
+      usuariosOrden.forEach((itemUsuario) => {
+        const [username, etiqueta] = Array.isArray(itemUsuario)
+          ? itemUsuario
+          : [itemUsuario, itemUsuario];
         const usuario = agregarPendienteUsuario(
           usuariosPendientes,
           username,
-          "ordenes_pendientes"
+          "ordenes_pendientes",
+          1,
+          etiqueta
         );
         usuario.detalles.push(`Orden #${ordenId}: ${pendientes.join(", ")}`);
       });
@@ -1175,8 +1198,10 @@ const crearCumplimientoOperativoData = (ctx) => {
       if (emergencia) {
         const usuario = agregarPendienteUsuario(
           usuariosPendientes,
-          orden.recepcionado_por,
-          "recepciones_emergencia"
+          orden.recepcionado_por_id || orden.recepcionado_por,
+          "recepciones_emergencia",
+          1,
+          orden.recepcionado_por
         );
         usuario.detalles.push(`Recepcion emergencia Orden #${ordenId}`);
       }
@@ -1184,8 +1209,10 @@ const crearCumplimientoOperativoData = (ctx) => {
       if (pendientes.includes("PAGO_PENDIENTE_LISTO_ENTREGA")) {
         const usuario = agregarPendienteUsuario(
           usuariosPendientes,
-          orden.recepcionado_por || "RECEPCION",
-          "cobros_pendientes_asociados"
+          orden.recepcionado_por_id || orden.recepcionado_por || "RECEPCION",
+          "cobros_pendientes_asociados",
+          1,
+          orden.recepcionado_por || "RECEPCION"
         );
         usuario.detalles.push(`Pago pendiente Orden #${ordenId}`);
       }
@@ -1199,6 +1226,7 @@ const crearCumplimientoOperativoData = (ctx) => {
           ? `${orden._vehiculo.patente} ${orden._vehiculo.marca || ""} ${orden._vehiculo.modelo || ""}`.trim()
           : "Vehiculo no registrado",
         recepcionado_por: orden.recepcionado_por || null,
+        recepcionado_por_id: orden.recepcionado_por_id || null,
         responsables,
         diagnosticos_count: diagnosticosOrden.length,
         pendientes,
@@ -1344,17 +1372,19 @@ const normalizarClaveUsuario = (valor) => limpiarTexto(valor).toLowerCase();
 
 const crearIdentidadUsuario = (req) => {
   const usuario = req.usuario || req.user || {};
+  const id = limpiarTexto(usuario.id);
   const username = limpiarTexto(usuario.username);
   const nombre = limpiarTexto(usuario.nombre);
   const email = limpiarTexto(usuario.email);
   const rol = upper(usuario.rol);
   const claves = new Set(
-    [username, nombre, email]
+    [id, username, nombre, email]
       .map(normalizarClaveUsuario)
       .filter(Boolean)
   );
 
   return {
+    id,
     username,
     nombre,
     email,
@@ -1501,16 +1531,25 @@ const crearMisPendientesData = (ctx, req) => {
     const emergencia = upper(orden.origen_recepcion) === "RECEPCION_EMERGENCIA_OPERADOR";
     const asignadaAlUsuario = coincideIdentidad(
       identidad,
+      orden.recepcionado_por_id,
       orden.recepcionado_por,
+      orden.diagnostico_asignado_a_id,
       orden.diagnostico_asignado_a,
+      orden.operador_ecu_asignado_a_id,
       orden.operador_ecu_asignado_a,
+      orden.mecanico_asignado_a_id,
       orden.mecanico_asignado_a,
+      orden.supervisor_asignado_a_id,
       orden.supervisor_asignado_a
     );
     const esColaRecepcion = rol === "RECEPCION" && estado === "LISTO_PARA_ENTREGA";
     const esColaScanner =
       rol === "OPERADOR_SCANNER" &&
-      (coincideIdentidad(identidad, orden.diagnostico_asignado_a) ||
+      (coincideIdentidad(
+        identidad,
+        orden.diagnostico_asignado_a_id,
+        orden.diagnostico_asignado_a
+      ) ||
         ["PARA_DIAGNOSTICO", "RECEPCIONADO"].includes(estado));
 
     if (asignadaAlUsuario || esColaScanner) {
@@ -1550,7 +1589,8 @@ const crearMisPendientesData = (ctx, req) => {
     }
 
     if (
-      (coincideIdentidad(identidad, orden.recepcionado_por) || rol === "RECEPCION") &&
+      (coincideIdentidad(identidad, orden.recepcionado_por_id, orden.recepcionado_por) ||
+        rol === "RECEPCION") &&
       emergencia &&
       fotosOrden.length === 0
     ) {
@@ -1590,8 +1630,10 @@ const crearMisPendientesData = (ctx, req) => {
     const orden = ctx.ordenes.find((actual) => Number(actual.id) === ordenId) || {};
     if (upper(orden.estado) === "ENTREGADO" || booleano(orden.archivada)) return;
     const datos = datosOrdenOperativa(orden);
-    const asignadoItem = coincideIdentidad(identidad, item.responsable);
-    const asignadoMecanico = rol === "MECANICO" && coincideIdentidad(identidad, orden.mecanico_asignado_a);
+    const asignadoItem = coincideIdentidad(identidad, item.responsable_id, item.responsable);
+    const asignadoMecanico =
+      rol === "MECANICO" &&
+      coincideIdentidad(identidad, orden.mecanico_asignado_a_id, orden.mecanico_asignado_a);
     const estadoItem = upper(item.estado || "PENDIENTE");
     const cerrado = ["CERRADO", "COMPLETADO", "FINALIZADO", "ANULADO"].includes(estadoItem);
     const requiereMaterial =
@@ -1730,6 +1772,9 @@ const crearMisPendientesData = (ctx, req) => {
     },
     resumen,
     pendientes,
+    mensaje_critico: pendientes.some((pendiente) => upper(pendiente.severidad) === "CRITICO")
+      ? "Debes resolver esto antes de recibir nuevos trabajos."
+      : null,
     solo_lectura: true,
     enfoque: "mis_pendientes_v1",
   };
@@ -2203,6 +2248,382 @@ const crearTiemposOperativosData = (ctx) => {
   };
 };
 
+const crearIdentidadDesdeUsuario = (usuario = {}) => {
+  const id = limpiarTexto(usuario.id);
+  const username = limpiarTexto(usuario.username);
+  const nombre = limpiarTexto(usuario.nombre);
+  const email = limpiarTexto(usuario.email);
+  const rol = upper(usuario.rol);
+  const claves = new Set(
+    [id, username, nombre, email]
+      .map(normalizarClaveUsuario)
+      .filter(Boolean)
+  );
+
+  return {
+    id,
+    username,
+    nombre,
+    email,
+    rol,
+    claves,
+  };
+};
+
+const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {}) => {
+  const id = limpiarTexto(usuarioId);
+
+  if (!id) {
+    return {
+      bloqueado: false,
+      usuarioId: null,
+      pendientes_criticos: [],
+    };
+  }
+
+  const usuario = await Usuario.findByPk(id, {
+    attributes: ["id", "nombre", "username", "rol", "activo"],
+  });
+
+  if (!usuario || usuario.activo === false) {
+    return {
+      bloqueado: true,
+      usuarioId: id,
+      usuario: null,
+      pendientes_criticos: [
+        {
+          tipo: "USUARIO_NO_ASIGNABLE",
+          titulo: "Usuario no asignable",
+          descripcion: "El usuario no existe o esta inactivo.",
+          ordenId: null,
+          archivoECUId: null,
+          itemId: null,
+          horas: 0,
+          accion_url: "/usuarios",
+        },
+      ],
+    };
+  }
+
+  const ctx = contexto || (await cargarContexto());
+  const identidad = crearIdentidadDesdeUsuario({
+    ...usuario.toJSON(),
+    rol: rol || usuario.rol,
+  });
+  const ahora = new Date();
+  const fotosPorOrden = new Map();
+  const itemsPorOrden = new Map();
+  const materialesPorOrden = new Map();
+  const materialesPorItem = new Map();
+  const pendientesMap = new Map();
+
+  ctx.fotos.forEach((foto) => {
+    const ordenId = Number(foto.ordenId || foto.orden_id || foto.ordenTrabajoId);
+    if (!ordenId) return;
+    if (!fotosPorOrden.has(ordenId)) fotosPorOrden.set(ordenId, []);
+    fotosPorOrden.get(ordenId).push(foto);
+  });
+
+  ctx.items.forEach((item) => {
+    const ordenId = Number(item.ordenId || item.orden_id);
+    if (!ordenId) return;
+    if (!itemsPorOrden.has(ordenId)) itemsPorOrden.set(ordenId, []);
+    itemsPorOrden.get(ordenId).push(item);
+  });
+
+  ctx.materiales.forEach((material) => {
+    const ordenId = Number(material.ordenId || material.orden_id);
+    const itemId = Number(material.itemId || material.item_id || 0);
+    if (ordenId) {
+      if (!materialesPorOrden.has(ordenId)) materialesPorOrden.set(ordenId, []);
+      materialesPorOrden.get(ordenId).push(material);
+    }
+    if (itemId) {
+      if (!materialesPorItem.has(itemId)) materialesPorItem.set(itemId, []);
+      materialesPorItem.get(itemId).push(material);
+    }
+  });
+
+  const itemMaterialCumplido = (item, ordenId) => {
+    const itemId = Number(item.id);
+    const materialesItem = materialesPorItem.get(itemId) || [];
+    const materialesOrden = (materialesPorOrden.get(Number(ordenId)) || []).filter(
+      (material) => !Number(material.itemId || material.item_id || 0)
+    );
+    return [...materialesItem, ...materialesOrden].some(materialCumpleCumplimiento);
+  };
+
+  const agregarPendienteCritico = (pendiente) => {
+    const key = [
+      pendiente.tipo,
+      pendiente.ordenId || "",
+      pendiente.archivoECUId || "",
+      pendiente.itemId || "",
+    ].join(":");
+
+    if (pendientesMap.has(key)) return;
+
+    pendientesMap.set(key, {
+      tipo: pendiente.tipo,
+      titulo: pendiente.titulo,
+      descripcion: pendiente.descripcion,
+      ordenId: pendiente.ordenId || null,
+      archivoECUId: pendiente.archivoECUId || null,
+      itemId: pendiente.itemId || null,
+      horas: redondearHoras(pendiente.horas || 0),
+      accion_url: pendiente.accion_url || "/",
+    });
+  };
+
+  const usuarioAsignadoOrden = (orden) =>
+    coincideIdentidad(
+      identidad,
+      orden.recepcionado_por_id,
+      orden.recepcionado_por,
+      orden.diagnostico_asignado_a_id,
+      orden.diagnostico_asignado_a,
+      orden.operador_ecu_asignado_a_id,
+      orden.operador_ecu_asignado_a,
+      orden.mecanico_asignado_a_id,
+      orden.mecanico_asignado_a,
+      orden.supervisor_asignado_a_id,
+      orden.supervisor_asignado_a
+    );
+
+  const usuarioAsignadoRecepcion = (orden) =>
+    coincideIdentidad(identidad, orden.recepcionado_por_id, orden.recepcionado_por);
+
+  const usuarioAsignadoArchivo = (archivo) =>
+    coincideIdentidad(
+      identidad,
+      archivo.tuner_asignado_a,
+      archivo.operador_ecu_asignado_a,
+      archivo.slave_asignado_a,
+      archivo.proceso_guard_responsable_id
+    );
+
+  ctx.ordenes
+    .filter((orden) => normalizarEstado(orden.estado) !== "ENTREGADO" && !booleano(orden.archivada))
+    .forEach((orden) => {
+      const ordenId = Number(orden.id);
+      const estado = normalizarEstado(orden.estado);
+      const horasOrden = horasDesde(orden.updatedAt || orden.createdAt, ahora);
+      const accionOrden = `/ordenes?ordenId=${ordenId}`;
+
+      if (estado === "EN_PROGRAMACION" && usuarioAsignadoOrden(orden) && horasOrden > 24) {
+        agregarPendienteCritico({
+          tipo: "PROGRAMACION_ATRASADA",
+          titulo: "Programacion atrasada",
+          descripcion: "Orden en programacion por mas de 24 horas corridas.",
+          ordenId,
+          horas: horasOrden,
+          accion_url: accionOrden,
+        });
+      }
+
+      if (
+        estado === "LISTO_PARA_ENTREGA" &&
+        usuarioAsignadoRecepcion(orden) &&
+        !orden.entregado_at &&
+        horasOrden > 24
+      ) {
+        agregarPendienteCritico({
+          tipo: "LISTO_SIN_ENTREGA",
+          titulo: "Lista sin entrega",
+          descripcion: "Orden lista para entrega por mas de 24 horas corridas.",
+          ordenId,
+          horas: horasOrden,
+          accion_url: `${accionOrden}#entrega`,
+        });
+      }
+
+      const emergencia = upper(orden.origen_recepcion) === "RECEPCION_EMERGENCIA_OPERADOR";
+      const fotosOrden = fotosPorOrden.get(ordenId) || [];
+      const itemsOrden = itemsPorOrden.get(ordenId) || [];
+
+      if (
+        emergencia &&
+        usuarioAsignadoRecepcion(orden) &&
+        (fotosOrden.length === 0 || itemsOrden.length === 0) &&
+        horasDesde(orden.createdAt, ahora) > 2
+      ) {
+        agregarPendienteCritico({
+          tipo: "RECEPCION_EMERGENCIA_INCOMPLETA",
+          titulo: "Recepcion emergencia incompleta",
+          descripcion: "Recepcion de emergencia sin fotos o items despues de 2 horas corridas.",
+          ordenId,
+          horas: horasDesde(orden.createdAt, ahora),
+          accion_url: accionOrden,
+        });
+      }
+    });
+
+  ctx.items.forEach((item) => {
+    const ordenId = Number(item.ordenId || item.orden_id);
+    const orden = ctx.ordenes.find((actual) => Number(actual.id) === ordenId);
+    if (!orden || normalizarEstado(orden.estado) === "ENTREGADO" || booleano(orden.archivada)) {
+      return;
+    }
+
+    const asignadoItem = coincideIdentidad(identidad, item.responsable_id, item.responsable);
+    const obligatorio =
+      booleano(item.material_recuperado_obligatorio) ||
+      booleano(item.requiere_material_recuperado);
+    const cerrado = ["ANULADO", "LISTO", "CERRADO", "COMPLETADO", "FINALIZADO"].includes(
+      normalizarEstado(item.estado)
+    );
+    const horasItem = horasDesde(item.updatedAt || item.createdAt || orden.createdAt, ahora);
+
+    if (asignadoItem && obligatorio && !cerrado && !itemMaterialCumplido(item, ordenId) && horasItem > 24) {
+      agregarPendienteCritico({
+        tipo: "MATERIAL_OBLIGATORIO_PENDIENTE",
+        titulo: "Material obligatorio pendiente",
+        descripcion: "Item con material recuperado obligatorio pendiente por mas de 24 horas.",
+        ordenId,
+        itemId: item.id || null,
+        horas: horasItem,
+        accion_url: `/ordenes?ordenId=${ordenId}#material`,
+      });
+    }
+  });
+
+  ctx.materiales.forEach((material) => {
+    const asignadoMaterial = coincideIdentidad(
+      identidad,
+      material.responsable_id,
+      material.responsable,
+      material.registrado_por_id,
+      material.registrado_por
+    );
+    if (!asignadoMaterial) return;
+    const ordenId = Number(material.ordenId || material.orden_id);
+    const horasMaterial = horasDesde(material.updatedAt || material.createdAt, ahora);
+    const pendiente = !materialCumpleCumplimiento(material);
+
+    if (pendiente && horasMaterial > 24) {
+      agregarPendienteCritico({
+        tipo: "MATERIAL_REGISTRO_INCOMPLETO",
+        titulo: "Registro de material incompleto",
+        descripcion: "Material recuperado sin peso o motivo de excepcion por mas de 24 horas.",
+        ordenId: ordenId || null,
+        itemId: material.itemId || null,
+        horas: horasMaterial,
+        accion_url: ordenId ? `/ordenes?ordenId=${ordenId}#material` : "/",
+      });
+    }
+  });
+
+  ctx.archivos.filter(esArchivoActivo).forEach((archivo) => {
+    if (!usuarioAsignadoArchivo(archivo)) return;
+
+    const estadoArchivo = normalizarEstado(archivo.estado);
+    const horasArchivo = horasDesde(archivo.updatedAt || archivo.createdAt, ahora);
+    const accion = `/archivos-ecu?archivoId=${archivo.id}`;
+    const postPendiente =
+      upper(archivo.post_escritura_estado) !== "OK" &&
+      (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
+        estadoArchivo
+      ) ||
+        Boolean(archivo.archivo_modificado));
+    const correccionPendiente =
+      booleano(archivo.correccion_pendiente) || estadoArchivo === "REQUIERE_CORRECCION";
+    const guardCritico = ["CRITICO", "ESCALADO"].includes(
+      upper(archivo.proceso_guard_estado)
+    );
+
+    if (correccionPendiente && horasArchivo > 12) {
+      agregarPendienteCritico({
+        tipo: "CORRECCION_FILE_SERVICE_ATRASADA",
+        titulo: "Correccion File Service atrasada",
+        descripcion: "File Service con correccion pendiente por mas de 12 horas.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        horas: horasArchivo,
+        accion_url: `${accion}#correccion`,
+      });
+    }
+
+    if (postPendiente && horasArchivo > 24) {
+      agregarPendienteCritico({
+        tipo: "POST_ESCRITURA_ATRASADA",
+        titulo: "Post escritura atrasada",
+        descripcion: "File Service sin post escritura OK por mas de 24 horas.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        horas: horasArchivo,
+        accion_url: `${accion}#post-escritura`,
+      });
+    }
+
+    if (guardCritico) {
+      agregarPendienteCritico({
+        tipo: "PROCESS_GUARD_CRITICO",
+        titulo: "Process Guard critico",
+        descripcion: "Proceso tecnico con cierre obligatorio en estado critico o escalado.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        horas: horasArchivo,
+        accion_url: accion,
+      });
+    }
+  });
+
+  const pendientes_criticos = [...pendientesMap.values()].sort(
+    (a, b) => numero(b.horas) - numero(a.horas)
+  );
+
+  return {
+    bloqueado: pendientes_criticos.length > 0,
+    usuarioId: id,
+    usuario: {
+      id: usuario.id,
+      nombre: usuario.nombre,
+      username: usuario.username,
+      rol: usuario.rol,
+    },
+    pendientes_criticos,
+  };
+};
+
+const guardiaOperativa = async (req, res) => {
+  try {
+    const usuarioId = limpiarTexto(req.params.usuarioId);
+
+    if (!usuarioId) {
+      return res.status(400).json({
+        error: "usuarioId requerido",
+      });
+    }
+
+    const rol = rolActual(req);
+    const esJefatura = ["OWNER", "ADMIN", "SUPERVISOR"].includes(rol);
+    const usuarioActualId = limpiarTexto(req.usuario?.id || req.user?.id);
+
+    if (!esJefatura && usuarioId !== usuarioActualId) {
+      return res.status(403).json({
+        error: "Solo puedes consultar tu propia guardia operativa.",
+      });
+    }
+
+    const resultado = await verificarGuardiaOperativaUsuario({ usuarioId });
+
+    return res.json({
+      ...resultado,
+      enfoque: "guardia_operativa_critica_v1",
+      solo_lectura: true,
+      mensaje: resultado.bloqueado
+        ? "Debes resolver los pendientes criticos antes de recibir nuevos trabajos."
+        : "Usuario sin pendientes criticos bloqueantes.",
+    });
+  } catch (error) {
+    console.error("ERROR GUARDIA OPERATIVA:", error);
+    return res.status(500).json({
+      error: "No se pudo revisar guardia operativa.",
+      detalle: process.env.NODE_ENV === "production" ? undefined : error.message,
+    });
+  }
+};
+
 const crearNotificacionAntiSpam = async ({
   rolesDestino,
   tipo,
@@ -2598,6 +3019,8 @@ module.exports = {
   cumplimientoOperativo,
   misPendientes,
   tiemposOperativos,
+  guardiaOperativa,
+  verificarGuardiaOperativaUsuario,
   revisionFinanzas,
   revisionMaterialRecuperado,
   obtenerUltimoReporte,

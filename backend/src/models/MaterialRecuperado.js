@@ -137,6 +137,11 @@ const MaterialRecuperado = sequelize.define(
       allowNull: true,
     },
 
+    responsable_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
     destino: {
       type: DataTypes.STRING(120),
       allowNull: true,
@@ -154,6 +159,11 @@ const MaterialRecuperado = sequelize.define(
 
     registrado_por: {
       type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    registrado_por_id: {
+      type: DataTypes.UUID,
       allowNull: true,
     },
 

@@ -24,6 +24,7 @@ const ESTADO_INICIAL_ORDEN = {
   sintomas_cliente: "",
   observaciones_visuales: "",
   prioridad: "MEDIA",
+  responsable_tecnico_id: "",
   requiere_scanner: true,
   requiere_lectura_ecu: true,
   requiere_mecanica: false,
@@ -94,6 +95,55 @@ const texto = (valor, fallback = "No registrado") => {
   return limpio || fallback;
 };
 
+const snapshotUsuario = (usuario) =>
+  usuario?.username || usuario?.nombre || usuario?.email || "";
+
+const obtenerCampoResponsablePorServicio = (servicio, requiereMecanica = false) => {
+  const valor = String(servicio || "").toUpperCase();
+
+  if (
+    requiereMecanica ||
+    valor.includes("MECAN") ||
+    valor.includes("MANTEN") ||
+    valor.includes("ACEITE") ||
+    valor.includes("LIMPIEZA DPF") ||
+    valor.includes("REGENER")
+  ) {
+    return {
+      campoId: "mecanico_asignado_a_id",
+      campoTexto: "mecanico_asignado_a",
+    };
+  }
+
+  if (
+    valor.includes("ECU") ||
+    valor.includes("TCU") ||
+    valor.includes("FILE SERVICE") ||
+    valor.includes("STAGE") ||
+    valor.includes("DPF") ||
+    valor.includes("EGR") ||
+    valor.includes("SCR") ||
+    valor.includes("ADBLUE") ||
+    valor.includes("NOX") ||
+    valor.includes("LAMBDA") ||
+    valor.includes("IMMO") ||
+    valor.includes("VMAX") ||
+    valor.includes("POPS") ||
+    valor.includes("LAUNCH") ||
+    valor.includes("HARDCUT")
+  ) {
+    return {
+      campoId: "operador_ecu_asignado_a_id",
+      campoTexto: "operador_ecu_asignado_a",
+    };
+  }
+
+  return {
+    campoId: "diagnostico_asignado_a_id",
+    campoTexto: "diagnostico_asignado_a",
+  };
+};
+
 const obtenerOrdenesVehiculo = (vehiculo) => {
   const ordenes =
     vehiculo?.OrdenTrabajos ||
@@ -151,6 +201,15 @@ const SERVICIOS_ORDEN_SUGERIDOS = [
   "Postventa técnica / corrección",
 ];
 
+const ROLES_RESPONSABLE_TECNICO = [
+  "OPERADOR_SCANNER",
+  "OPERADOR_ECU",
+  "TUNER",
+  "MECANICO",
+  "SUPERVISOR",
+  "OWNER",
+];
+
 const normalizarCategoriaCliente = (categoria) => {
   const valor = String(categoria || "NORMAL").trim().toUpperCase();
   if (["MAYORISTA", "PROVEEDOR"].includes(valor)) return "TALLER_ALIADO";
@@ -179,6 +238,8 @@ function RecepcionRapidaPage() {
   const [paso, setPaso] = useState(() => calcularPasoInicial());
   const [cargando, setCargando] = useState(false);
   const [aviso, setAviso] = useState(null);
+  const [usuariosResponsables, setUsuariosResponsables] = useState([]);
+  const [errorResponsables, setErrorResponsables] = useState("");
 
   const [patenteBusqueda, setPatenteBusqueda] = useState("");
   const [vehiculoEncontrado, setVehiculoEncontrado] = useState(null);
@@ -201,6 +262,27 @@ function RecepcionRapidaPage() {
   useEffect(() => {
     escribirStorage("gmtch_paso_recepcion", paso);
   }, [paso]);
+
+  useEffect(() => {
+    let activo = true;
+
+    api
+      .get("/usuarios/responsables")
+      .then((res) => {
+        if (!activo) return;
+        setUsuariosResponsables(Array.isArray(res.data) ? res.data : []);
+        setErrorResponsables("");
+      })
+      .catch(() => {
+        if (!activo) return;
+        setUsuariosResponsables([]);
+        setErrorResponsables("No se pudieron cargar responsables activos. Intenta nuevamente.");
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, []);
 
   const mostrarAviso = (tipo, mensaje) => {
     setAviso({ tipo, mensaje });
@@ -238,6 +320,38 @@ function RecepcionRapidaPage() {
     }
 
     return textoId;
+  };
+
+  const usuariosTecnicosActivos = usuariosResponsables.filter(
+    (usuario) =>
+      usuario.activo !== false && ROLES_RESPONSABLE_TECNICO.includes(usuario.rol)
+  );
+
+  const usuarioResponsableSeleccionado = () =>
+    usuariosTecnicosActivos.find(
+      (usuario) => String(usuario.id) === String(orden.responsable_tecnico_id)
+    );
+
+  const mensajeErrorResponsable = (err, fallback) => {
+    const data = err.response?.data || {};
+    if (data.error === "RESPONSABLE_BLOQUEADO") {
+      const pendientes = Array.isArray(data.pendientes_criticos)
+        ? data.pendientes_criticos.slice(0, 3)
+        : [];
+      const detalle = pendientes
+        .map((item) => `- ${item.titulo || item.tipo}: ${item.accion_url || ""}`)
+        .join("\n");
+
+      return [
+        data.message ||
+          "No puedes asignar más trabajo a este responsable porque tiene pendientes críticos sin resolver.",
+        detalle,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    return data.message || data.error || fallback;
   };
 
   const obtenerClienteId = (data) => {
@@ -557,9 +671,29 @@ function RecepcionRapidaPage() {
       return;
     }
 
+    if (errorResponsables || usuariosTecnicosActivos.length === 0) {
+      mostrarAviso(
+        "error",
+        errorResponsables ||
+          "No se pudieron cargar responsables activos. Intenta nuevamente."
+      );
+      return;
+    }
+
+    const responsableTecnico = usuarioResponsableSeleccionado();
+
+    if (!responsableTecnico) {
+      mostrarAviso("error", "Debes seleccionar un responsable tecnico activo.");
+      return;
+    }
+
     try {
       setCargando(true);
       limpiarAviso();
+      const campoResponsable = obtenerCampoResponsablePorServicio(
+        servicioSolicitado,
+        orden.requiere_mecanica
+      );
 
       const payload = {
         vehiculoId: idParaBackend(idVehiculoActual),
@@ -572,6 +706,8 @@ function RecepcionRapidaPage() {
         origen_recepcion: esRecepcionEmergenciaOperador
           ? "RECEPCION_EMERGENCIA_OPERADOR"
           : undefined,
+        [campoResponsable.campoId]: responsableTecnico.id,
+        [campoResponsable.campoTexto]: snapshotUsuario(responsableTecnico),
       };
 
       const res = await api.post("/ordenes", payload);
@@ -593,7 +729,10 @@ function RecepcionRapidaPage() {
       setPaso(5);
     } catch (err) {
       console.error("ERROR AL GUARDAR ORDEN:", err.response?.data || err.message);
-      mostrarAviso("error", mensajeErrorAmigable(err, "Orden"));
+      mostrarAviso(
+        "error",
+        mensajeErrorResponsable(err, mensajeErrorAmigable(err, "Orden"))
+      );
     } finally {
       setCargando(false);
     }
@@ -1091,6 +1230,30 @@ function RecepcionRapidaPage() {
                 }))
               }
             />
+
+            <select
+              className="border border-black p-3 w-full bg-white font-bold"
+              value={orden.responsable_tecnico_id ?? ""}
+              onChange={(e) =>
+                setOrden((prev) => ({
+                  ...prev,
+                  responsable_tecnico_id: e.target.value,
+                }))
+              }
+            >
+              <option value="">Responsable técnico obligatorio</option>
+              {usuariosTecnicosActivos.map((usuario) => (
+                <option key={usuario.id} value={usuario.id}>
+                  {usuario.nombre || usuario.username} ({usuario.rol})
+                </option>
+              ))}
+            </select>
+
+            {errorResponsables && (
+              <p className="border-2 border-red-600 bg-red-50 p-2 text-[10px] font-black uppercase text-red-900">
+                {errorResponsables}
+              </p>
+            )}
 
             <textarea
               className="border border-black p-3 w-full"

@@ -157,6 +157,78 @@ MaterialRecuperado.belongsTo(Cliente, {
   constraints: false,
 });
 
+OrdenTrabajo.belongsTo(Usuario, {
+  as: "RecepcionadoPorUsuario",
+  foreignKey: "recepcionado_por_id",
+  constraints: false,
+});
+
+OrdenTrabajo.belongsTo(Usuario, {
+  as: "DiagnosticoAsignadoUsuario",
+  foreignKey: "diagnostico_asignado_a_id",
+  constraints: false,
+});
+
+OrdenTrabajo.belongsTo(Usuario, {
+  as: "OperadorEcuAsignadoUsuario",
+  foreignKey: "operador_ecu_asignado_a_id",
+  constraints: false,
+});
+
+OrdenTrabajo.belongsTo(Usuario, {
+  as: "MecanicoAsignadoUsuario",
+  foreignKey: "mecanico_asignado_a_id",
+  constraints: false,
+});
+
+OrdenTrabajo.belongsTo(Usuario, {
+  as: "SupervisorAsignadoUsuario",
+  foreignKey: "supervisor_asignado_a_id",
+  constraints: false,
+});
+
+OrdenTrabajo.belongsTo(Usuario, {
+  as: "FeedbackPorUsuario",
+  foreignKey: "feedback_por_id",
+  constraints: false,
+});
+
+OrdenTrabajo.belongsTo(Usuario, {
+  as: "CobradoPorUsuario",
+  foreignKey: "cobrado_por_id",
+  constraints: false,
+});
+
+OrdenTrabajo.belongsTo(Usuario, {
+  as: "EntregadoPorUsuario",
+  foreignKey: "entregado_por_id",
+  constraints: false,
+});
+
+OrdenTrabajo.belongsTo(Usuario, {
+  as: "AjustadoPorUsuario",
+  foreignKey: "ajustado_por_id",
+  constraints: false,
+});
+
+OrdenServicioItem.belongsTo(Usuario, {
+  as: "ResponsableUsuario",
+  foreignKey: "responsable_id",
+  constraints: false,
+});
+
+MaterialRecuperado.belongsTo(Usuario, {
+  as: "ResponsableMaterialUsuario",
+  foreignKey: "responsable_id",
+  constraints: false,
+});
+
+MaterialRecuperado.belongsTo(Usuario, {
+  as: "RegistradoPorUsuario",
+  foreignKey: "registrado_por_id",
+  constraints: false,
+});
+
 OrdenTrabajo.hasMany(MovimientoFinanciero, {
   foreignKey: "ordenId",
   constraints: false,

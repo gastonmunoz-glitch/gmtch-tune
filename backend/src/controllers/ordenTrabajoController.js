@@ -10,10 +10,14 @@ const {
   OrdenServicioItem,
   MaterialRecuperado,
   OrdenEventoOperativo,
+  Usuario,
 } = require("../models");
 const {
   crearNotificacionesInternas,
 } = require("./notificacionController");
+const {
+  verificarGuardiaOperativaUsuario,
+} = require("./automatizacionController");
 
 console.log("🧾 CONTROLLER_ORDENES_CIERRE_COMERCIAL_V2_CARGADO");
 
@@ -23,6 +27,8 @@ const limpiarTexto = (valor) => {
   if (valor === null || valor === undefined) return "";
   return String(valor).trim();
 };
+
+const normalizarTexto = limpiarTexto;
 
 const usuarioActual = (req) => {
   return (
@@ -52,6 +58,109 @@ const normalizarDecimal3 = (valor, defecto = 0) => {
 
 const rolActual = (req) =>
   String(req.usuario?.rol || req.user?.rol || "").trim().toUpperCase();
+
+const usuarioActualId = (req) => limpiarTexto(req.usuario?.id || req.user?.id);
+
+const obtenerSnapshotUsuario = (usuario) =>
+  limpiarTexto(usuario?.username || usuario?.nombre || usuario?.email || usuario?.id);
+
+const crearErrorHttp = (statusCode, message, extra = {}) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  Object.assign(error, extra);
+  return error;
+};
+
+const buscarUsuarioActivoPorId = async (usuarioId) => {
+  const id = limpiarTexto(usuarioId);
+  if (!id) return null;
+
+  const usuario = await Usuario.findByPk(id, {
+    attributes: ["id", "nombre", "username", "rol", "activo"],
+  });
+
+  if (!usuario || usuario.activo === false) {
+    throw crearErrorHttp(400, "Responsable no existe o esta inactivo.", {
+      codigo: "RESPONSABLE_INVALIDO",
+    });
+  }
+
+  return usuario;
+};
+
+const resolverResponsableDesdeBody = async (
+  body,
+  campoId,
+  campoTexto,
+  opciones = {}
+) => {
+  const obligatorio = opciones.obligatorio === true;
+  const tieneCampoId = Object.prototype.hasOwnProperty.call(body, campoId);
+  const tieneCampoTexto = Object.prototype.hasOwnProperty.call(body, campoTexto);
+  const usuarioId = limpiarTexto(body[campoId]);
+
+  if (usuarioId) {
+    const usuario = await buscarUsuarioActivoPorId(usuarioId);
+    return {
+      id: String(usuario.id),
+      texto: obtenerSnapshotUsuario(usuario),
+      usuario,
+      legacy: false,
+    };
+  }
+
+  if (tieneCampoId && !usuarioId && obligatorio) {
+    throw crearErrorHttp(400, "Debes seleccionar un responsable activo.", {
+      codigo: "RESPONSABLE_REQUERIDO",
+    });
+  }
+
+  const texto = limpiarTexto(body[campoTexto]);
+  if (texto && !obligatorio) {
+    return {
+      id: null,
+      texto,
+      usuario: null,
+      legacy: true,
+    };
+  }
+
+  if ((tieneCampoId || tieneCampoTexto) && obligatorio) {
+    throw crearErrorHttp(400, "Debes seleccionar un responsable activo.", {
+      codigo: "RESPONSABLE_REQUERIDO",
+    });
+  }
+
+  return null;
+};
+
+const aplicarResponsableResuelto = (payload, campoId, campoTexto, resuelto) => {
+  if (!resuelto) return;
+  if (resuelto.id) payload[campoId] = resuelto.id;
+  payload[campoTexto] = resuelto.texto;
+};
+
+const validarGuardiaResponsable = async (usuario, opciones = {}) => {
+  if (!usuario?.id || opciones.omitir === true) return null;
+
+  const resultado = await verificarGuardiaOperativaUsuario({
+    usuarioId: String(usuario.id),
+    rol: usuario.rol,
+  });
+
+  if (resultado.bloqueado) {
+    throw crearErrorHttp(
+      409,
+      "No puedes asignar mas trabajo a este responsable porque tiene pendientes criticos sin resolver.",
+      {
+        codigo: "RESPONSABLE_BLOQUEADO",
+        pendientes_criticos: resultado.pendientes_criticos || [],
+      }
+    );
+  }
+
+  return resultado;
+};
 
 let eventosOrdenPreparados = false;
 
@@ -187,6 +296,25 @@ const enviarErrorPermiso = (res) =>
     error: "No tienes permisos para esta accion",
   });
 
+const responderErrorControlado = (res, error) => {
+  if (error?.codigo === "RESPONSABLE_BLOQUEADO") {
+    return res.status(409).json({
+      error: "RESPONSABLE_BLOQUEADO",
+      message: error.message,
+      pendientes_criticos: (error.pendientes_criticos || []).slice(0, 10),
+    });
+  }
+
+  if (["RESPONSABLE_INVALIDO", "RESPONSABLE_REQUERIDO"].includes(error?.codigo)) {
+    return res.status(error.statusCode || 400).json({
+      error: error.codigo,
+      message: error.message,
+    });
+  }
+
+  return null;
+};
+
 const normalizarBoolean = (valor) => {
   if (valor === true || valor === false) return valor;
   if (valor === 1 || valor === "1") return true;
@@ -269,6 +397,29 @@ const NOTIFICACIONES_RESPONSABLES = {
     etapa: "supervisión",
   },
 };
+
+const RESPONSABLES_ORDEN_CONFIG = [
+  {
+    campoTexto: "recepcionado_por",
+    campoId: "recepcionado_por_id",
+  },
+  {
+    campoTexto: "diagnostico_asignado_a",
+    campoId: "diagnostico_asignado_a_id",
+  },
+  {
+    campoTexto: "operador_ecu_asignado_a",
+    campoId: "operador_ecu_asignado_a_id",
+  },
+  {
+    campoTexto: "mecanico_asignado_a",
+    campoId: "mecanico_asignado_a_id",
+  },
+  {
+    campoTexto: "supervisor_asignado_a",
+    campoId: "supervisor_asignado_a_id",
+  },
+];
 
 const ESTADOS_CORRECCION_TECNICA = [
   "CORRECCION_SOLICITADA",
@@ -363,14 +514,17 @@ const CAMPOS_COMERCIALES_SENSIBLES = [
   "monto_pagado",
   "fecha_pago",
   "cobrado_por",
+  "cobrado_por_id",
   "observacion_pago",
   "entregado_por",
+  "entregado_por_id",
   "entregado_at",
   "observacion_cierre",
   "monto_total",
   "monto_final",
   "monto_original",
   "motivo_ajuste",
+  "ajustado_por_id",
   "historial_ajustes",
 ];
 
@@ -453,6 +607,9 @@ const prepararColumnas = async () => {
     ADD COLUMN IF NOT EXISTS "cobrado_por" VARCHAR(100);
 
     ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "cobrado_por_id" UUID;
+
+    ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "observacion_pago" TEXT;
 
     ALTER TABLE "ordenes_trabajo"
@@ -475,6 +632,9 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "ajustado_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "ajustado_por_id" UUID;
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "ajustado_at" TIMESTAMP WITH TIME ZONE;
@@ -515,6 +675,9 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "feedback_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "feedback_por_id" UUID;
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "feedback_at" TIMESTAMP;
@@ -629,19 +792,34 @@ const prepararColumnas = async () => {
     ADD COLUMN IF NOT EXISTS "recepcionado_por" VARCHAR(100);
 
     ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "recepcionado_por_id" UUID;
+
+    ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "origen_recepcion" VARCHAR(100);
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "diagnostico_asignado_a" VARCHAR(100);
 
     ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "diagnostico_asignado_a_id" UUID;
+
+    ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "operador_ecu_asignado_a" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "operador_ecu_asignado_a_id" UUID;
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "mecanico_asignado_a" VARCHAR(100);
 
     ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "mecanico_asignado_a_id" UUID;
+
+    ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "supervisor_asignado_a" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "supervisor_asignado_a_id" UUID;
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "tecnico_finalizado_por" VARCHAR(100);
@@ -651,6 +829,9 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "entregado_por" VARCHAR(100);
+
+    ALTER TABLE "ordenes_trabajo"
+    ADD COLUMN IF NOT EXISTS "entregado_por_id" UUID;
 
     ALTER TABLE "ordenes_trabajo"
     ADD COLUMN IF NOT EXISTS "entregado_at" TIMESTAMP WITH TIME ZONE;
@@ -700,6 +881,9 @@ const prepararColumnas = async () => {
     ADD COLUMN IF NOT EXISTS "responsable" VARCHAR(100);
 
     ALTER TABLE "orden_servicio_items"
+    ADD COLUMN IF NOT EXISTS "responsable_id" UUID;
+
+    ALTER TABLE "orden_servicio_items"
     ADD COLUMN IF NOT EXISTS "estado" VARCHAR(30) DEFAULT 'PENDIENTE';
 
     ALTER TABLE "orden_servicio_items"
@@ -734,6 +918,9 @@ const prepararColumnas = async () => {
     ADD COLUMN IF NOT EXISTS "responsable" VARCHAR(100);
 
     ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "responsable_id" UUID;
+
+    ALTER TABLE "materiales_recuperados"
     ADD COLUMN IF NOT EXISTS "destino" VARCHAR(120);
 
     ALTER TABLE "materiales_recuperados"
@@ -741,6 +928,9 @@ const prepararColumnas = async () => {
 
     ALTER TABLE "materiales_recuperados"
     ADD COLUMN IF NOT EXISTS "registrado_por" VARCHAR(100);
+
+    ALTER TABLE "materiales_recuperados"
+    ADD COLUMN IF NOT EXISTS "registrado_por_id" UUID;
 
     ALTER TABLE "materiales_recuperados"
     ADD COLUMN IF NOT EXISTS "registrado_at" TIMESTAMP WITH TIME ZONE;
@@ -932,6 +1122,7 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     monto_pagado: row.monto_pagado,
     fecha_pago: row.fecha_pago,
     cobrado_por: row.cobrado_por,
+    cobrado_por_id: row.cobrado_por_id,
     observacion_pago: row.observacion_pago,
 
     kilometraje: row.kilometraje,
@@ -941,6 +1132,7 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     monto_final: row.monto_final ?? row.monto_total,
     motivo_ajuste: row.motivo_ajuste,
     ajustado_por: row.ajustado_por,
+    ajustado_por_id: row.ajustado_por_id,
     ajustado_at: row.ajustado_at,
     historial_ajustes: parseJsonSeguro(row.historial_ajustes, []),
     excluir_estadisticas: row.excluir_estadisticas,
@@ -949,6 +1141,7 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     recomendacion_futura: row.recomendacion_futura,
     requiere_seguimiento: row.requiere_seguimiento,
     feedback_por: row.feedback_por,
+    feedback_por_id: row.feedback_por_id,
     feedback_at: row.feedback_at,
 
     correccion_estado: row.correccion_estado,
@@ -980,16 +1173,22 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     intervencion_fisica_at: row.intervencion_fisica_at,
 
     recepcionado_por: row.recepcionado_por,
+    recepcionado_por_id: row.recepcionado_por_id,
     origen_recepcion: row.origen_recepcion,
     diagnostico_asignado_a: row.diagnostico_asignado_a,
+    diagnostico_asignado_a_id: row.diagnostico_asignado_a_id,
     operador_ecu_asignado_a: row.operador_ecu_asignado_a,
+    operador_ecu_asignado_a_id: row.operador_ecu_asignado_a_id,
     mecanico_asignado_a: row.mecanico_asignado_a,
+    mecanico_asignado_a_id: row.mecanico_asignado_a_id,
     supervisor_asignado_a: row.supervisor_asignado_a,
+    supervisor_asignado_a_id: row.supervisor_asignado_a_id,
 
     tecnico_finalizado_por: row.tecnico_finalizado_por,
     tecnico_finalizado_at: row.tecnico_finalizado_at,
 
     entregado_por: row.entregado_por,
+    entregado_por_id: row.entregado_por_id,
     entregado_at: row.entregado_at,
     observacion_cierre: row.observacion_cierre,
 
@@ -1226,6 +1425,37 @@ const crearOrden = async (req, res) => {
     const prioridadFinal =
       prioridadExplicita || (await obtenerPrioridadSugeridaPorVehiculo(vehiculoId));
     const montoInicial = normalizarDecimal(req.body.monto_total, 0);
+    const responsablesCreacion = {};
+
+    for (const [campoId, campoTexto] of [
+      ["diagnostico_asignado_a_id", "diagnostico_asignado_a"],
+      ["operador_ecu_asignado_a_id", "operador_ecu_asignado_a"],
+      ["mecanico_asignado_a_id", "mecanico_asignado_a"],
+      ["supervisor_asignado_a_id", "supervisor_asignado_a"],
+    ]) {
+      const resuelto = await resolverResponsableDesdeBody(req.body, campoId, campoTexto, {
+        obligatorio: false,
+      });
+      if (resuelto?.usuario) {
+        await validarGuardiaResponsable(resuelto.usuario);
+      }
+      aplicarResponsableResuelto(responsablesCreacion, campoId, campoTexto, resuelto);
+    }
+
+    const tieneResponsableTecnico = [
+      "diagnostico_asignado_a_id",
+      "operador_ecu_asignado_a_id",
+      "mecanico_asignado_a_id",
+      "supervisor_asignado_a_id",
+    ].some((campo) => limpiarTexto(responsablesCreacion[campo]));
+
+    if (!tieneResponsableTecnico) {
+      throw crearErrorHttp(
+        400,
+        "Debes seleccionar un responsable activo para crear la orden.",
+        { codigo: "RESPONSABLE_REQUERIDO" }
+      );
+    }
 
     const nuevaOrden = await OrdenTrabajo.create({
       vehiculoId,
@@ -1254,17 +1484,22 @@ const crearOrden = async (req, res) => {
       ),
     });
 
-    const recepcionadoPor =
-      limpiarTexto(req.body.recepcionado_por) || usuarioActual(req);
+    const recepcionadoPor = usuarioActual(req);
+    const recepcionadoPorId = usuarioActualId(req) || null;
     const origenRecepcion = esRecepcionEmergenciaOperador
       ? "RECEPCION_EMERGENCIA_OPERADOR"
       : limpiarTexto(req.body.origen_recepcion);
+    const asignacionesResponsables = Object.keys(responsablesCreacion).map(
+      (campo) => `"${campo}" = :${campo}`
+    );
 
     await sequelize.query(
       `
       UPDATE "ordenes_trabajo"
       SET
         "recepcionado_por" = :recepcionadoPor,
+        "recepcionado_por_id" = :recepcionadoPorId,
+        ${asignacionesResponsables.length ? `${asignacionesResponsables.join(",\n        ")},` : ""}
         "origen_recepcion" = NULLIF(:origenRecepcion, ''),
         "updatedAt" = NOW()
       WHERE "id" = :id;
@@ -1273,7 +1508,9 @@ const crearOrden = async (req, res) => {
         replacements: {
           id: nuevaOrden.id,
           recepcionadoPor,
+          recepcionadoPorId,
           origenRecepcion,
+          ...responsablesCreacion,
         },
       }
     );
@@ -1309,12 +1546,16 @@ const crearOrden = async (req, res) => {
       orden: {
         ...nuevaOrden.toJSON(),
         recepcionado_por: recepcionadoPor,
+        recepcionado_por_id: recepcionadoPorId,
+        ...responsablesCreacion,
         origen_recepcion: origenRecepcion || null,
       },
       id: nuevaOrden.id,
     });
   } catch (error) {
     console.error("ERROR CREANDO ORDEN:", error);
+    const controlado = responderErrorControlado(res, error);
+    if (controlado) return;
 
     res.status(500).json({
       error: error.message,
@@ -1431,25 +1672,42 @@ const actualizarOrden = async (req, res) => {
 
     if (actualizaFeedback) {
       payload.feedback_por = usuarioActual(req);
+      payload.feedback_por_id = usuarioActualId(req) || null;
       payload.feedback_at = new Date();
     }
 
-    const camposResponsables = [
-      "recepcionado_por",
-      "diagnostico_asignado_a",
-      "operador_ecu_asignado_a",
-      "mecanico_asignado_a",
-      "supervisor_asignado_a",
-    ];
-
     const responsablesPayload = {};
+    const responsablesResueltos = {};
 
-    camposResponsables.forEach((campo) => {
-      if (Object.prototype.hasOwnProperty.call(payload, campo)) {
-        responsablesPayload[campo] = payload[campo];
-        delete payload[campo];
+    for (const config of RESPONSABLES_ORDEN_CONFIG) {
+      const tieneCampoTexto = Object.prototype.hasOwnProperty.call(payload, config.campoTexto);
+      const tieneCampoId = Object.prototype.hasOwnProperty.call(req.body, config.campoId);
+
+      if (tieneCampoTexto) {
+        delete payload[config.campoTexto];
       }
-    });
+
+      if (tieneCampoTexto || tieneCampoId) {
+        const resuelto = await resolverResponsableDesdeBody(
+          req.body,
+          config.campoId,
+          config.campoTexto,
+          {
+            obligatorio: tieneCampoId,
+          }
+        );
+
+        if (resuelto) {
+          aplicarResponsableResuelto(
+            responsablesPayload,
+            config.campoId,
+            config.campoTexto,
+            resuelto
+          );
+          responsablesResueltos[config.campoTexto] = resuelto;
+        }
+      }
+    }
 
     let responsablesActuales = {};
 
@@ -1457,10 +1715,16 @@ const actualizarOrden = async (req, res) => {
       const responsablesRows = await sequelize.query(
         `
         SELECT
+          "recepcionado_por",
+          "recepcionado_por_id",
           "diagnostico_asignado_a",
+          "diagnostico_asignado_a_id",
           "operador_ecu_asignado_a",
+          "operador_ecu_asignado_a_id",
           "mecanico_asignado_a",
-          "supervisor_asignado_a"
+          "mecanico_asignado_a_id",
+          "supervisor_asignado_a",
+          "supervisor_asignado_a_id"
         FROM "ordenes_trabajo"
         WHERE "id" = :id
         LIMIT 1;
@@ -1472,6 +1736,16 @@ const actualizarOrden = async (req, res) => {
       );
 
       responsablesActuales = responsablesRows[0] || {};
+    }
+
+    for (const config of RESPONSABLES_ORDEN_CONFIG) {
+      const resuelto = responsablesResueltos[config.campoTexto];
+      if (!resuelto?.usuario) continue;
+
+      const anteriorId = limpiarTexto(responsablesActuales[config.campoId]);
+      if (anteriorId && anteriorId === resuelto.id) continue;
+
+      await validarGuardiaResponsable(resuelto.usuario);
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "kilometraje")) {
@@ -1511,6 +1785,7 @@ const actualizarOrden = async (req, res) => {
     if (payload.estado_pago === "PAGADO") {
       payload.fecha_pago = req.body.fecha_pago ? new Date(req.body.fecha_pago) : new Date();
       payload.cobrado_por = limpiarTexto(req.body.cobrado_por) || usuarioActual(req);
+      payload.cobrado_por_id = usuarioActualId(req) || null;
 
       if (!payload.medio_pago || payload.medio_pago === "PENDIENTE") {
         payload.medio_pago = "TRANSFERENCIA";
@@ -1524,6 +1799,7 @@ const actualizarOrden = async (req, res) => {
     if (payload.estado === "ENTREGADO") {
       payload.entregado_at = new Date();
       payload.entregado_por = usuarioActual(req);
+      payload.entregado_por_id = usuarioActualId(req) || null;
 
       if (!payload.observacion_cierre) {
         payload.observacion_cierre = `Orden entregada por ${usuarioActual(req)}`;
@@ -1658,6 +1934,8 @@ const actualizarOrden = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR ACTUALIZANDO ORDEN:", error);
+    const controlado = responderErrorControlado(res, error);
+    if (controlado) return;
 
     res.status(error.statusCode || 500).json({
       error: error.message,
@@ -1729,6 +2007,7 @@ const registrarAjusteComercial = async (req, res) => {
       monto_total: montoFinal,
       motivo_ajuste: motivoAjuste,
       ajustado_por: usuario,
+      ajustado_por_id: usuarioActualId(req) || null,
       ajustado_at: ahora,
       historial_ajustes: [...historialActual, evento],
     });
@@ -1822,6 +2101,15 @@ const crearItemOrden = async (req, res) => {
       });
     }
 
+    const responsableResuelto = await resolverResponsableDesdeBody(
+      req.body,
+      "responsable_id",
+      "responsable",
+      { obligatorio: true }
+    );
+
+    await validarGuardiaResponsable(responsableResuelto.usuario);
+
     const cantidad = Math.max(normalizarDecimal(req.body.cantidad, 1), 0);
     const precioUnitario = Math.max(
       normalizarDecimal(req.body.precio_unitario, 0),
@@ -1837,7 +2125,8 @@ const crearItemOrden = async (req, res) => {
       cantidad,
       precio_unitario: precioUnitario,
       subtotal,
-      responsable: limpiarTexto(req.body.responsable),
+      responsable: responsableResuelto.texto,
+      responsable_id: responsableResuelto.id,
       estado: normalizarEstadoItem(req.body.estado),
       requiere_material_recuperado: normalizarBoolean(
         req.body.requiere_material_recuperado
@@ -1874,6 +2163,8 @@ const crearItemOrden = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR CREANDO ITEM DE ORDEN:", error);
+    const controlado = responderErrorControlado(res, error);
+    if (controlado) return;
 
     res.status(500).json({
       error: error.message,
@@ -1927,13 +2218,43 @@ const actualizarItemOrden = async (req, res) => {
 
     const payload = {};
 
-    ["tipo_servicio", "descripcion", "responsable", "observaciones"].forEach(
+    ["tipo_servicio", "descripcion", "observaciones"].forEach(
       (campo) => {
         if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
           payload[campo] = limpiarTexto(req.body[campo]);
         }
       }
     );
+
+    const intentaCambiarResponsableItem =
+      Object.prototype.hasOwnProperty.call(req.body, "responsable_id") ||
+      Object.prototype.hasOwnProperty.call(req.body, "responsable");
+
+    if (intentaCambiarResponsableItem) {
+      const responsableResuelto = await resolverResponsableDesdeBody(
+        req.body,
+        "responsable_id",
+        "responsable",
+        {
+          obligatorio: Object.prototype.hasOwnProperty.call(req.body, "responsable_id"),
+        }
+      );
+
+      if (responsableResuelto) {
+        if (
+          responsableResuelto.usuario &&
+          limpiarTexto(item.responsable_id) !== responsableResuelto.id
+        ) {
+          await validarGuardiaResponsable(responsableResuelto.usuario);
+        }
+        aplicarResponsableResuelto(
+          payload,
+          "responsable_id",
+          "responsable",
+          responsableResuelto
+        );
+      }
+    }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "categoria")) {
       payload.categoria = normalizarCategoriaItem(req.body.categoria);
@@ -2019,6 +2340,8 @@ const actualizarItemOrden = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR ACTUALIZANDO ITEM DE ORDEN:", error);
+    const controlado = responderErrorControlado(res, error);
+    if (controlado) return;
 
     res.status(500).json({
       error: error.message,
@@ -2216,6 +2539,30 @@ const registrarMaterialOrden = async (req, res) => {
         ? normalizarDecimal(req.body.valor_estimado, 0)
         : normalizarDecimal(pesoKg * precioEstimadoKg, 0);
     const usuario = usuarioActual(req);
+    let responsableMaterial = null;
+
+    if (limpiarTexto(req.body.responsable_id)) {
+      responsableMaterial = await resolverResponsableDesdeBody(
+        req.body,
+        "responsable_id",
+        "responsable",
+        { obligatorio: true }
+      );
+    } else if (limpiarTexto(req.body.responsable)) {
+      throw crearErrorHttp(
+        400,
+        "Debes seleccionar responsable_id desde usuarios activos para registrar material.",
+        { codigo: "RESPONSABLE_REQUERIDO" }
+      );
+    } else if (usuarioActualId(req)) {
+      responsableMaterial = {
+        id: usuarioActualId(req),
+        texto: usuario,
+        usuario: req.usuario || req.user || null,
+        legacy: false,
+      };
+    }
+
     const eventoAuditoria = {
       tipo: "MATERIAL_RECUPERADO_REGISTRADO",
       ordenId: orden.id,
@@ -2247,11 +2594,13 @@ const registrarMaterialOrden = async (req, res) => {
       lote_estado: limpiarTexto(req.body.lote_estado) || "ABIERTO",
       estado: limpiarTexto(req.body.estado) || "ACUMULADO",
       observacion: limpiarTexto(req.body.observacion),
-      responsable: limpiarTexto(req.body.responsable) || usuario,
+      responsable: responsableMaterial?.texto || usuario,
+      responsable_id: responsableMaterial?.id || null,
       destino: limpiarTexto(req.body.destino),
       motivo_excepcion_material: motivoExcepcion,
       creado_por: usuario,
       registrado_por: usuario,
+      registrado_por_id: usuarioActualId(req) || null,
       registrado_at: new Date(),
       auditoria: [eventoAuditoria],
     });
@@ -2279,6 +2628,8 @@ const registrarMaterialOrden = async (req, res) => {
     });
   } catch (error) {
     console.error("ERROR REGISTRANDO MATERIAL RECUPERADO:", error);
+    const controlado = responderErrorControlado(res, error);
+    if (controlado) return;
 
     res.status(500).json({
       error: error.message,
@@ -2574,6 +2925,7 @@ const actualizarEstado = async (req, res) => {
     if (estado === "ENTREGADO") {
       payload.entregado_at = new Date();
       payload.entregado_por = usuarioActual(req);
+      payload.entregado_por_id = usuarioActualId(req) || null;
     }
 
     await orden.update(payload);
@@ -2641,6 +2993,7 @@ const registrarPago = async (req, res) => {
       monto_pagado: montoPagado,
       fecha_pago: new Date(),
       cobrado_por: usuarioActual(req),
+      cobrado_por_id: usuarioActualId(req) || null,
       observacion_pago:
         limpiarTexto(req.body.observacion_pago) ||
         `Pago confirmado por ${usuarioActual(req)}`,
@@ -2711,8 +3064,10 @@ const cobrarYEntregar = async (req, res) => {
       monto_pagado: montoPagado,
       fecha_pago: new Date(),
       cobrado_por: usuarioActual(req),
+      cobrado_por_id: usuarioActualId(req) || null,
       entregado_at: new Date(),
       entregado_por: usuarioActual(req),
+      entregado_por_id: usuarioActualId(req) || null,
       observacion_pago:
         limpiarTexto(req.body.observacion_pago) ||
         `Pago y entrega confirmados por ${usuarioActual(req)}`,

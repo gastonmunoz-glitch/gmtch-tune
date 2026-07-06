@@ -50,8 +50,38 @@ const OrdenTrabajo = sequelize.define(
       allowNull: true,
     },
 
+    recepcionado_por_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    diagnostico_asignado_a_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    operador_ecu_asignado_a_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    mecanico_asignado_a_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    supervisor_asignado_a_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
     cobrado_por: {
       type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    cobrado_por_id: {
+      type: DataTypes.UUID,
       allowNull: true,
     },
 
@@ -92,6 +122,11 @@ const OrdenTrabajo = sequelize.define(
 
     ajustado_por: {
       type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    ajustado_por_id: {
+      type: DataTypes.UUID,
       allowNull: true,
     },
 
@@ -138,8 +173,18 @@ const OrdenTrabajo = sequelize.define(
       allowNull: true,
     },
 
+    feedback_por_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
     feedback_at: {
       type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    entregado_por_id: {
+      type: DataTypes.UUID,
       allowNull: true,
     },
 
