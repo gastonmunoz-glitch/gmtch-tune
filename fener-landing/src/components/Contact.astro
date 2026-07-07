@@ -1,0 +1,85 @@
+---
+import { contact, links } from "../data/site";
+---
+
+<section id="contacto" class="py-20 lg:py-24">
+  <div class="section-shell grid gap-10 lg:grid-cols-[0.85fr_1.15fr]">
+    <div>
+      <span class="eyebrow">Contacto</span>
+      <h2 class="mt-5 text-3xl font-black leading-tight text-fener-ink sm:text-4xl">
+        Cotiza tu servicio de alimentacion.
+      </h2>
+      <p class="mt-4 text-lg leading-8 text-stone-700">
+        Cuentanos cuantas personas necesitas atender, fecha, ubicacion y tipo de servicio. Te responderemos con una propuesta clara.
+      </p>
+
+      <div class="mt-8 grid gap-3">
+        <a class="focus-ring flex items-center justify-between rounded-lg border border-stone-200 bg-white p-5 shadow-sm transition hover:border-fener-red" href={links.whatsapp} target="_blank" rel="noreferrer">
+          <span>
+            <span class="block text-sm font-black text-fener-red">WhatsApp</span>
+            <span class="mt-1 block text-base font-bold text-fener-ink">{contact.whatsappLabel}</span>
+          </span>
+          <span class="text-2xl text-fener-green">→</span>
+        </a>
+        <a class="focus-ring flex items-center justify-between rounded-lg border border-stone-200 bg-white p-5 shadow-sm transition hover:border-fener-red" href={links.phone}>
+          <span>
+            <span class="block text-sm font-black text-fener-red">Telefono</span>
+            <span class="mt-1 block text-base font-bold text-fener-ink">{contact.phoneLabel}</span>
+          </span>
+          <span class="text-2xl text-fener-green">→</span>
+        </a>
+        <a class="focus-ring flex items-center justify-between rounded-lg border border-stone-200 bg-white p-5 shadow-sm transition hover:border-fener-red" href={links.email}>
+          <span>
+            <span class="block text-sm font-black text-fener-red">Correo</span>
+            <span class="mt-1 block text-base font-bold text-fener-ink">{contact.email}</span>
+          </span>
+          <span class="text-2xl text-fener-green">→</span>
+        </a>
+      </div>
+    </div>
+
+    <form class="rounded-lg border border-stone-200 bg-white p-6 shadow-soft sm:p-8" action={contact.formAction} method="post" enctype="text/plain">
+      <div class="grid gap-5 sm:grid-cols-2">
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Nombre</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-red focus:ring-4 focus:ring-fener-red/10" name="nombre" type="text" autocomplete="name" required />
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Empresa</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-red focus:ring-4 focus:ring-fener-red/10" name="empresa" type="text" autocomplete="organization" />
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Correo</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-red focus:ring-4 focus:ring-fener-red/10" name="correo" type="email" autocomplete="email" required />
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Telefono</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-red focus:ring-4 focus:ring-fener-red/10" name="telefono" type="tel" autocomplete="tel" required />
+        </label>
+      </div>
+
+      <label class="mt-5 block">
+        <span class="text-sm font-black text-fener-ink">Servicio requerido</span>
+        <select class="mt-2 w-full rounded-lg border border-stone-200 bg-white px-4 py-3 text-base outline-none transition focus:border-fener-red focus:ring-4 focus:ring-fener-red/10" name="servicio" required>
+          <option value="Alimentacion para empresas">Alimentacion para empresas</option>
+          <option value="Catering y eventos">Catering y eventos</option>
+          <option value="Platos tipicos chilenos">Platos tipicos chilenos</option>
+          <option value="Produccion alimentaria">Produccion alimentaria</option>
+          <option value="Solucion a medida">Solucion a medida</option>
+        </select>
+      </label>
+
+      <label class="mt-5 block">
+        <span class="text-sm font-black text-fener-ink">Mensaje</span>
+        <textarea class="mt-2 min-h-36 w-full resize-y rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-red focus:ring-4 focus:ring-fener-red/10" name="mensaje" placeholder="Ej: 80 personas, almuerzo corporativo, viernes, comuna..." required></textarea>
+      </label>
+
+      <button class="focus-ring mt-6 w-full rounded-full bg-fener-red px-6 py-4 text-sm font-black text-white shadow-soft transition hover:bg-fener-redDark" type="submit">
+        Enviar solicitud
+      </button>
+      <p class="mt-4 text-center text-xs leading-5 text-stone-500">
+        El formulario abrira tu cliente de correo con la informacion ingresada.
+      </p>
+    </form>
+  </div>
+</section>

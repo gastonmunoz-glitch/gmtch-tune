@@ -1,0 +1,67 @@
+---
+import "../styles/global.css";
+import { contact, seo } from "../data/site";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = seo.title,
+  description = seo.description,
+} = Astro.props;
+const canonicalUrl = new URL(Astro.url.pathname, seo.url).toString();
+const ogImageUrl = new URL(seo.image, seo.url).toString();
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@type": "FoodService",
+  name: "Fener.cl",
+  url: seo.url,
+  image: ogImageUrl,
+  description,
+  telephone: contact.phoneLabel,
+  email: contact.email,
+  address: {
+    "@type": "PostalAddress",
+    addressLocality: "Santiago",
+    addressCountry: "CL",
+  },
+  areaServed: "Chile",
+  servesCuisine: ["Comida chilena", "Catering", "Alimentacion para empresas"],
+};
+---
+
+<!doctype html>
+<html lang="es-CL">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalUrl} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#9F1D21" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="es_CL" />
+    <meta property="og:site_name" content="Fener.cl" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageUrl} />
+
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(structuredData)} />
+  </head>
+  <body class="antialiased">
+    <slot />
+  </body>
+</html>
