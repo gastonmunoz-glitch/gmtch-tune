@@ -231,8 +231,10 @@ const mapearUsuarioAdmin = (usuario) => {
     nombre: usuario.nombre,
     email: usuario.email,
     username: usuario.username || null,
+    rol: usuario.rol || "MASTER",
     activo: usuario.activo,
     aprobado: usuario.aprobado,
+    ultimo_login_at: usuario.last_login_at,
     last_login_at: usuario.last_login_at,
     last_seen_at: usuario.last_seen_at,
     createdAt: usuario.createdAt,
@@ -319,6 +321,9 @@ const crearCuenta = async (req, res) => {
     await prepararColumnasPortalUsuario();
 
     const nombreTaller = limpiarTexto(req.body.nombre_taller);
+    const cuentaEmail = limpiarTexto(
+      req.body.email || req.body.cuenta_email || req.body.email_cuenta
+    ).toLowerCase();
 
     if (!nombreTaller) {
       return res.status(400).json({
@@ -327,7 +332,10 @@ const crearCuenta = async (req, res) => {
     }
 
     const usuarioEmail = limpiarTexto(
-      req.body.usuario_email || req.body.email_usuario
+      req.body.usuario_email ||
+        req.body.email_usuario ||
+        req.body.email_acceso ||
+        cuentaEmail
     ).toLowerCase();
     const usuarioPassword = limpiarTexto(
       req.body.usuario_password || req.body.password
@@ -342,7 +350,7 @@ const crearCuenta = async (req, res) => {
     if (!usuarioEmail || !usuarioPassword || !usuarioNombre) {
       return res.status(400).json({
         error:
-          "Para crear cuenta portal debes enviar usuario_nombre, usuario_email y usuario_password. El username es opcional.",
+          "Para crear cuenta portal debes enviar usuario_nombre, usuario_password y email de acceso o correo empresa/contacto. El username es opcional.",
       });
     }
 
@@ -363,7 +371,7 @@ const crearCuenta = async (req, res) => {
         {
           nombre_taller: nombreTaller,
           contacto: limpiarTexto(req.body.contacto),
-          email: limpiarTexto(req.body.email).toLowerCase(),
+          email: cuentaEmail,
           telefono: limpiarTexto(req.body.telefono),
           pais: limpiarTexto(req.body.pais),
           ciudad: limpiarTexto(req.body.ciudad),
@@ -399,10 +407,16 @@ const crearCuenta = async (req, res) => {
       return { cuenta, usuario };
     });
 
+    const advertencias = [];
+    if (!resultado.usuario) {
+      advertencias.push("La cuenta no tiene usuario de acceso. El cliente no podra iniciar sesion.");
+    }
+
     res.status(201).json({
       mensaje: "Cuenta portal creada correctamente",
       cuenta: mapearCuentaAdmin(resultado.cuenta),
       usuario: mapearUsuarioAdmin(resultado.usuario),
+      advertencias,
     });
 
     await registrarEventoPortal({
@@ -465,6 +479,11 @@ const listarCuentas = async (req, res) => {
         return {
           ...mapearCuentaAdmin(json),
           Usuarios: (json.PortalUsuarios || []).map(mapearUsuarioAdmin),
+          usuarios_acceso_count: (json.PortalUsuarios || []).length,
+          advertencia_sin_usuario_acceso:
+            (json.PortalUsuarios || []).length === 0
+              ? "Esta cuenta no tiene usuario de acceso. El cliente no podra iniciar sesion."
+              : null,
           total_archivos: totalArchivos,
           total_movimientos: totalMovimientos,
           puede_eliminar_prueba: totalArchivos === 0 && totalMovimientos === 0,
@@ -558,7 +577,9 @@ const crearUsuarioCuenta = async (req, res) => {
     }
 
     const nombre = limpiarTexto(req.body.nombre || req.body.usuario_nombre);
-    const email = limpiarTexto(req.body.email || req.body.usuario_email).toLowerCase();
+    const email = limpiarTexto(
+      req.body.email || req.body.usuario_email || req.body.email_acceso
+    ).toLowerCase();
     const password = limpiarTexto(req.body.password || req.body.usuario_password);
     const username = await validarUsernameUnico(req.body.username || req.body.usuario_username);
 

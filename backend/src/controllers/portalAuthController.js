@@ -69,8 +69,22 @@ const registrarEventoPortal = async ({
   }
 };
 
-const contarFallosRecientes = async (email) => {
-  if (!email) return 0;
+const tipoIdentificador = (identificador) =>
+  String(identificador || "").includes("@") ? "email" : "username";
+
+const logDebugLoginPortal = ({ identificador, usuario = null, cuenta = null, causa }) => {
+  console.warn("PORTAL_LOGIN_DEBUG", {
+    identificador_tipo: tipoIdentificador(identificador),
+    usuario_encontrado: Boolean(usuario),
+    cuenta_encontrada: Boolean(cuenta),
+    usuario_activo: usuario ? Boolean(usuario.activo && usuario.aprobado) : null,
+    cuenta_activa: cuenta ? Boolean(cuenta.activo && cuenta.aprobado) : null,
+    causa,
+  });
+};
+
+const contarFallosRecientes = async (identificador) => {
+  if (!identificador) return 0;
 
   try {
     const desde = new Date(Date.now() - 15 * 60 * 1000);
@@ -82,7 +96,9 @@ const contarFallosRecientes = async (email) => {
           [Op.gte]: desde,
         },
         metadata: {
-          email,
+          [Op.contains]: {
+            email: identificador,
+          },
         },
       },
     });
@@ -92,10 +108,10 @@ const contarFallosRecientes = async (email) => {
   }
 };
 
-const registrarLoginFallido = async (req, causa, email, usuario = null, cuenta = null) => {
+const registrarLoginFallido = async (req, causa, identificador, usuario = null, cuenta = null) => {
   console.warn("LOGIN PORTAL FALLIDO:", {
     causa,
-    email,
+    identificador_tipo: tipoIdentificador(identificador),
     usuarioId: usuario?.id || null,
     cuentaId: cuenta?.id || usuario?.cuentaId || null,
   });
@@ -107,10 +123,15 @@ const registrarLoginFallido = async (req, causa, email, usuario = null, cuenta =
     tipo: "LOGIN_FALLIDO",
     resultado: "ERROR",
     descripcion: causa,
-    metadata: { email, causa },
+    metadata: {
+      email: identificador,
+      identificador,
+      identificador_tipo: tipoIdentificador(identificador),
+      causa,
+    },
   });
 
-  const fallos = await contarFallosRecientes(email);
+  const fallos = await contarFallosRecientes(identificador);
 
   if (fallos >= 5) {
     await registrarEventoPortal({
@@ -120,7 +141,12 @@ const registrarLoginFallido = async (req, causa, email, usuario = null, cuenta =
       tipo: "INTENTO_SOSPECHOSO",
       resultado: "ALERTA",
       descripcion: "Multiples intentos fallidos de login portal",
-      metadata: { email, fallos_15_min: fallos },
+      metadata: {
+        email: identificador,
+        identificador,
+        identificador_tipo: tipoIdentificador(identificador),
+        fallos_15_min: fallos,
+      },
     });
   }
 };
@@ -172,6 +198,10 @@ const loginPortal = async (req, res) => {
     });
 
     if (!usuario) {
+      logDebugLoginPortal({
+        identificador,
+        causa: "usuario_no_existe",
+      });
       await registrarLoginFallido(req, "usuario_no_existe", identificador);
       return res.status(401).json({
         error: "Credenciales inválidas",
@@ -179,9 +209,14 @@ const loginPortal = async (req, res) => {
     }
 
     if (!usuario.activo || !usuario.aprobado) {
+      logDebugLoginPortal({
+        identificador,
+        usuario,
+        causa: "usuario_inactivo",
+      });
       await registrarLoginFallido(
         req,
-        "usuario_inactivo_o_no_aprobado",
+        "usuario_inactivo",
         identificador,
         usuario
       );
@@ -193,9 +228,15 @@ const loginPortal = async (req, res) => {
     const cuenta = await PortalCuenta.findByPk(usuario.cuentaId);
 
     if (!cuenta || !cuenta.activo || !cuenta.aprobado) {
+      logDebugLoginPortal({
+        identificador,
+        usuario,
+        cuenta,
+        causa: "cuenta_inactiva",
+      });
       await registrarLoginFallido(
         req,
-        "cuenta_inactiva_o_no_aprobada",
+        "cuenta_inactiva",
         identificador,
         usuario,
         cuenta
@@ -222,6 +263,12 @@ const loginPortal = async (req, res) => {
     }
 
     if (!isMatch) {
+      logDebugLoginPortal({
+        identificador,
+        usuario,
+        cuenta,
+        causa: "password_invalida",
+      });
       await registrarLoginFallido(req, "password_invalida", identificador, usuario, cuenta);
       return res.status(401).json({
         error: "Credenciales inválidas",

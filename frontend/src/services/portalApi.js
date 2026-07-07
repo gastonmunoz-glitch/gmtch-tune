@@ -89,7 +89,7 @@ const requestPortal = async (
 export const portalLogin = (identificador, password) =>
   requestPortal("/portal/auth/login", {
     method: "POST",
-    body: { identificador, password },
+    body: { identificador, email: identificador, password },
     tokenType: "none",
   });
 

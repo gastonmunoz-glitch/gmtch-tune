@@ -169,17 +169,18 @@ function PortalAdminPage() {
     if (
       !nuevaCuenta.nombre_taller ||
       !nuevaCuenta.usuario_nombre ||
-      !nuevaCuenta.usuario_email ||
-      !nuevaCuenta.usuario_password
+      !nuevaCuenta.usuario_password ||
+      (!nuevaCuenta.usuario_email && !nuevaCuenta.email)
     ) {
-      setError("Debes completar taller y primer usuario externo.");
+      setError("Debes completar taller, correo empresa o email de acceso, usuario y password inicial.");
       return;
     }
 
     try {
+      const emailAcceso = (nuevaCuenta.usuario_email || nuevaCuenta.email || "").trim();
       await portalAdminCrearCuenta(nuevaCuenta);
       setMensaje(
-        `Cuenta creada. Email de acceso: ${nuevaCuenta.usuario_email.trim()}${
+        `Cuenta creada. Email de acceso: ${emailAcceso}${
           nuevaCuenta.usuario_username
             ? ` / Usuario: ${nuevaCuenta.usuario_username.trim()}`
             : ""
@@ -733,7 +734,7 @@ function PortalAdminPage() {
 
                 <div className="mt-3 border-t-2 border-black pt-3">
                   <p className="text-[10px] font-black uppercase text-blue-700">
-                    Usuarios portal asociados
+                    Usuarios de acceso
                   </p>
                   {usuariosPortal.length > 0 ? (
                     <div className="mt-2 space-y-2">
@@ -760,6 +761,9 @@ function PortalAdminPage() {
                           </p>
                           <p className="text-[10px] font-black uppercase">
                             {usuario.activo ? "Activo" : "Inactivo"} / {usuario.aprobado ? "Aprobado" : "Pendiente"}
+                          </p>
+                          <p className="text-[10px] font-bold uppercase text-gray-500">
+                            Rol portal: {usuario.rol || "MASTER"}
                           </p>
                           <p className="text-[10px] font-bold uppercase text-gray-500">
                             Último login: {fecha(usuario.last_login_at)}
@@ -855,9 +859,9 @@ function PortalAdminPage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-2 text-xs font-bold text-red-700">
-                      Esta cuenta no tiene usuario de login. No podrá iniciar sesión.
-                    </p>
+                    <div className="mt-2 border-2 border-red-600 bg-red-50 p-3 text-xs font-black uppercase text-red-700">
+                      Esta cuenta no tiene usuario de acceso. El cliente no podrá iniciar sesión.
+                    </div>
                   )}
                 </div>
 
@@ -866,7 +870,7 @@ function PortalAdminPage() {
                   className="mt-3 border-t-2 border-black pt-3"
                 >
                   <p className="text-[10px] font-black uppercase text-gray-500">
-                    Crear usuario portal en esta cuenta
+                    Crear usuario de acceso
                   </p>
                   <div className="mt-2 grid grid-cols-1 gap-2">
                     <input
@@ -905,7 +909,7 @@ function PortalAdminPage() {
                     type="submit"
                     className="mt-2 bg-blue-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-black"
                   >
-                    Crear usuario portal
+                    Crear usuario de acceso
                   </button>
                 </form>
 
