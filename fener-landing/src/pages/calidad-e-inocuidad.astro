@@ -1,0 +1,30 @@
+---
+import ContactCTA from "../components/ContactCTA.astro";
+import DailyOperations from "../components/DailyOperations.astro";
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import Hero from "../components/Hero.astro";
+import QualitySection from "../components/QualitySection.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { seo } from "../data/site";
+---
+
+<BaseLayout title={seo.pages.calidad.title} description={seo.pages.calidad.description}>
+  <Header />
+  <main>
+    <Hero
+      compact
+      eyebrow="Calidad e inocuidad"
+      title="Control operativo, higiene y supervision de procesos"
+      description="Buenas practicas, planificacion, trazabilidad interna y cumplimiento de estandares del servicio sin declarar certificaciones no confirmadas."
+      primaryLabel="Solicitar evaluacion"
+      primaryHref="/contacto"
+      secondaryLabel="Ver servicios"
+      secondaryHref="/servicios"
+    />
+    <QualitySection />
+    <DailyOperations />
+    <ContactCTA />
+  </main>
+  <Footer />
+</BaseLayout>

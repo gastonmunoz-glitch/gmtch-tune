@@ -1,35 +1,53 @@
 ---
 import "../styles/global.css";
-import { contact, seo } from "../data/site";
+import { brand, contact, seo } from "../data/site";
 
 interface Props {
   title?: string;
   description?: string;
+  image?: string;
 }
 
 const {
-  title = seo.title,
-  description = seo.description,
+  title = seo.defaultTitle,
+  description = seo.defaultDescription,
+  image = seo.image,
 } = Astro.props;
-const canonicalUrl = new URL(Astro.url.pathname, seo.url).toString();
-const ogImageUrl = new URL(seo.image, seo.url).toString();
+const canonicalUrl = new URL(Astro.url.pathname, seo.siteUrl).toString();
+const ogImageUrl = new URL(image, seo.siteUrl).toString();
 
 const structuredData = {
   "@context": "https://schema.org",
   "@type": "FoodService",
-  name: "Fener.cl",
-  url: seo.url,
+  name: brand.name,
+  url: seo.siteUrl,
   image: ogImageUrl,
   description,
-  telephone: contact.phoneLabel,
+  telephone: contact.phoneHref ? contact.phoneLabel : undefined,
   email: contact.email,
   address: {
     "@type": "PostalAddress",
-    addressLocality: "Santiago",
     addressCountry: "CL",
   },
-  areaServed: "Chile",
-  servesCuisine: ["Comida chilena", "Catering", "Alimentacion para empresas"],
+  areaServed: {
+    "@type": "Country",
+    name: "Chile",
+  },
+  servesCuisine: [
+    "Servicios de alimentacion",
+    "Alimentacion institucional",
+    "Catering corporativo",
+    "Banqueteria",
+    "Cocteleria",
+    "Cafeterias corporativas",
+  ],
+  knowsAbout: [
+    "servicios de alimentacion para empresas",
+    "alimentacion institucional",
+    "catering corporativo",
+    "alimentacion para colegios",
+    "servicios de alimentacion en Chile",
+  ],
 };
 ---
 
@@ -41,14 +59,18 @@ const structuredData = {
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
     <meta name="description" content={description} />
+    <meta
+      name="keywords"
+      content="servicios de alimentacion para empresas, alimentacion institucional, catering corporativo, banqueteria para empresas, cafeterias corporativas, alimentacion para colegios, servicios de alimentacion en Chile, catering y cocteleria, alimentacion diaria para empresas"
+    />
     <link rel="canonical" href={canonicalUrl} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta name="robots" content="index, follow" />
-    <meta name="theme-color" content="#9F1D21" />
+    <meta name="theme-color" content="#123C32" />
 
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="es_CL" />
-    <meta property="og:site_name" content="Fener.cl" />
+    <meta property="og:site_name" content={brand.name} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonicalUrl} />

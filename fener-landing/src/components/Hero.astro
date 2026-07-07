@@ -1,65 +1,68 @@
 ---
-import { links } from "../data/site";
+import { homeHero } from "../data/site";
+
+interface Props {
+  eyebrow?: string;
+  title?: string;
+  description?: string;
+  primaryLabel?: string;
+  primaryHref?: string;
+  secondaryLabel?: string;
+  secondaryHref?: string;
+  image?: string;
+  imageAlt?: string;
+  compact?: boolean;
+}
+
+const props = Astro.props;
+const eyebrow = props.eyebrow ?? homeHero.eyebrow;
+const title = props.title ?? homeHero.title;
+const description = props.description ?? homeHero.description;
+const primaryLabel = props.primaryLabel ?? homeHero.primaryLabel;
+const primaryHref = props.primaryHref ?? homeHero.primaryHref;
+const secondaryLabel = props.secondaryLabel ?? homeHero.secondaryLabel;
+const secondaryHref = props.secondaryHref ?? homeHero.secondaryHref;
+const image = props.image ?? homeHero.image;
+const imageAlt = props.imageAlt ?? homeHero.imageAlt;
+const compact = props.compact ?? false;
 ---
 
-<section class="relative overflow-hidden pt-28 sm:pt-32">
-  <div class="section-shell grid min-h-[calc(100vh-72px)] items-center gap-10 py-12 md:grid-cols-[1.02fr_0.98fr] lg:py-16">
-    <div class="relative z-10 max-w-2xl">
-      <span class="eyebrow">Comida chilena con estandar profesional</span>
-      <h1 class="mt-6 text-4xl font-black leading-[1.02] text-fener-ink sm:text-5xl lg:text-6xl">
-        Alimentacion, catering y produccion para empresas que necesitan cumplir.
+<section class:list={["relative isolate overflow-hidden bg-fener-ink text-white", compact ? "pt-28" : "pt-32"]}>
+  <img
+    class="absolute inset-0 -z-20 h-full w-full object-cover"
+    src={image}
+    alt={imageAlt}
+    loading="eager"
+    fetchpriority="high"
+  />
+  <div class="absolute inset-0 -z-10 bg-gradient-to-r from-fener-ink via-fener-ink/86 to-fener-ink/38"></div>
+  <div class="absolute inset-x-0 bottom-0 -z-10 h-28 bg-gradient-to-t from-fener-ink to-transparent"></div>
+
+  <div class:list={["section-shell flex items-center", compact ? "min-h-[420px] py-16" : "min-h-[680px] py-20"]}>
+    <div class="max-w-3xl">
+      <span class="eyebrow border-white/15 bg-white/10 text-fener-gold">{eyebrow}</span>
+      <h1 class="text-balance mt-6 text-4xl font-black leading-[1.02] sm:text-5xl lg:text-7xl">
+        {title}
       </h1>
-      <p class="mt-6 max-w-xl text-lg leading-8 text-stone-700">
-        En Fener preparamos soluciones alimentarias con sabor tipico chileno, orden operativo, calidad constante e inocuidad para servicios corporativos, eventos y producciones a medida.
+      <p class="mt-6 max-w-2xl text-lg leading-8 text-white/78 sm:text-xl">
+        {description}
       </p>
 
-      <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+      <div class="mt-9 flex flex-col gap-3 sm:flex-row">
         <a
-          class="focus-ring inline-flex items-center justify-center rounded-full bg-fener-red px-6 py-4 text-sm font-black text-white shadow-soft transition hover:bg-fener-redDark"
-          href={links.whatsapp}
-          target="_blank"
-          rel="noreferrer"
+          class="focus-ring inline-flex items-center justify-center rounded-full bg-fener-gold px-6 py-4 text-sm font-black text-fener-ink shadow-soft transition hover:bg-white"
+          href={primaryHref}
         >
-          Cotizar por WhatsApp
+          {primaryLabel}
         </a>
-        <a
-          class="focus-ring inline-flex items-center justify-center rounded-full border border-fener-green/30 bg-white px-6 py-4 text-sm font-black text-fener-green transition hover:border-fener-green hover:bg-fener-green hover:text-white"
-          href="/#servicios"
-        >
-          Ver servicios
-        </a>
-      </div>
-
-      <dl class="mt-10 grid grid-cols-3 gap-3 text-center sm:max-w-xl">
-        <div class="rounded-lg border border-fener-red/10 bg-white/78 p-4 shadow-sm backdrop-blur">
-          <dt class="text-2xl font-black text-fener-red">5</dt>
-          <dd class="mt-1 text-xs font-bold text-stone-600">lineas de servicio</dd>
-        </div>
-        <div class="rounded-lg border border-fener-red/10 bg-white/78 p-4 shadow-sm backdrop-blur">
-          <dt class="text-2xl font-black text-fener-green">4</dt>
-          <dd class="mt-1 text-xs font-bold text-stone-600">etapas claras</dd>
-        </div>
-        <div class="rounded-lg border border-fener-red/10 bg-white/78 p-4 shadow-sm backdrop-blur">
-          <dt class="text-2xl font-black text-fener-gold">100%</dt>
-          <dd class="mt-1 text-xs font-bold text-stone-600">orientado a calidad</dd>
-        </div>
-      </dl>
-    </div>
-
-    <div class="relative min-h-[420px] md:min-h-[560px]">
-      <div class="absolute inset-0 rounded-[2rem] bg-fener-red/10"></div>
-      <img
-        class="relative h-full min-h-[420px] w-full rounded-[2rem] object-cover shadow-soft md:min-h-[560px]"
-        src="/images/hero-fener.png"
-        alt="Catering profesional con comida tipica chilena preparado por Fener"
-        loading="eager"
-        fetchpriority="high"
-      />
-      <div class="absolute bottom-5 left-5 right-5 rounded-lg bg-white/92 p-5 shadow-soft backdrop-blur">
-        <p class="text-sm font-black text-fener-red">Servicios para empresas, eventos y produccion</p>
-        <p class="mt-1 text-sm leading-6 text-stone-700">
-          Propuestas flexibles para volumenes, horarios y formatos de entrega.
-        </p>
+        {secondaryHref && secondaryLabel && (
+          <a
+            class="focus-ring inline-flex items-center justify-center rounded-full border border-white/35 px-6 py-4 text-sm font-black text-white transition hover:bg-white hover:text-fener-ink"
+            href={secondaryHref}
+          >
+            {secondaryLabel}
+          </a>
+        )}
       </div>
     </div>
   </div>

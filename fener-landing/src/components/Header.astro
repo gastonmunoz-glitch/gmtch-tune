@@ -1,46 +1,59 @@
 ---
-import { links, navItems } from "../data/site";
+import { brand, commercialTexts, links, navItems } from "../data/site";
+
+const currentPath = Astro.url.pathname.replace(/\/$/, "") || "/";
+
+const isActive = (href: string) => {
+  const path = href.replace(/\/$/, "") || "/";
+  return path === currentPath;
+};
 ---
 
-<header class="fixed inset-x-0 top-0 z-50 border-b border-white/40 bg-white/88 shadow-sm backdrop-blur-xl">
+<header class="fixed inset-x-0 top-0 z-50 border-b border-stone-200/70 bg-white/92 shadow-sm backdrop-blur-xl">
   <div class="section-shell flex h-20 items-center justify-between gap-4">
     <a class="focus-ring flex items-center gap-3 rounded-full" href="/" aria-label="Inicio Fener.cl">
-      <span class="grid size-11 place-items-center rounded-full bg-fener-red text-lg font-black text-white shadow-soft">
+      <span class="grid size-11 place-items-center rounded-full bg-fener-green text-lg font-black text-white shadow-soft">
         F
       </span>
       <span class="leading-tight">
-        <span class="block text-lg font-black text-fener-ink">Fener.cl</span>
-        <span class="block text-xs font-semibold text-fener-green">Alimentacion y catering</span>
+        <span class="block text-lg font-black text-fener-ink">{brand.name}</span>
+        <span class="block text-xs font-semibold text-fener-slate">Alimentacion institucional</span>
       </span>
     </a>
 
-    <nav class="hidden items-center gap-7 text-sm font-bold text-stone-700 lg:flex" aria-label="Navegacion principal">
+    <nav class="hidden items-center gap-1 text-sm font-bold text-fener-slate xl:flex" aria-label="Navegacion principal">
       {navItems.map((item) => (
-        <a class="focus-ring rounded-full transition hover:text-fener-red" href={item.href}>
+        <a
+          class:list={[
+            "focus-ring rounded-full px-3 py-2 transition",
+            isActive(item.href)
+              ? "bg-fener-green text-white"
+              : "hover:bg-fener-greenSoft hover:text-fener-green",
+          ]}
+          href={item.href}
+        >
           {item.label}
         </a>
       ))}
     </nav>
 
-    <div class="hidden items-center gap-3 lg:flex">
+    <div class="hidden items-center gap-3 xl:flex">
       <a
-        class="focus-ring rounded-full border border-fener-red/20 px-5 py-3 text-sm font-black text-fener-red transition hover:border-fener-red hover:bg-fener-red hover:text-white"
-        href="/#contacto"
+        class="focus-ring rounded-full border border-fener-green/20 px-5 py-3 text-sm font-black text-fener-green transition hover:border-fener-green hover:bg-fener-green hover:text-white"
+        href={links.email}
       >
-        Formulario
+        {commercialTexts.emailCta}
       </a>
       <a
-        class="focus-ring rounded-full bg-fener-red px-5 py-3 text-sm font-black text-white shadow-soft transition hover:bg-fener-redDark"
-        href={links.whatsapp}
-        target="_blank"
-        rel="noreferrer"
+        class="focus-ring rounded-full bg-fener-green px-5 py-3 text-sm font-black text-white shadow-soft transition hover:bg-fener-ink"
+        href="/contacto"
       >
-        Cotizar
+        {commercialTexts.proposalCta}
       </a>
     </div>
 
     <button
-      class="focus-ring inline-flex size-11 items-center justify-center rounded-full border border-stone-200 bg-white text-fener-ink lg:hidden"
+      class="focus-ring inline-flex size-11 items-center justify-center rounded-full border border-stone-200 bg-white text-fener-ink xl:hidden"
       type="button"
       aria-label="Abrir menu"
       aria-expanded="false"
@@ -53,27 +66,33 @@ import { links, navItems } from "../data/site";
     </button>
   </div>
 
-  <div class="hidden border-t border-stone-100 bg-white lg:hidden" data-mobile-menu>
-    <nav class="section-shell flex flex-col py-4 text-sm font-bold text-stone-700" aria-label="Navegacion movil">
+  <div class="hidden border-t border-stone-100 bg-white xl:hidden" data-mobile-menu>
+    <nav class="section-shell flex flex-col py-4 text-sm font-bold text-fener-slate" aria-label="Navegacion movil">
       {navItems.map((item) => (
-        <a class="focus-ring rounded-lg px-2 py-3 transition hover:bg-fener-cream hover:text-fener-red" href={item.href}>
+        <a
+          class:list={[
+            "focus-ring rounded-lg px-2 py-3 transition",
+            isActive(item.href)
+              ? "bg-fener-green text-white"
+              : "hover:bg-fener-greenSoft hover:text-fener-green",
+          ]}
+          href={item.href}
+        >
           {item.label}
         </a>
       ))}
-      <div class="mt-3 grid grid-cols-2 gap-3">
+      <div class="mt-3 grid gap-3 sm:grid-cols-2">
         <a
-          class="focus-ring rounded-full border border-fener-red/25 px-4 py-3 text-center font-black text-fener-red"
-          href="/#contacto"
+          class="focus-ring rounded-full border border-fener-green/25 px-4 py-3 text-center font-black text-fener-green"
+          href={links.email}
         >
-          Formulario
+          {commercialTexts.emailCta}
         </a>
         <a
-          class="focus-ring rounded-full bg-fener-red px-4 py-3 text-center font-black text-white"
-          href={links.whatsapp}
-          target="_blank"
-          rel="noreferrer"
+          class="focus-ring rounded-full bg-fener-green px-4 py-3 text-center font-black text-white"
+          href="/contacto"
         >
-          Cotizar
+          {commercialTexts.proposalCta}
         </a>
       </div>
     </nav>

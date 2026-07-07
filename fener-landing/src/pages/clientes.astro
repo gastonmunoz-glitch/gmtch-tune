@@ -1,0 +1,30 @@
+---
+import ClientSectors from "../components/ClientSectors.astro";
+import ContactCTA from "../components/ContactCTA.astro";
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import Hero from "../components/Hero.astro";
+import TrustBar from "../components/TrustBar.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { seo } from "../data/site";
+---
+
+<BaseLayout title={seo.pages.clientes.title} description={seo.pages.clientes.description}>
+  <Header />
+  <main>
+    <Hero
+      compact
+      eyebrow="Clientes y rubros"
+      title="Soluciones para empresas, colegios, universidades e instituciones"
+      description="La web queda preparada para incorporar logos y nombres autorizados de clientes. Mientras tanto, se muestran rubros atendidos sin inventar marcas."
+      primaryLabel="Solicitar propuesta"
+      primaryHref="/contacto"
+      secondaryLabel="Ver cobertura"
+      secondaryHref="/trayectoria"
+    />
+    <TrustBar />
+    <ClientSectors />
+    <ContactCTA />
+  </main>
+  <Footer />
+</BaseLayout>

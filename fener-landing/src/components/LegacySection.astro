@@ -1,0 +1,27 @@
+---
+import { legacy } from "../data/site";
+---
+
+<section class="bg-fener-cream py-20 lg:py-24">
+  <div class="section-shell grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+    <div>
+      <span class="eyebrow bg-white">{legacy.eyebrow}</span>
+      <h2 class="mt-5 text-3xl font-black leading-tight text-fener-ink sm:text-4xl">
+        {legacy.title}
+      </h2>
+      <p class="mt-5 text-lg leading-8 text-fener-slate">{legacy.body}</p>
+    </div>
+
+    <div class="rounded-lg border border-stone-200 bg-white p-6 shadow-soft lg:p-8">
+      <p class="text-sm font-black uppercase text-fener-gold">Continuidad desde Aliner Ltda.</p>
+      <ul class="mt-6 grid gap-4">
+        {legacy.points.map((point) => (
+          <li class="flex gap-4">
+            <span class="mt-1 grid size-7 shrink-0 place-items-center rounded-full bg-fener-green text-sm font-black text-white">OK</span>
+            <span class="text-base font-semibold leading-7 text-fener-ink">{point}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </div>
+</section>

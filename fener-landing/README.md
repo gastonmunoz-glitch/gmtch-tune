@@ -1,6 +1,16 @@
-# Fener.cl Landing
+# Fener.cl Sitio Corporativo
 
-Landing profesional para Fener.cl creada con Astro y Tailwind CSS.
+Sitio corporativo premium multipagina para Fener.cl, creado con Astro y Tailwind CSS.
+
+## Rutas
+
+- `/`
+- `/servicios`
+- `/trayectoria`
+- `/calidad-e-inocuidad`
+- `/clientes`
+- `/galeria`
+- `/contacto`
 
 ## Comandos
 
@@ -8,8 +18,32 @@ Landing profesional para Fener.cl creada con Astro y Tailwind CSS.
 npm install
 npm run dev
 npm run build
+npm run preview
 npm run zip:cpanel
 ```
+
+## Edicion rapida
+
+- Contacto, correo, telefono, WhatsApp y formulario: `src/data/site.ts`
+- SEO por pagina: `src/data/site.ts`
+- Servicios, metricas, rubros, calidad, cobertura y galeria: `src/data/site.ts`
+- Componentes visuales: `src/components/`
+- Paginas Astro: `src/pages/`
+- Imagen principal y futuras fotos reales: `public/images/`
+
+Si no hay telefono o WhatsApp confirmado, deja esos campos vacios en `src/data/site.ts`. El sitio no muestra telefonos falsos ni redes sociales genericas.
+
+## Formulario
+
+El formulario usa `contact.formAction` desde `src/data/site.ts`.
+
+Por ahora puede quedar como `mailto:contacto@fener.cl`. Para Formspree, Netlify Forms o un backend autorizado, cambia `formAction` y `formMethod` en el mismo archivo.
+
+## Fotos y clientes
+
+La galeria y la seccion de clientes usan placeholders sobrios. Reemplaza esos bloques cuando existan fotos reales, logos o nombres con autorizacion comercial.
+
+No inventar nombres de clientes, certificaciones, anos de experiencia, raciones, cantidad de clientes ni logos.
 
 ## Subida a BlueHosting/cPanel
 
@@ -36,13 +70,4 @@ Despues de subir, abre:
 https://fener.cl/health-check.txt
 ```
 
-Si ves `FENER_LANDING_ASTRO_OK_2026`, cPanel esta sirviendo la landing Astro correcta.
-
-## Edicion rapida
-
-- Textos, telefono, WhatsApp, correo y redes: `src/data/site.ts`
-- Componentes visuales: `src/components/`
-- Imagen principal y galeria: `public/images/`
-- Metadata SEO: `src/data/site.ts` y `src/layouts/BaseLayout.astro`
-
-El formulario usa `mailto:` para no depender de backend ni inventar rutas. Para conectarlo a CRM, Formspree o backend propio, cambia `contact.formAction` en `src/data/site.ts`.
+Si ves `FENER_LANDING_ASTRO_OK_2026`, cPanel esta sirviendo la version Astro correcta.

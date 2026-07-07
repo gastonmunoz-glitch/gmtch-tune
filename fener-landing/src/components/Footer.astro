@@ -1,25 +1,31 @@
 ---
-import { contact, links, navItems, socialLinks } from "../data/site";
+import { brand, commercialTexts, contact, links, navItems, socialLinks } from "../data/site";
 ---
 
 <footer class="bg-fener-ink py-12 text-white">
   <div class="section-shell">
-    <div class="grid gap-10 lg:grid-cols-[1.1fr_0.9fr_0.9fr]">
+    <div class="grid gap-10 lg:grid-cols-[1.1fr_0.85fr_0.95fr]">
       <div>
         <a class="focus-ring inline-flex items-center gap-3 rounded-full" href="/" aria-label="Inicio Fener.cl">
-          <span class="grid size-11 place-items-center rounded-full bg-fener-red text-lg font-black text-white">F</span>
+          <span class="grid size-11 place-items-center rounded-full bg-fener-gold text-lg font-black text-fener-ink">F</span>
           <span>
-            <span class="block text-lg font-black">Fener.cl</span>
-            <span class="block text-xs font-semibold text-white/64">Comida tipica, catering y produccion</span>
+            <span class="block text-lg font-black">{brand.name}</span>
+            <span class="block text-xs font-semibold text-white/64">{brand.tagline}</span>
           </span>
         </a>
         <p class="mt-5 max-w-md text-sm leading-7 text-white/68">
-          Servicios alimentarios para empresas, eventos y producciones con foco en calidad, inocuidad y cumplimiento.
+          {brand.descriptor}
         </p>
+        <a
+          class="focus-ring mt-6 inline-flex rounded-full bg-fener-gold px-5 py-3 text-sm font-black text-fener-ink transition hover:bg-white"
+          href="/contacto"
+        >
+          {commercialTexts.proposalCta}
+        </a>
       </div>
 
       <div>
-        <h2 class="text-sm font-black text-fener-gold">Enlaces</h2>
+        <h2 class="text-sm font-black text-fener-gold">Navegacion</h2>
         <nav class="mt-4 grid gap-3 text-sm font-semibold text-white/72" aria-label="Enlaces del footer">
           {navItems.map((item) => (
             <a class="focus-ring rounded transition hover:text-white" href={item.href}>{item.label}</a>
@@ -28,25 +34,28 @@ import { contact, links, navItems, socialLinks } from "../data/site";
       </div>
 
       <div>
-        <h2 class="text-sm font-black text-fener-gold">Datos de empresa</h2>
+        <h2 class="text-sm font-black text-fener-gold">Contacto comercial</h2>
         <ul class="mt-4 grid gap-3 text-sm text-white/72">
+          <li>{contact.coverageLabel}</li>
           <li>{contact.address}</li>
-          <li><a class="focus-ring rounded transition hover:text-white" href={links.phone}>{contact.phoneLabel}</a></li>
           <li><a class="focus-ring rounded transition hover:text-white" href={links.email}>{contact.email}</a></li>
-          <li><a class="focus-ring rounded transition hover:text-white" href={links.whatsapp} target="_blank" rel="noreferrer">WhatsApp comercial</a></li>
+          {links.phone && <li><a class="focus-ring rounded transition hover:text-white" href={links.phone}>{contact.phoneLabel}</a></li>}
+          {links.whatsapp && <li><a class="focus-ring rounded transition hover:text-white" href={links.whatsapp} target="_blank" rel="noreferrer">{contact.whatsappLabel}</a></li>}
         </ul>
       </div>
     </div>
 
     <div class="mt-10 flex flex-col gap-5 border-t border-white/10 pt-6 sm:flex-row sm:items-center sm:justify-between">
-      <p class="text-sm text-white/56">© {new Date().getFullYear()} Fener.cl. Todos los derechos reservados.</p>
-      <div class="flex flex-wrap gap-3">
-        {socialLinks.map((social) => (
-          <a class="focus-ring rounded-full border border-white/12 px-4 py-2 text-sm font-bold text-white/72 transition hover:border-fener-gold hover:text-white" href={social.href} target="_blank" rel="noreferrer">
-            {social.label}
-          </a>
-        ))}
-      </div>
+      <p class="text-sm text-white/56">&copy; {new Date().getFullYear()} {brand.name}. Todos los derechos reservados.</p>
+      {socialLinks.length > 0 && (
+        <div class="flex flex-wrap gap-3">
+          {socialLinks.map((social) => (
+            <a class="focus-ring rounded-full border border-white/12 px-4 py-2 text-sm font-bold text-white/72 transition hover:border-fener-gold hover:text-white" href={social.href} target="_blank" rel="noreferrer">
+              {social.label}
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   </div>
 </footer>

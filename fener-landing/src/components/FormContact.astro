@@ -1,0 +1,88 @@
+---
+import { commercialTexts, contact, links, services } from "../data/site";
+
+const serviceOptions = services.map((service) => service.title);
+---
+
+<section class="py-20 lg:py-24">
+  <div class="section-shell grid gap-10 lg:grid-cols-[0.82fr_1.18fr]">
+    <aside>
+      <span class="eyebrow">Solicitud comercial</span>
+      <h2 class="mt-5 text-3xl font-black leading-tight text-fener-ink sm:text-4xl">
+        Cuentanos que servicio necesitas.
+      </h2>
+      <p class="mt-5 text-lg leading-8 text-fener-slate">{commercialTexts.formIntro}</p>
+
+      <div class="mt-8 grid gap-3">
+        <a class="focus-ring rounded-lg border border-stone-200 bg-white p-5 shadow-sm transition hover:border-fener-green" href={links.email}>
+          <span class="block text-sm font-black uppercase text-fener-gold">Correo</span>
+          <span class="mt-1 block text-base font-black text-fener-ink">{contact.email}</span>
+        </a>
+        {links.phone ? (
+          <a class="focus-ring rounded-lg border border-stone-200 bg-white p-5 shadow-sm transition hover:border-fener-green" href={links.phone}>
+            <span class="block text-sm font-black uppercase text-fener-gold">Telefono</span>
+            <span class="mt-1 block text-base font-black text-fener-ink">{contact.phoneLabel}</span>
+          </a>
+        ) : (
+          <div class="rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
+            <span class="block text-sm font-black uppercase text-fener-gold">Telefono / WhatsApp</span>
+            <span class="mt-1 block text-sm font-semibold leading-6 text-fener-slate">{commercialTexts.noPhoneMessage}</span>
+          </div>
+        )}
+      </div>
+    </aside>
+
+    <form class="rounded-lg border border-stone-200 bg-white p-6 shadow-soft sm:p-8" action={contact.formAction} method={contact.formMethod} enctype="text/plain">
+      <div class="grid gap-5 sm:grid-cols-2">
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Nombre</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-green focus:ring-4 focus:ring-fener-green/10" name="nombre" type="text" autocomplete="name" required />
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Empresa o institucion</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-green focus:ring-4 focus:ring-fener-green/10" name="empresa_o_institucion" type="text" autocomplete="organization" required />
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Telefono</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-green focus:ring-4 focus:ring-fener-green/10" name="telefono" type="tel" autocomplete="tel" />
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Correo</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-green focus:ring-4 focus:ring-fener-green/10" name="correo" type="email" autocomplete="email" required />
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Tipo de servicio</span>
+          <select class="mt-2 w-full rounded-lg border border-stone-200 bg-white px-4 py-3 text-base outline-none transition focus:border-fener-green focus:ring-4 focus:ring-fener-green/10" name="tipo_de_servicio" required>
+            {serviceOptions.map((option) => (
+              <option value={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Cantidad aproximada de personas</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-green focus:ring-4 focus:ring-fener-green/10" name="cantidad_aproximada" type="text" inputmode="numeric" />
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Ciudad o comuna</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-green focus:ring-4 focus:ring-fener-green/10" name="ciudad_o_comuna" type="text" autocomplete="address-level2" />
+        </label>
+        <label class="block">
+          <span class="text-sm font-black text-fener-ink">Fecha estimada</span>
+          <input class="mt-2 w-full rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-green focus:ring-4 focus:ring-fener-green/10" name="fecha_estimada" type="date" />
+        </label>
+      </div>
+
+      <label class="mt-5 block">
+        <span class="text-sm font-black text-fener-ink">Mensaje</span>
+        <textarea class="mt-2 min-h-40 w-full resize-y rounded-lg border border-stone-200 px-4 py-3 text-base outline-none transition focus:border-fener-green focus:ring-4 focus:ring-fener-green/10" name="mensaje" placeholder="Ej: servicio diario para 300 personas en Santiago, cafeteria institucional, evento corporativo, banqueteria..." required></textarea>
+      </label>
+
+      <button class="focus-ring mt-6 w-full rounded-full bg-fener-green px-6 py-4 text-sm font-black text-white shadow-soft transition hover:bg-fener-ink" type="submit">
+        Enviar solicitud
+      </button>
+      <p class="mt-4 text-center text-xs leading-5 text-stone-500">
+        El action del formulario esta centralizado en site.ts para conectar mailto, Formspree, Netlify Forms u otro endpoint autorizado.
+      </p>
+    </form>
+  </div>
+</section>

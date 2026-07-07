@@ -1,0 +1,26 @@
+---
+import Footer from "../components/Footer.astro";
+import FormContact from "../components/FormContact.astro";
+import Header from "../components/Header.astro";
+import Hero from "../components/Hero.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { seo } from "../data/site";
+---
+
+<BaseLayout title={seo.pages.contacto.title} description={seo.pages.contacto.description}>
+  <Header />
+  <main>
+    <Hero
+      compact
+      eyebrow="Contacto"
+      title="Solicita una propuesta para tu servicio de alimentacion"
+      description="Indicanos tipo de servicio, ciudad, volumen aproximado, fecha y contexto operativo para preparar una respuesta comercial adecuada."
+      primaryLabel="Completar formulario"
+      primaryHref="/contacto"
+      secondaryLabel="Enviar correo"
+      secondaryHref="mailto:contacto@fener.cl"
+    />
+    <FormContact />
+  </main>
+  <Footer />
+</BaseLayout>

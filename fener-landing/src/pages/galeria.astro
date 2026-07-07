@@ -1,0 +1,28 @@
+---
+import ContactCTA from "../components/ContactCTA.astro";
+import Footer from "../components/Footer.astro";
+import Gallery from "../components/Gallery.astro";
+import Header from "../components/Header.astro";
+import Hero from "../components/Hero.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { seo } from "../data/site";
+---
+
+<BaseLayout title={seo.pages.galeria.title} description={seo.pages.galeria.description}>
+  <Header />
+  <main>
+    <Hero
+      compact
+      eyebrow="Galeria"
+      title="Registro visual preparado para fotos reales y material corporativo"
+      description="Espacios visuales sobrios para publicar servicios diarios, cafeterias, catering, cocteleria, banqueteria, eventos y produccion cuando el material este disponible."
+      primaryLabel="Solicitar propuesta"
+      primaryHref="/contacto"
+      secondaryLabel="Ver servicios"
+      secondaryHref="/servicios"
+    />
+    <Gallery />
+    <ContactCTA />
+  </main>
+  <Footer />
+</BaseLayout>

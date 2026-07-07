@@ -4,16 +4,17 @@ export default {
     extend: {
       colors: {
         fener: {
-          red: "#9F1D21",
-          redDark: "#731316",
-          green: "#1F6B4A",
-          gold: "#D69C32",
-          cream: "#FFF7EA",
-          ink: "#22201D",
+          green: "#123C32",
+          greenSoft: "#E7F0EB",
+          gold: "#B88735",
+          goldSoft: "#F3E6CF",
+          cream: "#F8F3EA",
+          ink: "#1D2521",
+          slate: "#4B5752",
         },
       },
       boxShadow: {
-        soft: "0 24px 60px rgba(47, 32, 22, 0.13)",
+        soft: "0 24px 60px rgba(18, 60, 50, 0.12)",
       },
     },
   },

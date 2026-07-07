@@ -1,0 +1,33 @@
+---
+import { commercialTexts, contact, links } from "../data/site";
+---
+
+<section class="bg-fener-cream py-16 lg:py-20">
+  <div class="section-shell rounded-lg bg-fener-ink p-6 text-white shadow-soft sm:p-10 lg:p-12">
+    <div class="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+      <div>
+        <span class="eyebrow border-white/15 bg-white/10 text-fener-gold">Contacto comercial</span>
+        <h2 class="mt-5 text-3xl font-black leading-tight sm:text-4xl">
+          Conversemos sobre tu operacion alimentaria.
+        </h2>
+        <p class="mt-4 text-lg leading-8 text-white/72">
+          Solicita una propuesta para alimentacion diaria, cafeterias, catering, cocteleria, banqueteria, eventos o produccion alimentaria a medida.
+        </p>
+      </div>
+
+      <div class="grid gap-3">
+        <a class="focus-ring rounded-full bg-fener-gold px-6 py-4 text-center text-sm font-black text-fener-ink transition hover:bg-white" href="/contacto">
+          {commercialTexts.proposalCta}
+        </a>
+        <a class="focus-ring rounded-full border border-white/25 px-6 py-4 text-center text-sm font-black text-white transition hover:bg-white hover:text-fener-ink" href={links.email}>
+          {contact.email}
+        </a>
+        {links.whatsapp && (
+          <a class="focus-ring rounded-full border border-white/25 px-6 py-4 text-center text-sm font-black text-white transition hover:bg-white hover:text-fener-ink" href={links.whatsapp} target="_blank" rel="noreferrer">
+            {contact.whatsappLabel}
+          </a>
+        )}
+      </div>
+    </div>
+  </div>
+</section>

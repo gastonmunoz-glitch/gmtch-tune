@@ -1,0 +1,26 @@
+---
+import { dailyOperations } from "../data/site";
+---
+
+<section class="py-20 lg:py-24">
+  <div class="section-shell grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+    <div>
+      <span class="eyebrow">{dailyOperations.eyebrow}</span>
+      <h2 class="mt-5 text-3xl font-black leading-tight text-fener-ink sm:text-4xl">
+        {dailyOperations.title}
+      </h2>
+      <p class="mt-5 text-lg leading-8 text-fener-slate">{dailyOperations.body}</p>
+    </div>
+
+    <ol class="grid gap-4">
+      {dailyOperations.steps.map((step, index) => (
+        <li class="flex gap-4 rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
+          <span class="grid size-10 shrink-0 place-items-center rounded-full bg-fener-green text-sm font-black text-white">
+            {index + 1}
+          </span>
+          <span class="pt-2 text-base font-black leading-7 text-fener-ink">{step}</span>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>

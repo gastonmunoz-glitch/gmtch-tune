@@ -1,0 +1,21 @@
+---
+import { coverage } from "../data/site";
+---
+
+<section class="bg-fener-green py-20 text-white lg:py-24">
+  <div class="section-shell grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+    <div>
+      <span class="eyebrow border-white/15 bg-white/10 text-fener-gold">{coverage.eyebrow}</span>
+      <h2 class="mt-5 text-3xl font-black leading-tight sm:text-4xl">{coverage.title}</h2>
+      <p class="mt-5 text-lg leading-8 text-white/78">{coverage.body}</p>
+    </div>
+
+    <div class="grid gap-3 sm:grid-cols-2">
+      {coverage.zones.map((zone) => (
+        <div class="rounded-lg border border-white/12 bg-white/8 p-5">
+          <p class="text-base font-black leading-7 text-white">{zone}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

@@ -1,0 +1,30 @@
+---
+import ContactCTA from "../components/ContactCTA.astro";
+import DailyOperations from "../components/DailyOperations.astro";
+import FeaturedServices from "../components/FeaturedServices.astro";
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import Hero from "../components/Hero.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { seo } from "../data/site";
+---
+
+<BaseLayout title={seo.pages.servicios.title} description={seo.pages.servicios.description}>
+  <Header />
+  <main>
+    <Hero
+      compact
+      eyebrow="Portafolio de servicios"
+      title="Alimentacion diaria, cafeterias, catering, cocteleria, banqueteria y eventos"
+      description="Servicios recurrentes y soluciones especiales para empresas grandes, colegios, universidades, ministerios e instituciones publicas y privadas."
+      primaryLabel="Solicitar propuesta"
+      primaryHref="/contacto"
+      secondaryLabel="Ver operacion diaria"
+      secondaryHref="/calidad-e-inocuidad"
+    />
+    <FeaturedServices />
+    <DailyOperations />
+    <ContactCTA />
+  </main>
+  <Footer />
+</BaseLayout>

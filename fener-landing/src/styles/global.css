@@ -8,7 +8,7 @@
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   background: #fffaf2;
-  color: #22201d;
+  color: #1d2521;
   scroll-behavior: smooth;
 }
 
@@ -20,8 +20,8 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(circle at 18% 12%, rgba(214, 156, 50, 0.12), transparent 28rem),
-    linear-gradient(180deg, #fffaf2 0%, #fff 40%, #fff7ea 100%);
+    radial-gradient(circle at 16% 10%, rgba(184, 135, 53, 0.12), transparent 30rem),
+    linear-gradient(180deg, #fbf8f1 0%, #fff 46%, #f8f3ea 100%);
 }
 
 a,
@@ -39,10 +39,10 @@ button {
   align-items: center;
   gap: 0.5rem;
   border-radius: 999px;
-  border: 1px solid rgba(159, 29, 33, 0.14);
-  background: rgba(255, 247, 234, 0.76);
+  border: 1px solid rgba(18, 60, 50, 0.12);
+  background: rgba(248, 243, 234, 0.8);
   padding: 0.4rem 0.72rem;
-  color: #731316;
+  color: #123c32;
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0;
@@ -55,7 +55,11 @@ button {
 }
 
 .focus-ring:focus-visible {
-  outline-color: #d69c32;
+  outline-color: #b88735;
+}
+
+.text-balance {
+  text-wrap: balance;
 }
 
 @media (prefers-reduced-motion: reduce) {

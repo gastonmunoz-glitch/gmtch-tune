@@ -1,30 +1,31 @@
 ---
-import ClientSectors from "../components/ClientSectors.astro";
 import ContactCTA from "../components/ContactCTA.astro";
-import DailyOperations from "../components/DailyOperations.astro";
 import Footer from "../components/Footer.astro";
 import Header from "../components/Header.astro";
 import Hero from "../components/Hero.astro";
 import LegacySection from "../components/LegacySection.astro";
 import NationalCoverage from "../components/NationalCoverage.astro";
-import QualitySection from "../components/QualitySection.astro";
-import ServiceOverview from "../components/ServiceOverview.astro";
 import TrustBar from "../components/TrustBar.astro";
 import BaseLayout from "../layouts/BaseLayout.astro";
 import { seo } from "../data/site";
 ---
 
-<BaseLayout title={seo.pages.home.title} description={seo.pages.home.description}>
+<BaseLayout title={seo.pages.trayectoria.title} description={seo.pages.trayectoria.description}>
   <Header />
   <main>
-    <Hero />
+    <Hero
+      compact
+      eyebrow="Trayectoria"
+      title="Continuidad operativa de una trayectoria consolidada"
+      description="Fener proyecta una experiencia relevante en servicios de alimentacion con una propuesta renovada para clientes institucionales, corporativos y educacionales."
+      primaryLabel="Conocer servicios"
+      primaryHref="/servicios"
+      secondaryLabel="Contactar"
+      secondaryHref="/contacto"
+    />
     <TrustBar />
-    <ServiceOverview />
     <LegacySection />
-    <DailyOperations />
-    <QualitySection />
     <NationalCoverage />
-    <ClientSectors />
     <ContactCTA />
   </main>
   <Footer />
