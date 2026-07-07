@@ -86,10 +86,10 @@ const requestPortal = async (
   return response.json();
 };
 
-export const portalLogin = (email, password) =>
+export const portalLogin = (identificador, password) =>
   requestPortal("/portal/auth/login", {
     method: "POST",
-    body: { email, password },
+    body: { identificador, password },
     tokenType: "none",
   });
 

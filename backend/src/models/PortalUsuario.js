@@ -28,6 +28,12 @@ const PortalUsuario = sequelize.define(
       unique: true,
     },
 
+    username: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+      unique: true,
+    },
+
     password: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -68,6 +74,12 @@ const normalizarEmail = (usuario) => {
   if (usuario.email) {
     usuario.email = String(usuario.email).trim().toLowerCase();
   }
+
+  if (usuario.username) {
+    usuario.username = String(usuario.username).trim().toLowerCase();
+  } else if (usuario.username === "") {
+    usuario.username = null;
+  }
 };
 
 const hashPassword = async (usuario) => {
@@ -80,6 +92,10 @@ PortalUsuario.beforeValidate(normalizarEmail);
 PortalUsuario.beforeCreate(hashPassword);
 PortalUsuario.beforeUpdate(async (usuario) => {
   if (usuario.changed("email")) {
+    normalizarEmail(usuario);
+  }
+
+  if (usuario.changed("username")) {
     normalizarEmail(usuario);
   }
 

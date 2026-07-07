@@ -9,6 +9,25 @@ const limpiarTexto = (valor) => {
   return String(valor).trim();
 };
 
+let columnasPortalUsuarioPreparadas = false;
+
+const prepararColumnasPortalUsuario = async () => {
+  if (columnasPortalUsuarioPreparadas) return;
+
+  await PortalUsuario.sequelize.query(`
+    ALTER TABLE portal_usuarios
+    ADD COLUMN IF NOT EXISTS username VARCHAR(120);
+  `);
+
+  await PortalUsuario.sequelize.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS portal_usuarios_username_lower_unique
+    ON portal_usuarios (LOWER(username))
+    WHERE username IS NOT NULL AND username <> '';
+  `);
+
+  columnasPortalUsuarioPreparadas = true;
+};
+
 const mensajeErrorServidor = (error) =>
   process.env.NODE_ENV === "production"
     ? "Error interno del servidor"
@@ -124,6 +143,7 @@ const mapearUsuario = (usuario) => ({
   cuentaId: usuario.cuentaId,
   nombre: usuario.nombre,
   email: usuario.email,
+  username: usuario.username || null,
   activo: usuario.activo,
   aprobado: usuario.aprobado,
   last_login_at: usuario.last_login_at,
@@ -132,39 +152,56 @@ const mapearUsuario = (usuario) => ({
 
 const loginPortal = async (req, res) => {
   try {
-    const email = limpiarTexto(req.body.email).toLowerCase();
+    await prepararColumnasPortalUsuario();
+
+    const identificador = limpiarTexto(
+      req.body.identificador || req.body.email
+    ).toLowerCase();
     const password = limpiarTexto(req.body.password);
 
-    if (!email || !password) {
+    if (!identificador || !password) {
       return res.status(400).json({
-        error: "Email y password son obligatorios",
+        error: "Email o usuario y password son obligatorios",
       });
     }
 
     const usuario = await PortalUsuario.findOne({
-      where: { email },
+      where: {
+        [Op.or]: [{ email: identificador }, { username: identificador }],
+      },
     });
 
     if (!usuario) {
-      await registrarLoginFallido(req, "email_no_existe", email);
+      await registrarLoginFallido(req, "usuario_no_existe", identificador);
       return res.status(401).json({
-        error: "Credenciales portal invalidas",
+        error: "Credenciales inválidas",
       });
     }
 
     if (!usuario.activo || !usuario.aprobado) {
-      await registrarLoginFallido(req, "usuario_inactivo_o_no_aprobado", email, usuario);
+      await registrarLoginFallido(
+        req,
+        "usuario_inactivo_o_no_aprobado",
+        identificador,
+        usuario
+      );
       return res.status(403).json({
-        error: "Acceso portal no autorizado",
+        error: "El usuario está inactivo",
       });
     }
 
     const cuenta = await PortalCuenta.findByPk(usuario.cuentaId);
 
     if (!cuenta || !cuenta.activo || !cuenta.aprobado) {
-      await registrarLoginFallido(req, "cuenta_inactiva_o_no_aprobada", email, usuario, cuenta);
+      await registrarLoginFallido(
+        req,
+        "cuenta_inactiva_o_no_aprobada",
+        identificador,
+        usuario,
+        cuenta
+      );
       return res.status(403).json({
-        error: "Acceso portal no autorizado",
+        error: "La cuenta Master está inactiva",
       });
     }
 
@@ -185,9 +222,9 @@ const loginPortal = async (req, res) => {
     }
 
     if (!isMatch) {
-      await registrarLoginFallido(req, "password_invalida", email, usuario, cuenta);
+      await registrarLoginFallido(req, "password_invalida", identificador, usuario, cuenta);
       return res.status(401).json({
-        error: "Credenciales portal invalidas",
+        error: "Credenciales inválidas",
       });
     }
 
@@ -205,7 +242,7 @@ const loginPortal = async (req, res) => {
       tipo: "LOGIN_OK",
       resultado: "OK",
       descripcion: "Login portal correcto",
-      metadata: { email: usuario.email },
+      metadata: { email: usuario.email, username: usuario.username || null },
       creado_por: usuario.email,
     });
 
@@ -215,6 +252,7 @@ const loginPortal = async (req, res) => {
         portalUsuarioId: usuario.id,
         cuentaId: cuenta.id,
         email: usuario.email,
+        username: usuario.username || null,
       },
       PORTAL_JWT_SECRET,
       {

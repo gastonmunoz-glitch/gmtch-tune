@@ -48,6 +48,11 @@ const estadoCuentaClass = (item) =>
       ? getStatusColor("VALIDADO", "soft")
       : getStatusColor("PENDIENTE", "soft");
 
+const sugerirUsernameDesdeEmail = (email = "") => {
+  const base = String(email || "").trim().toLowerCase().split("@")[0] || "";
+  return base.replace(/[^a-z0-9._-]/g, "").slice(0, 40);
+};
+
 function PortalAdminPage() {
   const [searchParams] = useSearchParams();
   const [cuentas, setCuentas] = useState([]);
@@ -74,6 +79,7 @@ function PortalAdminPage() {
     observaciones: "",
     usuario_nombre: "",
     usuario_email: "",
+    usuario_username: "",
     usuario_password: "",
   });
   const [credito, setCredito] = useState({
@@ -173,7 +179,11 @@ function PortalAdminPage() {
     try {
       await portalAdminCrearCuenta(nuevaCuenta);
       setMensaje(
-        `Cuenta creada. Email de login portal: ${nuevaCuenta.usuario_email.trim()}`
+        `Cuenta creada. Email de acceso: ${nuevaCuenta.usuario_email.trim()}${
+          nuevaCuenta.usuario_username
+            ? ` / Usuario: ${nuevaCuenta.usuario_username.trim()}`
+            : ""
+        }`
       );
       setNuevaCuenta({
         nombre_taller: "",
@@ -183,6 +193,7 @@ function PortalAdminPage() {
         observaciones: "",
         usuario_nombre: "",
         usuario_email: "",
+        usuario_username: "",
         usuario_password: "",
       });
       await cargar();
@@ -207,6 +218,7 @@ function PortalAdminPage() {
       const res = await api.post(`/portal/admin/cuentas/${cuenta.id}/usuarios`, {
         nombre: form.nombre,
         email: form.email,
+        username: form.username || "",
         password: form.password,
       });
 
@@ -215,7 +227,7 @@ function PortalAdminPage() {
       );
       setNuevoUsuarioPorCuenta((actual) => ({
         ...actual,
-        [cuenta.id]: { nombre: "", email: "", password: "" },
+        [cuenta.id]: { nombre: "", email: "", username: "", password: "" },
       }));
       await cargar();
     } catch (err) {
@@ -256,6 +268,7 @@ function PortalAdminPage() {
       const res = await api.patch(`/portal/admin/usuarios/${usuario.id}`, {
         nombre: edit.nombre ?? usuario.nombre,
         email: edit.email ?? usuario.email,
+        username: edit.username ?? usuario.username ?? "",
         activo: usuario.activo,
         aprobado: usuario.aprobado,
       });
@@ -567,15 +580,27 @@ function PortalAdminPage() {
         <form onSubmit={crearCuenta} className="border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
           <h2 className="text-sm font-black uppercase">Crear cuenta externa</h2>
           <p className="mt-2 text-xs font-bold text-gray-500">
-            El master debe iniciar sesión con el Email de login portal, no con el email de la cuenta.
+            El master puede iniciar sesión con Email de acceso o Usuario de acceso. El correo empresa puede ser el mismo.
           </p>
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <input className={inputClass} placeholder="Nombre taller" value={nuevaCuenta.nombre_taller} onChange={(e) => actualizarNuevaCuenta("nombre_taller", e.target.value)} />
             <input className={inputClass} placeholder="Contacto" value={nuevaCuenta.contacto} onChange={(e) => actualizarNuevaCuenta("contacto", e.target.value)} />
-            <input className={inputClass} placeholder="Email de cuenta/taller" value={nuevaCuenta.email} onChange={(e) => actualizarNuevaCuenta("email", e.target.value)} />
+            <input className={inputClass} placeholder="Correo empresa/contacto" value={nuevaCuenta.email} onChange={(e) => actualizarNuevaCuenta("email", e.target.value)} />
             <input className={inputClass} placeholder="Teléfono" value={nuevaCuenta.telefono} onChange={(e) => actualizarNuevaCuenta("telefono", e.target.value)} />
             <input className={inputClass} placeholder="Nombre usuario portal" value={nuevaCuenta.usuario_nombre} onChange={(e) => actualizarNuevaCuenta("usuario_nombre", e.target.value)} />
-            <input className={inputClass} placeholder="Email de login portal" value={nuevaCuenta.usuario_email} onChange={(e) => actualizarNuevaCuenta("usuario_email", e.target.value)} />
+            <input
+              className={inputClass}
+              placeholder="Email de acceso"
+              value={nuevaCuenta.usuario_email}
+              onChange={(e) => {
+                const email = e.target.value;
+                actualizarNuevaCuenta("usuario_email", email);
+                if (!nuevaCuenta.usuario_username) {
+                  actualizarNuevaCuenta("usuario_username", sugerirUsernameDesdeEmail(email));
+                }
+              }}
+            />
+            <input className={inputClass} placeholder="Usuario de acceso (opcional)" value={nuevaCuenta.usuario_username} onChange={(e) => actualizarNuevaCuenta("usuario_username", e.target.value)} />
             <input className={inputClass} type="password" placeholder="Password inicial" value={nuevaCuenta.usuario_password} onChange={(e) => actualizarNuevaCuenta("usuario_password", e.target.value)} />
             <input className={inputClass} placeholder="Observaciones" value={nuevaCuenta.observaciones} onChange={(e) => actualizarNuevaCuenta("observaciones", e.target.value)} />
           </div>
@@ -620,7 +645,7 @@ function PortalAdminPage() {
               <article key={cuenta.id} className="border-2 border-black p-4">
                 <p className="text-sm font-black uppercase">{cuenta.nombre_taller}</p>
                 <p className="mt-2 text-xs font-bold text-gray-500">
-                  Email cuenta/taller: {cuenta.email || "No registrado"}
+                  Correo empresa/contacto: {cuenta.email || "No registrado"}
                 </p>
                 <p className="text-xs font-bold text-gray-500">
                   Contacto: {cuenta.contacto || cuenta.telefono || "Sin contacto"}
@@ -654,7 +679,7 @@ function PortalAdminPage() {
                   <div className="mt-3 grid grid-cols-1 gap-2">
                     <input className={inputClass} placeholder="Nombre taller" value={edicionCuenta[cuenta.id]?.nombre_taller ?? cuenta.nombre_taller ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "nombre_taller", e.target.value)} />
                     <input className={inputClass} placeholder="Contacto" value={edicionCuenta[cuenta.id]?.contacto ?? cuenta.contacto ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "contacto", e.target.value)} />
-                    <input className={inputClass} placeholder="Email cuenta/taller" value={edicionCuenta[cuenta.id]?.email ?? cuenta.email ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "email", e.target.value)} />
+                    <input className={inputClass} placeholder="Correo empresa/contacto" value={edicionCuenta[cuenta.id]?.email ?? cuenta.email ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "email", e.target.value)} />
                     <input className={inputClass} placeholder="Teléfono" value={edicionCuenta[cuenta.id]?.telefono ?? cuenta.telefono ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "telefono", e.target.value)} />
                     <input className={inputClass} placeholder="País" value={edicionCuenta[cuenta.id]?.pais ?? cuenta.pais ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "pais", e.target.value)} />
                     <input className={inputClass} placeholder="Ciudad" value={edicionCuenta[cuenta.id]?.ciudad ?? cuenta.ciudad ?? ""} onChange={(e) => actualizarEdicionCuenta(cuenta.id, "ciudad", e.target.value)} />
@@ -721,7 +746,7 @@ function PortalAdminPage() {
                             {usuario.nombre || "Usuario portal"}
                           </p>
                           <p className="text-xs font-bold text-gray-700">
-                            Email de login portal:{" "}
+                            Email de acceso:{" "}
                             {usuario.email ? (
                               <a href={`mailto:${usuario.email}`} className="text-blue-700 underline">
                                 {usuario.email}
@@ -729,6 +754,9 @@ function PortalAdminPage() {
                             ) : (
                               "No registrado"
                             )}
+                          </p>
+                          <p className="text-xs font-bold text-gray-700">
+                            Usuario de acceso: {usuario.username || "No registrado"}
                           </p>
                           <p className="text-[10px] font-black uppercase">
                             {usuario.activo ? "Activo" : "Inactivo"} / {usuario.aprobado ? "Aprobado" : "Pendiente"}
@@ -758,9 +786,15 @@ function PortalAdminPage() {
                               />
                               <input
                                 className={inputClass}
-                                placeholder="Email de login portal"
+                                placeholder="Email de acceso"
                                 value={edicionUsuario[usuario.id]?.email ?? usuario.email ?? ""}
                                 onChange={(e) => actualizarEdicionUsuario(usuario.id, "email", e.target.value)}
+                              />
+                              <input
+                                className={inputClass}
+                                placeholder="Usuario de acceso (opcional)"
+                                value={edicionUsuario[usuario.id]?.username ?? usuario.username ?? ""}
+                                onChange={(e) => actualizarEdicionUsuario(usuario.id, "username", e.target.value)}
                               />
                             </div>
                             <button
@@ -843,9 +877,21 @@ function PortalAdminPage() {
                     />
                     <input
                       className={inputClass}
-                      placeholder="Email de login portal"
+                      placeholder="Email de acceso"
                       value={nuevoUsuarioPorCuenta[cuenta.id]?.email || ""}
-                      onChange={(e) => actualizarNuevoUsuario(cuenta.id, "email", e.target.value)}
+                      onChange={(e) => {
+                        const email = e.target.value;
+                        actualizarNuevoUsuario(cuenta.id, "email", email);
+                        if (!nuevoUsuarioPorCuenta[cuenta.id]?.username) {
+                          actualizarNuevoUsuario(cuenta.id, "username", sugerirUsernameDesdeEmail(email));
+                        }
+                      }}
+                    />
+                    <input
+                      className={inputClass}
+                      placeholder="Usuario de acceso (opcional)"
+                      value={nuevoUsuarioPorCuenta[cuenta.id]?.username || ""}
+                      onChange={(e) => actualizarNuevoUsuario(cuenta.id, "username", e.target.value)}
                     />
                     <input
                       className={inputClass}

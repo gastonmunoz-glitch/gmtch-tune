@@ -24,7 +24,7 @@ const LogoPortal = () => {
 };
 
 function PortalLoginPage() {
-  const [email, setEmail] = useState("");
+  const [identificador, setIdentificador] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
@@ -35,8 +35,8 @@ function PortalLoginPage() {
     setError("");
     setMensaje("");
 
-    if (!email.trim() || !password.trim()) {
-      setError("Debes ingresar email y contraseña.");
+    if (!identificador.trim() || !password.trim()) {
+      setError("Debes ingresar email o usuario y contraseña.");
       return;
     }
 
@@ -44,7 +44,7 @@ function PortalLoginPage() {
 
     try {
       setCargando(true);
-      const data = await portalLogin(email.trim(), password);
+      const data = await portalLogin(identificador.trim(), password);
       const portalToken = data?.portalToken || data?.token || data?.accessToken;
 
       if (!portalToken) {
@@ -65,7 +65,7 @@ function PortalLoginPage() {
     } catch (err) {
       if (err.status === 401) {
         setError(
-          "Credenciales inválidas. Recuerda usar el Email de login portal, no el email de la cuenta/taller."
+          "Credenciales inválidas. Usa el Email de acceso o Usuario de acceso del portal."
         );
       } else if (
         err.name === "TypeError" ||
@@ -127,14 +127,15 @@ function PortalLoginPage() {
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <label className="block">
               <span className="text-xs font-black uppercase text-slate-400">
-                Email
+                Email o usuario
               </span>
               <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                type="text"
+                value={identificador}
+                onChange={(event) => setIdentificador(event.target.value)}
+                placeholder="correo@taller.com o usuario"
                 className="mt-2 w-full border border-slate-700 bg-black px-4 py-3 text-sm font-bold text-white outline-none focus:border-blue-500"
-                autoComplete="email"
+                autoComplete="username"
               />
             </label>
 

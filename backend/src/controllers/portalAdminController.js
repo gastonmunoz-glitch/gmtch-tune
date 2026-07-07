@@ -31,6 +31,51 @@ const limpiarTexto = (valor) => {
   return String(valor).trim();
 };
 
+const normalizarUsername = (valor) => {
+  const texto = limpiarTexto(valor).toLowerCase();
+  return texto || null;
+};
+
+let columnasPortalUsuarioPreparadas = false;
+
+const prepararColumnasPortalUsuario = async () => {
+  if (columnasPortalUsuarioPreparadas) return;
+
+  await sequelize.query(`
+    ALTER TABLE portal_usuarios
+    ADD COLUMN IF NOT EXISTS username VARCHAR(120);
+  `);
+
+  await sequelize.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS portal_usuarios_username_lower_unique
+    ON portal_usuarios (LOWER(username))
+    WHERE username IS NOT NULL AND username <> '';
+  `);
+
+  columnasPortalUsuarioPreparadas = true;
+};
+
+const validarUsernameUnico = async (username, usuarioIdExcluir = null) => {
+  const normalizado = normalizarUsername(username);
+  if (!normalizado) return null;
+
+  const where = { username: normalizado };
+
+  if (usuarioIdExcluir) {
+    where.id = { [Op.ne]: usuarioIdExcluir };
+  }
+
+  const existente = await PortalUsuario.findOne({ where });
+
+  if (existente) {
+    const error = new Error("Ya existe un usuario portal con ese usuario de acceso");
+    error.status = 409;
+    throw error;
+  }
+
+  return normalizado;
+};
+
 const normalizarMonto = (valor, defecto = 0) => {
   const numero = Number(valor);
   if (!Number.isFinite(numero)) return defecto;
@@ -185,6 +230,7 @@ const mapearUsuarioAdmin = (usuario) => {
     cuentaId: usuario.cuentaId,
     nombre: usuario.nombre,
     email: usuario.email,
+    username: usuario.username || null,
     activo: usuario.activo,
     aprobado: usuario.aprobado,
     last_login_at: usuario.last_login_at,
@@ -270,6 +316,8 @@ const mapearFileAdmin = (archivo) => {
 
 const crearCuenta = async (req, res) => {
   try {
+    await prepararColumnasPortalUsuario();
+
     const nombreTaller = limpiarTexto(req.body.nombre_taller);
 
     if (!nombreTaller) {
@@ -287,11 +335,14 @@ const crearCuenta = async (req, res) => {
     const usuarioNombre = limpiarTexto(
       req.body.usuario_nombre || req.body.nombre_usuario
     );
+    const username = await validarUsernameUnico(
+      req.body.usuario_username || req.body.username
+    );
 
     if (!usuarioEmail || !usuarioPassword || !usuarioNombre) {
       return res.status(400).json({
         error:
-          "Para crear cuenta portal debes enviar usuario_nombre, usuario_email y usuario_password. Ese email sera el login del portal.",
+          "Para crear cuenta portal debes enviar usuario_nombre, usuario_email y usuario_password. El username es opcional.",
       });
     }
 
@@ -301,7 +352,7 @@ const crearCuenta = async (req, res) => {
 
     if (usuarioExistente) {
       return res.status(409).json({
-        error: "Ya existe un usuario portal con ese email de login",
+        error: "Ya existe un usuario portal con ese email de acceso",
       });
     }
 
@@ -337,6 +388,7 @@ const crearCuenta = async (req, res) => {
           cuentaId: cuenta.id,
           nombre: usuarioNombre,
           email: usuarioEmail,
+          username,
           password: usuarioPasswordHash,
           activo: true,
           aprobado: true,
@@ -363,6 +415,7 @@ const crearCuenta = async (req, res) => {
       metadata: {
         cuenta_email: resultado.cuenta.email,
         usuario_email: resultado.usuario.email,
+        username: resultado.usuario.username || null,
       },
       creado_por: usuarioInternoActual(req),
     });
@@ -374,6 +427,8 @@ const crearCuenta = async (req, res) => {
 
 const listarCuentas = async (req, res) => {
   try {
+    await prepararColumnasPortalUsuario();
+
     const cuentas = await PortalCuenta.findAll({
       include: [
         {
@@ -384,6 +439,7 @@ const listarCuentas = async (req, res) => {
             "cuentaId",
             "nombre",
             "email",
+            "username",
             "activo",
             "aprobado",
             "last_login_at",
@@ -491,6 +547,8 @@ const editarCuenta = async (req, res) => {
 
 const crearUsuarioCuenta = async (req, res) => {
   try {
+    await prepararColumnasPortalUsuario();
+
     const cuenta = await PortalCuenta.findByPk(req.params.id);
 
     if (!cuenta) {
@@ -502,6 +560,7 @@ const crearUsuarioCuenta = async (req, res) => {
     const nombre = limpiarTexto(req.body.nombre || req.body.usuario_nombre);
     const email = limpiarTexto(req.body.email || req.body.usuario_email).toLowerCase();
     const password = limpiarTexto(req.body.password || req.body.usuario_password);
+    const username = await validarUsernameUnico(req.body.username || req.body.usuario_username);
 
     if (!nombre || !email || !password) {
       return res.status(400).json({
@@ -515,7 +574,7 @@ const crearUsuarioCuenta = async (req, res) => {
 
     if (existente) {
       return res.status(409).json({
-        error: "Ya existe un usuario portal con ese email de login",
+        error: "Ya existe un usuario portal con ese email de acceso",
       });
     }
 
@@ -525,6 +584,7 @@ const crearUsuarioCuenta = async (req, res) => {
       cuentaId: cuenta.id,
       nombre,
       email,
+      username,
       password: passwordHash,
       activo: true,
       aprobado: true,
@@ -542,7 +602,7 @@ const crearUsuarioCuenta = async (req, res) => {
       tipo: "USUARIO_PORTAL_CREADO",
       resultado: "OK",
       descripcion: "Usuario portal creado en cuenta existente",
-      metadata: { email: usuario.email },
+      metadata: { email: usuario.email, username: usuario.username || null },
       creado_por: usuarioInternoActual(req),
     });
   } catch (error) {
@@ -553,6 +613,8 @@ const crearUsuarioCuenta = async (req, res) => {
 
 const editarUsuarioPortal = async (req, res) => {
   try {
+    await prepararColumnasPortalUsuario();
+
     const usuario = await PortalUsuario.findByPk(req.params.id);
 
     if (!usuario) {
@@ -574,7 +636,7 @@ const editarUsuarioPortal = async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(req.body, "email")) {
       const email = limpiarTexto(req.body.email).toLowerCase();
       if (!email) {
-        return res.status(400).json({ error: "Email de login portal obligatorio" });
+        return res.status(400).json({ error: "Email de acceso obligatorio" });
       }
 
       const existente = await PortalUsuario.findOne({
@@ -595,6 +657,10 @@ const editarUsuarioPortal = async (req, res) => {
       payload.email = email;
     }
 
+    if (Object.prototype.hasOwnProperty.call(req.body, "username")) {
+      payload.username = await validarUsernameUnico(req.body.username, usuario.id);
+    }
+
     if (Object.prototype.hasOwnProperty.call(req.body, "activo")) {
       payload.activo = normalizarBoolean(req.body.activo, usuario.activo);
     }
@@ -612,7 +678,11 @@ const editarUsuarioPortal = async (req, res) => {
       tipo: "USUARIO_PORTAL_EDITADO",
       resultado: "OK",
       descripcion: "Usuario portal editado por admin",
-      metadata: { campos: Object.keys(payload), email: usuario.email },
+      metadata: {
+        campos: Object.keys(payload),
+        email: usuario.email,
+        username: usuario.username || null,
+      },
       creado_por: usuarioInternoActual(req),
     });
 
@@ -829,6 +899,7 @@ const listarFilesAdmin = async (req, res) => {
             "cuentaId",
             "nombre",
             "email",
+            "username",
             "activo",
             "aprobado",
             "last_login_at",
@@ -863,6 +934,7 @@ const obtenerFileAdmin = async (req, res) => {
             "cuentaId",
             "nombre",
             "email",
+            "username",
             "activo",
             "aprobado",
             "last_login_at",
