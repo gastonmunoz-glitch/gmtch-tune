@@ -11,6 +11,7 @@ const {
   cumplimientoOperativo,
   misPendientes,
   tiemposOperativos,
+  cierreDiario,
   guardiaOperativa,
   revisionFinanzas,
   revisionMaterialRecuperado,
@@ -48,6 +49,11 @@ router.get(
   "/cumplimiento-operativo",
   permitirRoles("OWNER", "ADMIN", "SUPERVISOR"),
   cumplimientoOperativo
+);
+router.get(
+  "/cierre-diario",
+  permitirRoles("OWNER", "ADMIN", "SUPERVISOR"),
+  cierreDiario
 );
 router.post("/reporte-apertura", permitirRoles("OWNER", "ADMIN"), reporteApertura);
 router.post("/reporte-cierre", permitirRoles("OWNER", "ADMIN"), reporteCierre);

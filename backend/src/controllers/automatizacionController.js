@@ -2270,6 +2270,328 @@ const crearTiemposOperativosData = (ctx) => {
   };
 };
 
+const esCriticoCierreDiario = (item = {}) => {
+  const severidad = upper(item.severidad || item.tipo || item.prioridad);
+  const prioridad = upper(item.prioridad);
+  return ["CRITICO", "URGENTE", "ALTA"].includes(severidad) || ["URGENTE", "ALTA"].includes(prioridad);
+};
+
+const normalizarPendienteCierreDiario = (item = {}, fallback = {}) => ({
+  tipo: item.tipo || fallback.tipo || "PENDIENTE_OPERATIVO",
+  severidad: item.severidad || item.tipo || fallback.severidad || "ATENCION",
+  titulo: item.titulo || fallback.titulo || "Pendiente operativo",
+  descripcion:
+    item.descripcion ||
+    item.mensaje ||
+    item.motivo ||
+    fallback.descripcion ||
+    "Requiere revision antes de cerrar la jornada.",
+  ordenId: item.ordenId || item.orden_id || fallback.ordenId || null,
+  archivoECUId: item.archivoECUId || item.archivo_ecu_id || fallback.archivoECUId || null,
+  usuario_responsable:
+    item.usuario_responsable ||
+    item.responsable_principal ||
+    item.responsable ||
+    fallback.usuario_responsable ||
+    "Sin responsable",
+  accion_url:
+    item.accion_url ||
+    fallback.accion_url ||
+    (item.archivoECUId
+      ? `/archivos-ecu?archivoId=${item.archivoECUId}`
+      : item.ordenId
+        ? `/ordenes?ordenId=${item.ordenId}`
+        : null),
+});
+
+const agregarPendienteCierreDiario = (mapa, item = {}, fallback = {}) => {
+  const pendiente = normalizarPendienteCierreDiario(item, fallback);
+  const clave = [
+    pendiente.tipo,
+    pendiente.ordenId || "sin-orden",
+    pendiente.archivoECUId || "sin-file",
+    pendiente.titulo,
+  ].join("-");
+
+  if (!mapa.has(clave)) {
+    mapa.set(clave, pendiente);
+  }
+};
+
+const datosBasicosOrdenCierre = (orden = {}) => ({
+  cliente: orden._cliente?.nombre || "Cliente no registrado",
+  vehiculo: orden._vehiculo?.patente
+    ? `${orden._vehiculo.patente} ${orden._vehiculo.marca || ""} ${orden._vehiculo.modelo || ""}`.trim()
+    : "Vehiculo no registrado",
+});
+
+const crearCierreDiarioData = (ctx) => {
+  const ahora = new Date();
+  // V1 usa dia local del servidor. Si Railway queda en UTC, ajustar V1.1 a timezone America/Santiago.
+  const desdeHoy = inicioDia(ahora);
+  const cumplimiento = crearCumplimientoOperativoData(ctx);
+  const tiempos = crearTiemposOperativosData(ctx);
+  const reporte = crearReporteData(ctx, "CIERRE_DIA");
+  const pendientesMap = new Map();
+
+  const ordenesActivas = ctx.ordenes.filter(
+    (orden) => upper(orden.estado) !== "ENTREGADO" && !booleano(orden.archivada)
+  );
+  const archivosActivos = ctx.archivos.filter(esArchivoActivo);
+  const ordenesCreadasHoy = ctx.ordenes.filter((orden) => dentroDesde(orden.createdAt, desdeHoy));
+  const ordenesEntregadasHoy = ctx.ordenes.filter(
+    (orden) =>
+      upper(orden.estado) === "ENTREGADO" &&
+      (dentroDesde(orden.entregado_at, desdeHoy) || dentroDesde(orden.updatedAt, desdeHoy))
+  );
+  const listasSinEntrega = ordenesActivas.filter(
+    (orden) => upper(orden.estado) === "LISTO_PARA_ENTREGA"
+  );
+  const pagosPendientes = ordenesActivas.filter((orden) => upper(orden.estado_pago) !== "PAGADO");
+  const recepcionesEmergenciaHoy = ctx.ordenes.filter(
+    (orden) =>
+      upper(orden.origen_recepcion) === "RECEPCION_EMERGENCIA_OPERADOR" &&
+      dentroDesde(orden.createdAt, desdeHoy)
+  );
+  const fileServiceSinPostEscritura = archivosActivos.filter((archivo) => {
+    const estado = upper(archivo.estado);
+    return (
+      upper(archivo.post_escritura_estado) !== "OK" &&
+      (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(estado) ||
+        Boolean(archivo.archivo_modificado))
+    );
+  });
+  const fileServiceSinCierreTecnico = archivosActivos.filter(
+    (archivo) =>
+      booleano(archivo.cierre_tecnico_obligatorio) &&
+      !fechaValida(archivo.cierre_tecnico_at)
+  );
+
+  listasSinEntrega.forEach((orden) => {
+    agregarPendienteCierreDiario(
+      pendientesMap,
+      {
+        tipo: "LISTA_SIN_ENTREGA",
+        severidad: "ATENCION",
+        titulo: `Orden #${orden.id} lista sin entregar`,
+        descripcion: "Orden lista para entrega debe revisarse antes del cierre del dia.",
+        ordenId: orden.id,
+        usuario_responsable: orden.recepcionado_por || "RECEPCION",
+        accion_url: `/ordenes?ordenId=${orden.id}#entrega`,
+      }
+    );
+  });
+
+  pagosPendientes
+    .filter((orden) => upper(orden.estado) === "LISTO_PARA_ENTREGA")
+    .forEach((orden) => {
+      agregarPendienteCierreDiario(
+        pendientesMap,
+        {
+          tipo: "PAGO_PENDIENTE",
+          severidad: "CRITICO",
+          titulo: `Pago pendiente Orden #${orden.id}`,
+          descripcion: "No cerrar el dia sin revisar pago pendiente asociado a entrega.",
+          ordenId: orden.id,
+          usuario_responsable: orden.recepcionado_por || "RECEPCION",
+          accion_url: `/ordenes?ordenId=${orden.id}#pago`,
+        }
+      );
+    });
+
+  fileServiceSinPostEscritura.forEach((archivo) => {
+    agregarPendienteCierreDiario(
+      pendientesMap,
+      {
+        tipo: "FILE_SERVICE_SIN_POST_ESCRITURA",
+        severidad: "ATENCION",
+        titulo: `File Service #${archivo.id} sin post escritura OK`,
+        descripcion: "Registrar post escritura o dejar continuidad clara para manana.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        usuario_responsable: responsableArchivoSLA(archivo),
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+      }
+    );
+  });
+
+  fileServiceSinCierreTecnico.forEach((archivo) => {
+    agregarPendienteCierreDiario(
+      pendientesMap,
+      {
+        tipo: "FILE_SERVICE_SIN_CIERRE_TECNICO",
+        severidad: ["CRITICO", "ESCALADO"].includes(upper(archivo.proceso_guard_estado))
+          ? "CRITICO"
+          : "ATENCION",
+        titulo: `File Service #${archivo.id} sin cierre tecnico`,
+        descripcion: "Process Guard requiere cierre tecnico, correccion o continuidad documentada.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        usuario_responsable: responsableArchivoSLA(archivo),
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+      }
+    );
+  });
+
+  (cumplimiento.material_pendiente || []).forEach((item) => {
+    agregarPendienteCierreDiario(
+      pendientesMap,
+      {
+        ...item,
+        tipo: "MATERIAL_OBLIGATORIO_PENDIENTE",
+        severidad: "ATENCION",
+        titulo: `Material pendiente Orden #${item.ordenId}`,
+        descripcion: item.motivo || "Debe registrar peso o motivo de excepcion.",
+        accion_url: `/ordenes?ordenId=${item.ordenId}#material`,
+      }
+    );
+  });
+
+  (cumplimiento.ordenes_con_pendientes || []).forEach((orden) => {
+    if (orden.pendientes?.includes("SIN_FOTOS")) {
+      agregarPendienteCierreDiario(
+        pendientesMap,
+        {
+          tipo: "ORDEN_SIN_FOTOS",
+          severidad: "ATENCION",
+          titulo: `Orden #${orden.ordenId} sin fotos`,
+          descripcion: "Completar evidencia fotografica o registrar motivo antes de cerrar la jornada.",
+          ordenId: orden.ordenId,
+          usuario_responsable: orden.recepcionado_por || "Sin responsable",
+          accion_url: `/fotos?ordenId=${orden.ordenId}`,
+        }
+      );
+    }
+
+    if (orden.pendientes?.includes("SIN_ITEMS")) {
+      agregarPendienteCierreDiario(
+        pendientesMap,
+        {
+          tipo: "ORDEN_SIN_ITEMS",
+          severidad: "ATENCION",
+          titulo: `Orden #${orden.ordenId} sin items`,
+          descripcion: "La orden debe tener al menos un item/servicio para trazabilidad comercial-operativa.",
+          ordenId: orden.ordenId,
+          usuario_responsable: orden.recepcionado_por || "Sin responsable",
+          accion_url: `/ordenes?ordenId=${orden.ordenId}#items`,
+        }
+      );
+    }
+
+    if (orden.pendientes?.includes("RECEPCION_EMERGENCIA")) {
+      agregarPendienteCierreDiario(
+        pendientesMap,
+        {
+          tipo: "RECEPCION_EMERGENCIA",
+          severidad: "SEGUIMIENTO",
+          titulo: `Recepcion emergencia Orden #${orden.ordenId}`,
+          descripcion: "Verificar que la recepcion de emergencia tenga evidencia e items claros.",
+          ordenId: orden.ordenId,
+          usuario_responsable: orden.recepcionado_por || "Sin responsable",
+          accion_url: `/ordenes?ordenId=${orden.ordenId}`,
+        }
+      );
+    }
+
+    if (orden.pendientes?.includes("SIN_FEEDBACK")) {
+      agregarPendienteCierreDiario(
+        pendientesMap,
+        {
+          tipo: "ORDEN_SIN_FEEDBACK",
+          severidad: "SEGUIMIENTO",
+          titulo: `Orden #${orden.ordenId} sin feedback operativo`,
+          descripcion: "Si el trabajo continua o quedo tecnico, dejar feedback operativo.",
+          ordenId: orden.ordenId,
+          usuario_responsable: orden.recepcionado_por || "Sin responsable",
+          accion_url: `/ordenes?ordenId=${orden.ordenId}#feedback`,
+        }
+      );
+    }
+  });
+
+  (tiempos.alertas_tiempo || []).forEach((item) => {
+    if (esCriticoCierreDiario(item)) {
+      agregarPendienteCierreDiario(pendientesMap, item, {
+        tipo: item.tipo || "SLA_CRITICO",
+        severidad: item.severidad || "CRITICO",
+      });
+    }
+  });
+
+  const pendientes_para_cerrar_dia = [...pendientesMap.values()].sort(
+    (a, b) => prioridadPendiente(b) - prioridadPendiente(a)
+  );
+  const idsPendientes = new Set(
+    pendientes_para_cerrar_dia
+      .map((item) => item.ordenId)
+      .filter(Boolean)
+      .map(String)
+  );
+  const archivosPendientes = new Set(
+    pendientes_para_cerrar_dia
+      .map((item) => item.archivoECUId)
+      .filter(Boolean)
+      .map(String)
+  );
+  const continuarOrdenes = ordenesActivas
+    .filter((orden) => !idsPendientes.has(String(orden.id)))
+    .map((orden) => ({
+      tipo: "ORDEN_CONTINUA",
+      titulo: `Orden #${orden.id} continua manana`,
+      descripcion: `Estado actual: ${orden.estado || "SIN_ESTADO"}`,
+      ordenId: orden.id,
+      usuario_responsable: responsableOrdenSLA(orden),
+      accion_url: `/ordenes?ordenId=${orden.id}`,
+      ...datosBasicosOrdenCierre(orden),
+    }));
+  const continuarArchivos = archivosActivos
+    .filter((archivo) => !archivosPendientes.has(String(archivo.id)))
+    .map((archivo) => ({
+      tipo: "FILE_SERVICE_CONTINUA",
+      titulo: `File Service #${archivo.id} continua manana`,
+      descripcion: `Estado actual: ${archivo.estado || "SIN_ESTADO"}`,
+      ordenId: archivo.ordenId || null,
+      archivoECUId: archivo.id,
+      usuario_responsable: responsableArchivoSLA(archivo),
+      accion_url: `/archivos-ecu?archivoId=${archivo.id}`,
+    }));
+
+  const resumen = {
+    ordenes_creadas_hoy: ordenesCreadasHoy.length,
+    ordenes_entregadas_hoy: ordenesEntregadasHoy.length,
+    ordenes_activas: ordenesActivas.length,
+    listas_sin_entrega: listasSinEntrega.length,
+    pagos_pendientes: pagosPendientes.length,
+    file_service_pendiente: archivosActivos.length,
+    file_service_sin_post_escritura: fileServiceSinPostEscritura.length,
+    file_service_sin_cierre_tecnico: fileServiceSinCierreTecnico.length,
+    material_pendiente: cumplimiento.resumen?.items_material_pendiente || 0,
+    ordenes_sin_fotos: cumplimiento.resumen?.ordenes_sin_fotos || 0,
+    ordenes_sin_items: cumplimiento.resumen?.ordenes_sin_items || 0,
+    recepciones_emergencia_hoy: recepcionesEmergenciaHoy.length,
+    pendientes_criticos: pendientes_para_cerrar_dia.filter(esCriticoCierreDiario).length,
+  };
+
+  return {
+    generado_at: new Date().toISOString(),
+    fecha: desdeHoy.toISOString().slice(0, 10),
+    resumen,
+    pendientes_para_cerrar_dia: pendientes_para_cerrar_dia.slice(0, 100),
+    continuar_manana: [...continuarOrdenes, ...continuarArchivos].slice(0, 100),
+    alertas: [
+      ...(reporte.alertas || []).map((item) => ({
+        tipo: item.prioridad || "ATENCION",
+        titulo: item.titulo || "Alerta operativa",
+        mensaje: item.detalle || item.mensaje || item.descripcion || "",
+        accion_url: item.accion_url || null,
+      })),
+      ...(tiempos.alertas_tiempo || []).slice(0, 20),
+    ].slice(0, 50),
+    responsables_con_pendientes: (cumplimiento.usuarios || []).slice(0, 50),
+    solo_lectura: true,
+  };
+};
+
 const crearIdentidadDesdeUsuario = (usuario = {}) => {
   const id = limpiarTexto(usuario.id);
   const username = limpiarTexto(usuario.username);
@@ -2915,6 +3237,21 @@ const tiemposOperativos = async (req, res) => {
   }
 };
 
+const cierreDiario = async (req, res) => {
+  try {
+    const ctx = await cargarContexto();
+    const resultado = crearCierreDiarioData(ctx);
+
+    return res.json(resultado);
+  } catch (error) {
+    console.error("ERROR CIERRE DIARIO OPERATIVO:", error);
+    return res.status(500).json({
+      error: "No se pudo cargar cierre diario operativo.",
+      detalle: process.env.NODE_ENV === "production" ? undefined : error.message,
+    });
+  }
+};
+
 const revisarProcessGuard = async (req, res) => {
   try {
     const ctx = await cargarContexto();
@@ -3048,6 +3385,7 @@ module.exports = {
   cumplimientoOperativo,
   misPendientes,
   tiemposOperativos,
+  cierreDiario,
   guardiaOperativa,
   verificarGuardiaOperativaUsuario: verificarGuardiaOperativaUsuarioService,
   revisionFinanzas,

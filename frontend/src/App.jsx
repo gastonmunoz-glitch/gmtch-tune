@@ -1932,6 +1932,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
   const mostrarTiemposOperativos = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
     rol
   );
+  const mostrarCierreDiario = ["OWNER", "ADMIN", "SUPERVISOR"].includes(rol);
   const mostrarMisPendientes = puedeVerOperacion(usuario);
   const puedeGenerarReportesAutomatizacion = ["OWNER", "ADMIN"].includes(
     rol
@@ -2015,6 +2016,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     error: "",
   });
   const [tiemposOperativos, setTiemposOperativos] = useState({
+    data: null,
+    error: "",
+  });
+  const [cierreDiario, setCierreDiario] = useState({
     data: null,
     error: "",
   });
@@ -3374,6 +3379,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         mostrarTiemposOperativos
           ? api.get("/automatizaciones/tiempos-operativos")
           : Promise.resolve({ data: null }),
+        mostrarCierreDiario
+          ? api.get("/automatizaciones/cierre-diario")
+          : Promise.resolve({ data: null }),
         mostrarMisPendientes
           ? api.get("/automatizaciones/mis-pendientes")
           : Promise.resolve({ data: null }),
@@ -3389,6 +3397,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         leadsRes,
         cumplimientoRes,
         tiemposOperativosRes,
+        cierreDiarioRes,
         misPendientesRes,
       ] =
         respuestas;
@@ -3414,6 +3423,10 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       const tiemposOperativosData =
         tiemposOperativosRes.status === "fulfilled"
           ? tiemposOperativosRes.value?.data || null
+          : null;
+      const cierreDiarioData =
+        cierreDiarioRes.status === "fulfilled"
+          ? cierreDiarioRes.value?.data || null
           : null;
       const misPendientesData =
         misPendientesRes.status === "fulfilled"
@@ -3447,6 +3460,14 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         error:
           mostrarTiemposOperativos && tiemposOperativosRes.status !== "fulfilled"
             ? "No se pudo cargar tiempos operativos."
+            : "",
+      });
+
+      setCierreDiario({
+        data: cierreDiarioData,
+        error:
+          mostrarCierreDiario && cierreDiarioRes.status !== "fulfilled"
+            ? "No se pudo cargar cierre diario operativo."
             : "",
       });
 
@@ -3625,6 +3646,13 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         <TiemposMuertosSection
           data={tiemposOperativos.data}
           error={tiemposOperativos.error}
+        />
+      )}
+
+      {mostrarCierreDiario && (
+        <CierreDiarioOperativoSection
+          data={cierreDiario.data}
+          error={cierreDiario.error}
         />
       )}
 
@@ -4047,6 +4075,225 @@ const TiemposMuertosSection = ({ data, error }) => {
                     </span>
                   )}
                 </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </section>
+  );
+};
+
+const totalPendientesResponsableCierre = (responsable = {}) =>
+  numeroDashboard(responsable.ordenes_pendientes) +
+  numeroDashboard(responsable.file_service_pendientes) +
+  numeroDashboard(responsable.material_pendiente) +
+  numeroDashboard(responsable.cobros_pendientes_asociados);
+
+const CierreDiarioOperativoSection = ({ data, error }) => {
+  const resumen = data?.resumen || {};
+  const pendientes = Array.isArray(data?.pendientes_para_cerrar_dia)
+    ? data.pendientes_para_cerrar_dia.slice(0, 8)
+    : [];
+  const continuar = Array.isArray(data?.continuar_manana)
+    ? data.continuar_manana.slice(0, 8)
+    : [];
+  const responsables = Array.isArray(data?.responsables_con_pendientes)
+    ? data.responsables_con_pendientes.slice(0, 8)
+    : [];
+  const tarjetas = [
+    ["Creadas hoy", resumen.ordenes_creadas_hoy, "border-blue-500"],
+    ["Entregadas hoy", resumen.ordenes_entregadas_hoy, "border-emerald-500"],
+    ["Activas", resumen.ordenes_activas, "border-slate-500"],
+    ["Listas sin entregar", resumen.listas_sin_entrega, "border-red-600"],
+    ["Pagos pendientes", resumen.pagos_pendientes, "border-red-700"],
+    ["File Service pendiente", resumen.file_service_pendiente, "border-blue-600"],
+    ["FS sin post escritura", resumen.file_service_sin_post_escritura, "border-amber-500"],
+    ["FS sin cierre técnico", resumen.file_service_sin_cierre_tecnico, "border-red-500"],
+    ["Material pendiente", resumen.material_pendiente, "border-orange-500"],
+    ["Sin fotos", resumen.ordenes_sin_fotos, "border-purple-500"],
+    ["Sin ítems", resumen.ordenes_sin_items, "border-amber-600"],
+    ["Emergencias del día", resumen.recepciones_emergencia_hoy, "border-sky-500"],
+  ];
+
+  return (
+    <section className="rounded-3xl border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
+            Cierre diario operativo
+          </p>
+          <h2 className="mt-1 text-2xl font-black uppercase text-black">
+            Revisión de jornada · solo lectura
+          </h2>
+          <p className="mt-2 text-xs font-bold uppercase text-gray-500">
+            Panel de control para revisar pendientes antes de terminar el día. No modifica datos.
+          </p>
+        </div>
+        <p className="text-[10px] font-black uppercase text-gray-400">
+          Fecha: {data?.fecha || "Hoy"} · Generado:{" "}
+          {data?.generado_at ? formatoFechaCorta(data.generado_at) : "Pendiente"}
+        </p>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-50 p-3 text-xs font-black uppercase text-red-800">
+          {error}
+        </div>
+      )}
+
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        {tarjetas.map(([label, valor, color]) => (
+          <div key={label} className={`rounded-2xl border-4 ${color} bg-slate-50 p-4`}>
+            <p className="text-[10px] font-black uppercase text-gray-500">{label}</p>
+            <p className="mt-2 text-3xl font-black text-black">
+              {numeroDashboard(valor)}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="rounded-2xl border-4 border-red-700 bg-red-50 p-4 xl:col-span-2">
+          <h3 className="text-sm font-black uppercase text-red-900">
+            No cerrar el día sin revisar
+          </h3>
+          <div className="mt-3 space-y-3">
+            {pendientes.length === 0 ? (
+              <p className="rounded-xl border-2 border-emerald-500 bg-white p-3 text-xs font-black uppercase text-emerald-800">
+                Sin pendientes críticos de cierre diario.
+              </p>
+            ) : (
+              pendientes.map((pendiente) => (
+                <div
+                  key={`${pendiente.tipo}-${pendiente.ordenId || "sin-orden"}-${pendiente.archivoECUId || "sin-file"}-${pendiente.titulo}`}
+                  className={`rounded-2xl border-4 p-4 ${tiempoSeveridadClass(
+                    pendiente.severidad
+                  )}`}
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-black px-3 py-1 text-[10px] font-black uppercase text-white">
+                          {pendiente.severidad || "ATENCION"}
+                        </span>
+                        <span className="text-[10px] font-black uppercase opacity-70">
+                          {pendiente.tipo}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm font-black uppercase">
+                        {pendiente.titulo || "Pendiente de cierre diario"}
+                      </p>
+                      <p className="mt-1 text-xs font-bold opacity-80">
+                        {pendiente.descripcion || pendiente.mensaje || "Requiere revisión operativa."}
+                      </p>
+                      <p className="mt-2 text-[10px] font-black uppercase opacity-75">
+                        Orden #{pendiente.ordenId || "-"} · File #{pendiente.archivoECUId || "-"} ·{" "}
+                        {pendiente.usuario_responsable || "Sin responsable"}
+                      </p>
+                    </div>
+                    {pendiente.accion_url ? (
+                      <Link
+                        to={pendiente.accion_url}
+                        className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-[10px] font-black uppercase text-white transition hover:bg-blue-700"
+                      >
+                        {labelAccionTiempo(pendiente.accion_url)}
+                      </Link>
+                    ) : (
+                      <span className="rounded-xl border-2 border-current px-4 py-3 text-[10px] font-black uppercase opacity-70">
+                        Sin acción directa
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border-4 border-slate-950 bg-slate-950 p-4 text-white">
+          <h3 className="text-sm font-black uppercase text-blue-300">
+            Continúa mañana
+          </h3>
+          <div className="mt-3 space-y-2">
+            {continuar.length === 0 ? (
+              <p className="text-xs font-black uppercase text-slate-400">
+                Sin trabajos abiertos para continuidad.
+              </p>
+            ) : (
+              continuar.map((item) => (
+                <div
+                  key={`${item.tipo}-${item.ordenId || "sin-orden"}-${item.archivoECUId || "sin-file"}-${item.titulo}`}
+                  className="rounded-xl border border-white/10 bg-white/10 p-3"
+                >
+                  <p className="text-[10px] font-black uppercase text-slate-400">
+                    {item.tipo}
+                  </p>
+                  <p className="mt-1 text-xs font-black uppercase text-white">
+                    {item.titulo}
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-slate-300">
+                    {item.descripcion}
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10px] font-black uppercase text-slate-400">
+                      {item.usuario_responsable || "Sin responsable"}
+                    </span>
+                    {item.accion_url && (
+                      <Link
+                        to={item.accion_url}
+                        className="rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-blue-500"
+                      >
+                        {labelAccionTiempo(item.accion_url)}
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-2xl border-4 border-black bg-slate-50 p-4">
+        <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h3 className="text-sm font-black uppercase text-black">
+              Responsables con pendientes
+            </h3>
+            <p className="mt-1 text-xs font-bold uppercase text-gray-500">
+              Pendientes asociados, no ranking.
+            </p>
+          </div>
+          <p className="text-[10px] font-black uppercase text-gray-400">
+            Máximo 8 para revisión rápida
+          </p>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {responsables.length === 0 ? (
+            <p className="rounded-xl border-2 border-dashed border-gray-300 bg-white p-3 text-xs font-black uppercase text-gray-500">
+              Sin responsables con pendientes asociados.
+            </p>
+          ) : (
+            responsables.map((responsable) => (
+              <div
+                key={responsable.username || responsable.nombre || responsable.id}
+                className="rounded-xl border-2 border-black bg-white p-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-black uppercase text-black">
+                    {responsable.username || responsable.nombre || "Sin usuario"}
+                  </p>
+                  <span className="rounded-full bg-slate-950 px-3 py-1 text-[10px] font-black uppercase text-white">
+                    {totalPendientesResponsableCierre(responsable)}
+                  </span>
+                </div>
+                <p className="mt-2 text-[10px] font-bold uppercase text-gray-500">
+                  Órdenes: {numeroDashboard(responsable.ordenes_pendientes)} · FS:{" "}
+                  {numeroDashboard(responsable.file_service_pendientes)} · Material:{" "}
+                  {numeroDashboard(responsable.material_pendiente)} · Cobros:{" "}
+                  {numeroDashboard(responsable.cobros_pendientes_asociados)}
+                </p>
               </div>
             ))
           )}
