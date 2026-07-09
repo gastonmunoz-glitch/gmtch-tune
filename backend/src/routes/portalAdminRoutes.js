@@ -22,6 +22,7 @@ const {
   subirModAdmin,
   cargarCreditos,
   listarMovimientosCuenta,
+  listarComprasCreditosAdmin,
   listarAuditoria,
   listarAuditoriaUsuario,
   listarAuditoriaCuenta,
@@ -104,6 +105,7 @@ const manejarUploadPortal = (campo) => (req, res, next) => {
 };
 
 router.get("/auditoria", listarAuditoria);
+router.get("/compras-creditos", listarComprasCreditosAdmin);
 
 router.post("/cuentas", crearCuenta);
 router.get("/cuentas", listarCuentas);
