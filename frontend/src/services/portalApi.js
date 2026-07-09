@@ -124,6 +124,18 @@ export const portalDownloadMod = (id) =>
 
 export const portalGetCreditos = () => requestPortal("/portal/creditos");
 
+export const portalGetPaquetesCreditos = () =>
+  requestPortal("/portal/creditos/paquetes");
+
+export const portalComprarCreditos = (paquete_id) =>
+  requestPortal("/portal/creditos/comprar", {
+    method: "POST",
+    body: { paquete_id },
+  });
+
+export const portalListComprasCreditos = () =>
+  requestPortal("/portal/creditos/compras");
+
 export const portalAdminListCuentas = () =>
   requestPortal("/portal/admin/cuentas", { tokenType: "internal" });
 
@@ -182,5 +194,10 @@ export const portalAdminCargarCreditos = (cuentaId, payload) =>
 
 export const portalAdminMovimientos = (cuentaId) =>
   requestPortal(`/portal/admin/cuentas/${cuentaId}/movimientos`, {
+    tokenType: "internal",
+  });
+
+export const portalAdminListComprasCreditos = () =>
+  requestPortal("/portal/admin/compras-creditos", {
     tokenType: "internal",
   });

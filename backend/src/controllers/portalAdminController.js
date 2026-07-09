@@ -8,9 +8,11 @@ const {
   PortalUsuario,
   PortalFileService,
   PortalCreditoMovimiento,
+  PortalCreditoCompra,
   PortalAuditoriaEvento,
 } = require("../models");
 const { registrarEventoPortal } = require("./portalAuthController");
+const { notificarN8nPortal } = require("../services/portalNotificacionService");
 
 const ESTADOS_VALIDOS = [
   "RECIBIDO",
@@ -24,6 +26,7 @@ const ESTADOS_VALIDOS = [
   "RECHAZADO",
 ];
 const PORTAL_UPLOADS_DIR = path.resolve(__dirname, "..", "portal_uploads");
+const FRONTEND_URL = String(process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
 let columnasNuevaLecturaPreparadas = false;
 
 const limpiarTexto = (valor) => {
@@ -255,6 +258,29 @@ const mapearEventoAuditoria = (evento) => ({
   creado_por: evento.creado_por,
   createdAt: evento.createdAt,
 });
+
+const mapearCompraCreditoAdmin = (compra) => {
+  const json = typeof compra.toJSON === "function" ? compra.toJSON() : compra;
+
+  return {
+    id: json.id,
+    cuentaId: json.cuentaId,
+    usuarioId: json.usuarioId,
+    paquete_id: json.paquete_id,
+    creditos: json.creditos,
+    monto_clp: json.monto_clp,
+    estado: json.estado,
+    flow_commerce_order: json.flow_commerce_order,
+    flow_status: json.flow_status,
+    pagada_at: json.pagada_at,
+    fallida_at: json.fallida_at,
+    movimientoId: json.movimientoId,
+    Cuenta: json.PortalCuenta ? mapearCuentaAdmin(json.PortalCuenta) : null,
+    Usuario: json.PortalUsuario ? mapearUsuarioAdmin(json.PortalUsuario) : null,
+    createdAt: json.createdAt,
+    updatedAt: json.updatedAt,
+  };
+};
 
 const buscarEventosAuditoria = async (filtros = {}) => {
   const where = {};
@@ -1246,6 +1272,39 @@ const subirModAdmin = async (req, res) => {
       creado_por: usuarioInternoActual(req),
     });
 
+    const [cuentaNotificacion, usuarioNotificacion] = await Promise.all([
+      PortalCuenta.findByPk(archivo.cuentaId),
+      PortalUsuario.findByPk(archivo.usuarioId),
+    ]);
+
+    await notificarN8nPortal("PORTAL_MOD_LISTO", {
+      evento: "PORTAL_MOD_LISTO",
+      cuenta: cuentaNotificacion
+        ? {
+            id: cuentaNotificacion.id,
+            nombre_taller: cuentaNotificacion.nombre_taller,
+            email: cuentaNotificacion.email,
+            telefono: cuentaNotificacion.telefono,
+          }
+        : null,
+      usuario: usuarioNotificacion
+        ? {
+            id: usuarioNotificacion.id,
+            nombre: usuarioNotificacion.nombre,
+            email: usuarioNotificacion.email,
+            username: usuarioNotificacion.username || null,
+          }
+        : null,
+      email: usuarioNotificacion?.email || cuentaNotificacion?.email || null,
+      whatsapp: cuentaNotificacion?.telefono || null,
+      creditos: archivo.creditos_requeridos || null,
+      monto: null,
+      archivoId: archivo.id,
+      servicios: archivo.tipo_servicio,
+      fecha: new Date().toISOString(),
+      link_admin: `${FRONTEND_URL}/portal-admin?fileId=${archivo.id}`,
+    });
+
     res.json({
       mensaje: "MOD cargado correctamente",
       archivo: mapearFileAdmin(archivo),
@@ -1357,6 +1416,32 @@ const listarMovimientosCuenta = async (req, res) => {
   }
 };
 
+const listarComprasCreditosAdmin = async (req, res) => {
+  try {
+    const compras = await PortalCreditoCompra.findAll({
+      include: [
+        {
+          model: PortalCuenta,
+          required: false,
+        },
+        {
+          model: PortalUsuario,
+          required: false,
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: 100,
+    });
+
+    res.json({
+      compras: compras.map(mapearCompraCreditoAdmin),
+    });
+  } catch (error) {
+    console.error("ERROR LISTANDO COMPRAS CREDITOS PORTAL:", error);
+    responderError(res, error);
+  }
+};
+
 const listarAuditoria = async (req, res) => {
   try {
     const eventos = await buscarEventosAuditoria({
@@ -1432,6 +1517,7 @@ module.exports = {
   subirModAdmin,
   cargarCreditos,
   listarMovimientosCuenta,
+  listarComprasCreditosAdmin,
   listarAuditoria,
   listarAuditoriaUsuario,
   listarAuditoriaCuenta,

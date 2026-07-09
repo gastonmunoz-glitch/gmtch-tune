@@ -8,10 +8,12 @@ const {
 } = require("../models");
 const { registrarEventoPortal } = require("./portalAuthController");
 const { crearNotificacionesInternas } = require("./notificacionController");
+const { notificarN8nPortal } = require("../services/portalNotificacionService");
 
 const ESTADOS_DESCARGABLES = ["MOD_LISTO", "CORREGIDO", "ENTREGADO"];
 const ROLES_NOTIFICACION_PORTAL = ["OWNER", "ADMIN", "OPERADOR_ECU", "TUNER"];
 const PORTAL_UPLOADS_DIR = path.resolve(__dirname, "..", "portal_uploads");
+const FRONTEND_URL = String(process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
 let columnasNuevaLecturaPreparadas = false;
 
 const limpiarTexto = (valor) => {
@@ -83,6 +85,35 @@ const crearNotificacionPortalInterna = async ({
     );
   }
 };
+
+const payloadN8nArchivoPortal = ({ evento, archivo, cuenta, usuario }) => ({
+  evento,
+  cuenta: cuenta
+    ? {
+        id: cuenta.id,
+        nombre_taller: cuenta.nombre_taller,
+        email: cuenta.email,
+        telefono: cuenta.telefono,
+      }
+    : null,
+  usuario: usuario
+    ? {
+        id: usuario.id,
+        nombre: usuario.nombre,
+        email: usuario.email,
+      }
+    : null,
+  email: usuario?.email || cuenta?.email || null,
+  whatsapp: cuenta?.telefono || null,
+  creditos: archivo?.creditos_requeridos || null,
+  monto: null,
+  archivoId: archivo?.id || null,
+  servicios: archivo?.tipo_servicio || null,
+  fecha: new Date().toISOString(),
+  link_admin: archivo?.id
+    ? `${FRONTEND_URL}/portal-admin?fileId=${archivo.id}`
+    : `${FRONTEND_URL}/portal-admin`,
+});
 
 const prepararColumnasNuevaLectura = async () => {
   if (columnasNuevaLecturaPreparadas) return;
@@ -291,6 +322,16 @@ const crearPortalFile = async (req, res) => {
       mensaje: `Nuevo archivo subido por ${req.portal.usuario.email} para ${archivo.tipo_servicio}.`,
       archivo,
     });
+
+    await notificarN8nPortal(
+      "PORTAL_ARCHIVO_NUEVO",
+      payloadN8nArchivoPortal({
+        evento: "PORTAL_ARCHIVO_NUEVO",
+        archivo,
+        cuenta: req.portal.cuenta,
+        usuario: req.portal.usuario,
+      })
+    );
   } catch (error) {
     console.error("ERROR CREANDO PORTAL FILE:", error);
     responderError(res, error);
@@ -363,6 +404,16 @@ const solicitarCorreccionPortal = async (req, res) => {
       mensaje: `El usuario ${req.portal.usuario.email} solicito correccion en File #${archivo.id}.`,
       archivo,
     });
+
+    await notificarN8nPortal(
+      "PORTAL_CORRECCION_SOLICITADA",
+      payloadN8nArchivoPortal({
+        evento: "PORTAL_CORRECCION_SOLICITADA",
+        archivo,
+        cuenta: req.portal.cuenta,
+        usuario: req.portal.usuario,
+      })
+    );
 
     res.json({
       mensaje: "Correccion solicitada correctamente",

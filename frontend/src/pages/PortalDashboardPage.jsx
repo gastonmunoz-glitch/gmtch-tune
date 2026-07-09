@@ -175,8 +175,8 @@ function PortalDashboardPage() {
             <small>Ver estados, MODs y correcciones.</small>
           </Link>
           <Link className="border border-slate-700 bg-slate-950 p-6 hover:border-blue-500 hover:bg-blue-950/30" to="/portal/creditos">
-            <span>Créditos</span>
-            <small>Revisar saldo y movimientos.</small>
+            <span>Comprar créditos</span>
+            <small>Comprar créditos, revisar saldo y movimientos.</small>
           </Link>
         </div>
       </section>

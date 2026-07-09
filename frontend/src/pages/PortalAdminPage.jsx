@@ -5,6 +5,7 @@ import {
   portalAdminCrearCuenta,
   portalAdminDownloadNuevaLectura,
   portalAdminDownloadOriginal,
+  portalAdminListComprasCreditos,
   portalAdminListCuentas,
   portalAdminListFiles,
   portalAdminMovimientos,
@@ -37,6 +38,13 @@ const fecha = (valor) => {
   return d.toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" });
 };
 
+const formatoCLP = (valor) =>
+  new Intl.NumberFormat("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  }).format(Number(valor || 0));
+
 const mensajeError = (err, fallback) =>
   err.response?.data?.error || err.message || fallback;
 
@@ -57,6 +65,7 @@ function PortalAdminPage() {
   const [searchParams] = useSearchParams();
   const [cuentas, setCuentas] = useState([]);
   const [archivos, setArchivos] = useState([]);
+  const [comprasCreditos, setComprasCreditos] = useState([]);
   const [movimientos, setMovimientos] = useState([]);
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
@@ -94,12 +103,14 @@ function PortalAdminPage() {
     try {
       setError("");
       setCargando(true);
-      const [cuentasData, filesData] = await Promise.all([
+      const [cuentasData, filesData, comprasData] = await Promise.all([
         portalAdminListCuentas(),
         portalAdminListFiles(),
+        portalAdminListComprasCreditos(),
       ]);
       setCuentas(Array.isArray(cuentasData) ? cuentasData : []);
       setArchivos(Array.isArray(filesData) ? filesData : []);
+      setComprasCreditos(Array.isArray(comprasData?.compras) ? comprasData.compras : []);
     } catch (err) {
       setError(
         err.status === 401 || err.status === 403
@@ -629,6 +640,55 @@ function PortalAdminPage() {
             Cargar créditos
           </button>
         </form>
+      </section>
+
+      <section className="border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-sm font-black uppercase">Compras de créditos</h2>
+            <p className="mt-1 text-xs font-bold uppercase text-gray-500">
+              Pagos Flow del Portal Master. La carga manual sigue disponible.
+            </p>
+          </div>
+          <button type="button" onClick={cargar} disabled={cargando} className="border-2 border-black px-4 py-2 text-xs font-black uppercase disabled:opacity-50">
+            {cargando ? "Cargando..." : "Actualizar compras"}
+          </button>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-3">
+          {comprasCreditos.slice(0, 12).map((compra) => (
+            <div key={compra.id} className="border-2 border-black bg-slate-50 p-4 text-xs font-bold">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-black uppercase text-black">
+                  {compra.estado || "PENDIENTE"}
+                </span>
+                <span className="font-black uppercase text-blue-700">
+                  {compra.creditos} créditos
+                </span>
+              </div>
+              <p className="mt-2 font-black uppercase">
+                {compra.Cuenta?.nombre_taller || "Cuenta sin nombre"}
+              </p>
+              <p className="text-gray-600">
+                {compra.Usuario?.email || "Usuario no informado"}
+              </p>
+              <p className="mt-2">Monto: {formatoCLP(compra.monto_clp)}</p>
+              <p>Paquete: {compra.paquete_id}</p>
+              <p>Fecha: {fecha(compra.createdAt)}</p>
+              {compra.flow_commerce_order && (
+                <p className="mt-2 break-all text-[10px] text-gray-500">
+                  Flow: {compra.flow_commerce_order}
+                </p>
+              )}
+            </div>
+          ))}
+
+          {!comprasCreditos.length && !cargando && (
+            <p className="text-xs font-bold uppercase text-gray-500">
+              Sin compras de créditos registradas.
+            </p>
+          )}
+        </div>
       </section>
 
       <section className="border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">

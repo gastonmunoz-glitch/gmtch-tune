@@ -279,6 +279,7 @@ const tarifaRoutes = require("./src/routes/tarifaRoutes");
 const campaniaRoutes = require("./src/routes/campaniaRoutes");
 const portalAuthRoutes = require("./src/routes/portalAuthRoutes");
 const portalFileRoutes = require("./src/routes/portalFileRoutes");
+const portalCreditoRoutes = require("./src/routes/portalCreditoRoutes");
 const portalAdminRoutes = require("./src/routes/portalAdminRoutes");
 const { iniciarSchedulerInterno } = require("./src/services/internalScheduler");
 
@@ -286,11 +287,12 @@ const { iniciarSchedulerInterno } = require("./src/services/internalScheduler");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/portal/auth", portalAuthRoutes);
+app.use("/api/portal/creditos/flow", portalCreditoRoutes.flowRouter);
 
 // ====================== RUTAS PROTEGIDAS ======================
 
 app.use("/api/portal/files", autenticarPortal, portalFileRoutes);
-app.use("/api/portal/creditos", autenticarPortal, portalFileRoutes.creditosRouter);
+app.use("/api/portal/creditos", autenticarPortal, portalCreditoRoutes);
 app.use("/api/portal/admin", autenticar, permitirRoles("OWNER"), portalAdminRoutes);
 app.use("/api/ai-agents", autenticar, permitirRoles("OWNER", "ADMIN"), aiAgentRoutes);
 app.use("/api/automatizaciones", autenticar, automatizacionRoutes);
