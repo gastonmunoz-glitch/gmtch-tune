@@ -80,7 +80,7 @@ const buscarUsuarioActivoPorId = async (usuarioId) => {
   });
 
   if (!usuario || usuario.activo === false) {
-    throw crearErrorHttp(400, "Responsable no existe o esta inactivo.", {
+    throw crearErrorHttp(400, "El responsable seleccionado no existe o está inactivo.", {
       codigo: "RESPONSABLE_INVALIDO",
     });
   }
@@ -151,7 +151,7 @@ const validarGuardiaResponsable = async (usuario, opciones = {}) => {
   if (resultado.bloqueado) {
     throw crearErrorHttp(
       409,
-      "No puedes asignar mas trabajo a este responsable porque tiene pendientes criticos sin resolver.",
+      "No puedes asignar más trabajo a este responsable porque tiene pendientes críticos sin resolver.",
       {
         codigo: "RESPONSABLE_BLOQUEADO",
         pendientes_criticos: resultado.pendientes_criticos || [],
@@ -373,6 +373,108 @@ const obtenerPrioridadSugeridaPorVehiculo = async (vehiculoId) => {
     console.warn("No se pudo sugerir prioridad por categoría:", error.message);
     return "MEDIA";
   }
+};
+
+const textoServicioOrden = (body = {}) =>
+  [
+    body.categoria_servicio,
+    body.tipo_servicio,
+    body.servicio,
+    body.servicio_solicitado,
+    body.motivo_ingreso,
+  ]
+    .map(limpiarTexto)
+    .filter(Boolean)
+    .join(" ");
+
+const obtenerCampoResponsableTecnicoPorServicio = (body = {}) => {
+  const servicio = textoServicioOrden(body)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+
+  const esMecanica =
+    servicio.includes("MECAN") ||
+    servicio.includes("MANTEN") ||
+    servicio.includes("ACEITE") ||
+    servicio.includes("LIMPIEZA DPF") ||
+    servicio.includes("LIMPIEZA FAP") ||
+    servicio.includes("REGENER") ||
+    servicio.includes("REVISION MECANICA") ||
+    servicio.includes("REVISION FISICA");
+
+  if (esMecanica) {
+    return {
+      campoId: "mecanico_asignado_a_id",
+      campoTexto: "mecanico_asignado_a",
+    };
+  }
+
+  const esEcu =
+    servicio.includes("ECU") ||
+    servicio.includes("TCU") ||
+    servicio.includes("FILE SERVICE") ||
+    servicio.includes("STAGE") ||
+    servicio.includes("REPROGRAM") ||
+    servicio.includes("ELECTRON") ||
+    servicio.includes("DPF") ||
+    servicio.includes("FAP") ||
+    servicio.includes("EGR") ||
+    servicio.includes("SCR") ||
+    servicio.includes("ADBLUE") ||
+    servicio.includes("DEF") ||
+    servicio.includes("NOX") ||
+    servicio.includes("LAMBDA") ||
+    servicio.includes("O2") ||
+    servicio.includes("TVA") ||
+    servicio.includes("IMMO") ||
+    servicio.includes("VMAX") ||
+    servicio.includes("POPS") ||
+    servicio.includes("LAUNCH") ||
+    servicio.includes("HARDCUT");
+
+  if (esEcu) {
+    return {
+      campoId: "operador_ecu_asignado_a_id",
+      campoTexto: "operador_ecu_asignado_a",
+    };
+  }
+
+  const esDiagnostico =
+    servicio.includes("DIAGNOST") ||
+    servicio.includes("SCANNER") ||
+    servicio.includes("DTC") ||
+    servicio.includes("REVISION ELECTRONICA");
+
+  if (esDiagnostico) {
+    return {
+      campoId: "diagnostico_asignado_a_id",
+      campoTexto: "diagnostico_asignado_a",
+    };
+  }
+
+  return {
+    campoId: "supervisor_asignado_a_id",
+    campoTexto: "supervisor_asignado_a",
+  };
+};
+
+const resolverResponsableTecnicoGenerico = async (body = {}) => {
+  const responsableId = limpiarTexto(body.responsable_tecnico_id);
+  if (!responsableId) return null;
+
+  const usuario = await buscarUsuarioActivoPorId(responsableId);
+  const snapshot =
+    limpiarTexto(body.responsable_tecnico_texto || body.responsable_tecnico) ||
+    obtenerSnapshotUsuario(usuario);
+  const campo = obtenerCampoResponsableTecnicoPorServicio(body);
+
+  return {
+    ...campo,
+    id: String(usuario.id),
+    texto: snapshot,
+    usuario,
+  };
 };
 
 const NOTIFICACIONES_RESPONSABLES = {
@@ -1426,6 +1528,9 @@ const crearOrden = async (req, res) => {
       prioridadExplicita || (await obtenerPrioridadSugeridaPorVehiculo(vehiculoId));
     const montoInicial = normalizarDecimal(req.body.monto_total, 0);
     const responsablesCreacion = {};
+    const responsableTecnicoGenerico = await resolverResponsableTecnicoGenerico(
+      req.body
+    );
 
     for (const [campoId, campoTexto] of [
       ["diagnostico_asignado_a_id", "diagnostico_asignado_a"],
@@ -1442,17 +1547,26 @@ const crearOrden = async (req, res) => {
       aplicarResponsableResuelto(responsablesCreacion, campoId, campoTexto, resuelto);
     }
 
-    const tieneResponsableTecnico = [
+    let tieneResponsableTecnico = [
       "diagnostico_asignado_a_id",
       "operador_ecu_asignado_a_id",
       "mecanico_asignado_a_id",
       "supervisor_asignado_a_id",
     ].some((campo) => limpiarTexto(responsablesCreacion[campo]));
 
+    if (!tieneResponsableTecnico && responsableTecnicoGenerico) {
+      await validarGuardiaResponsable(responsableTecnicoGenerico.usuario);
+      responsablesCreacion[responsableTecnicoGenerico.campoId] =
+        responsableTecnicoGenerico.id;
+      responsablesCreacion[responsableTecnicoGenerico.campoTexto] =
+        responsableTecnicoGenerico.texto;
+      tieneResponsableTecnico = true;
+    }
+
     if (!tieneResponsableTecnico) {
       throw crearErrorHttp(
         400,
-        "Debes seleccionar un responsable activo para crear la orden.",
+        "Debes seleccionar un responsable técnico para crear la orden.",
         { codigo: "RESPONSABLE_REQUERIDO" }
       );
     }

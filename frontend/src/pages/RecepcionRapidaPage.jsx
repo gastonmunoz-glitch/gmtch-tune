@@ -162,6 +162,13 @@ const obtenerCampoResponsablePorServicio = (servicio, requiereMecanica = false) 
   };
 };
 
+const obtenerCategoriaServicioPorCampo = (campoId) => {
+  if (campoId === "diagnostico_asignado_a_id") return "DIAGNOSTICO";
+  if (campoId === "operador_ecu_asignado_a_id") return "ECU_TCU_FILE_SERVICE";
+  if (campoId === "mecanico_asignado_a_id") return "MECANICA";
+  return "OTRO";
+};
+
 const obtenerOrdenesVehiculo = (vehiculo) => {
   const ordenes =
     vehiculo?.OrdenTrabajos ||
@@ -384,6 +391,14 @@ function RecepcionRapidaPage() {
       ]
         .filter(Boolean)
         .join("\n");
+    }
+
+    if (codigo === "RESPONSABLE_REQUERIDO") {
+      return "Debes seleccionar un responsable técnico para continuar.";
+    }
+
+    if (codigo === "RESPONSABLE_INVALIDO") {
+      return "El responsable seleccionado no está activo o no existe.";
     }
 
     if (
@@ -744,6 +759,9 @@ function RecepcionRapidaPage() {
         servicioSolicitado,
         orden.requiere_mecanica
       );
+      const categoriaServicio = obtenerCategoriaServicioPorCampo(
+        campoResponsable.campoId
+      );
       const responsableTexto = snapshotUsuario(responsableTecnico);
       const usuarioRecepcion = usuarioLocalActual();
       const recepcionadoPorTexto = snapshotUsuario(usuarioRecepcion);
@@ -759,7 +777,11 @@ function RecepcionRapidaPage() {
         origen_recepcion: esRecepcionEmergenciaOperador
           ? "RECEPCION_EMERGENCIA_OPERADOR"
           : undefined,
+        categoria_servicio: categoriaServicio,
+        tipo_servicio: servicioSolicitado,
+        servicio: servicioSolicitado,
         responsable_tecnico_id: responsableTecnico.id,
+        responsable_tecnico: responsableTexto,
         responsable_tecnico_texto: responsableTexto,
         recepcionado_por_id: usuarioRecepcion.id || undefined,
         recepcionado_por: recepcionadoPorTexto || undefined,
