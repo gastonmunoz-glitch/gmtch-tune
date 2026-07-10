@@ -141,9 +141,14 @@ function PortalMisArchivosPage() {
           <Link to="/portal" className="text-xs font-black uppercase tracking-[0.24em] text-blue-400">
             Portal File Service
           </Link>
-          <Link to="/portal/nuevo-archivo" className="bg-blue-600 px-4 py-2 text-xs font-black uppercase text-white hover:bg-white hover:text-black">
-            Nuevo archivo
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/portal/mensajes" className="border border-slate-700 px-4 py-2 text-xs font-black uppercase text-slate-200 hover:border-blue-500">
+              Soporte / mensajes
+            </Link>
+            <Link to="/portal/nuevo-archivo" className="bg-blue-600 px-4 py-2 text-xs font-black uppercase text-white hover:bg-white hover:text-black">
+              Nuevo archivo
+            </Link>
+          </div>
         </div>
       </header>
 

@@ -99,6 +99,22 @@ export const portalListFiles = () => requestPortal("/portal/files");
 
 export const portalGetFile = (id) => requestPortal(`/portal/files/${id}`);
 
+export const portalListMensajes = () => requestPortal("/portal/mensajes");
+
+export const portalGetMensaje = (id) => requestPortal(`/portal/mensajes/${id}`);
+
+export const portalCrearMensaje = (payload) =>
+  requestPortal("/portal/mensajes", {
+    method: "POST",
+    body: payload,
+  });
+
+export const portalResponderMensaje = (id, texto) =>
+  requestPortal(`/portal/mensajes/${id}/responder`, {
+    method: "POST",
+    body: { texto },
+  });
+
 export const portalCreateFile = (formData) =>
   requestPortal("/portal/files", {
     method: "POST",

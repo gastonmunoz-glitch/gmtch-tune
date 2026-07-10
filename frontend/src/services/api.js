@@ -36,4 +36,34 @@ api.interceptors.response.use(
   }
 );
 
+export const getConversaciones = (params = {}) =>
+  api
+    .get("/mensajes/conversaciones", { params })
+    .then((response) => response.data);
+
+export const getConversacion = (id) =>
+  api
+    .get(`/mensajes/conversaciones/${id}`)
+    .then((response) => response.data);
+
+export const responderConversacion = (id, texto) =>
+  api
+    .post(`/mensajes/conversaciones/${id}/responder`, { texto })
+    .then((response) => response.data);
+
+export const asignarConversacion = (id, asignado_a_id) =>
+  api
+    .patch(`/mensajes/conversaciones/${id}/asignar`, { asignado_a_id })
+    .then((response) => response.data);
+
+export const cambiarEstadoConversacion = (id, estado) =>
+  api
+    .patch(`/mensajes/conversaciones/${id}/estado`, { estado })
+    .then((response) => response.data);
+
+export const cerrarConversacion = (id) =>
+  api
+    .patch(`/mensajes/conversaciones/${id}/cerrar`)
+    .then((response) => response.data);
+
 export default api;

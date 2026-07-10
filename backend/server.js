@@ -281,6 +281,8 @@ const portalAuthRoutes = require("./src/routes/portalAuthRoutes");
 const portalFileRoutes = require("./src/routes/portalFileRoutes");
 const portalCreditoRoutes = require("./src/routes/portalCreditoRoutes");
 const portalAdminRoutes = require("./src/routes/portalAdminRoutes");
+const portalMensajeRoutes = require("./src/routes/portalMensajeRoutes");
+const mensajeRoutes = require("./src/routes/mensajeRoutes");
 const { iniciarSchedulerInterno } = require("./src/services/internalScheduler");
 
 // ====================== RUTAS PÚBLICAS ======================
@@ -293,7 +295,9 @@ app.use("/api/portal/creditos/flow", portalCreditoRoutes.flowRouter);
 
 app.use("/api/portal/files", autenticarPortal, portalFileRoutes);
 app.use("/api/portal/creditos", autenticarPortal, portalCreditoRoutes);
+app.use("/api/portal/mensajes", autenticarPortal, portalMensajeRoutes);
 app.use("/api/portal/admin", autenticar, permitirRoles("OWNER"), portalAdminRoutes);
+app.use("/api/mensajes", autenticar, mensajeRoutes);
 app.use("/api/ai-agents", autenticar, permitirRoles("OWNER", "ADMIN"), aiAgentRoutes);
 app.use("/api/automatizaciones", autenticar, automatizacionRoutes);
 app.use("/api/push", autenticar, pushRoutes);
@@ -1837,7 +1841,9 @@ const startServer = async () => {
       console.log("   /api/portal/auth/login");
       console.log("   /api/portal/files");
       console.log("   /api/portal/creditos");
+      console.log("   /api/portal/mensajes");
       console.log("   /api/portal/admin");
+      console.log("   /api/mensajes");
       console.log("   /api/usuarios");
       console.log("   /api/clientes");
       console.log("   /api/vehiculos DIRECT-SERVER-V6");

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { portalGetCreditos, portalListFiles, portalMe } from "../services/portalApi";
+import {
+  portalGetCreditos,
+  portalListFiles,
+  portalListMensajes,
+  portalMe,
+} from "../services/portalApi";
 
 const estadosActivos = [
   "RECIBIDO",
@@ -49,6 +54,9 @@ const PortalHeader = ({ cuenta, onCerrar }) => (
         <Link className="border border-slate-700 px-4 py-2 text-xs font-black uppercase text-slate-200 hover:border-blue-500 hover:text-blue-300" to="/portal/creditos">
           Créditos
         </Link>
+        <Link className="border border-slate-700 px-4 py-2 text-xs font-black uppercase text-slate-200 hover:border-blue-500 hover:text-blue-300" to="/portal/mensajes">
+          Mensajes
+        </Link>
         <button
           type="button"
           onClick={onCerrar}
@@ -74,6 +82,7 @@ function PortalDashboardPage() {
   const navigate = useNavigate();
   const [cuenta, setCuenta] = useState(null);
   const [archivos, setArchivos] = useState([]);
+  const [conversaciones, setConversaciones] = useState([]);
   const [saldo, setSaldo] = useState(0);
   const [error, setError] = useState("");
   const [cargando, setCargando] = useState(true);
@@ -82,15 +91,19 @@ function PortalDashboardPage() {
     try {
       setError("");
       setCargando(true);
-      const [me, creditos, files] = await Promise.all([
+      const [me, creditos, files, mensajes] = await Promise.all([
         portalMe(),
         portalGetCreditos(),
         portalListFiles(),
+        portalListMensajes(),
       ]);
 
       setCuenta(me.cuenta || null);
       setSaldo(numero(creditos?.saldo_creditos));
       setArchivos(Array.isArray(files) ? files : []);
+      setConversaciones(
+        Array.isArray(mensajes?.conversaciones) ? mensajes.conversaciones : []
+      );
       localStorage.setItem("portalCuenta", JSON.stringify(me.cuenta || {}));
       localStorage.setItem("portalUsuario", JSON.stringify(me.usuario || {}));
     } catch (err) {
@@ -165,7 +178,7 @@ function PortalDashboardPage() {
           <StatPortal label="Nueva lectura requerida" value={stats.nuevasLecturas} color="border-yellow-500" />
         </div>
 
-        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-4">
           <Link className="border border-slate-700 bg-slate-950 p-6 hover:border-blue-500 hover:bg-blue-950/30" to="/portal/nuevo-archivo">
             <span>Nuevo archivo</span>
             <small>Subir original y solicitar servicio.</small>
@@ -178,7 +191,58 @@ function PortalDashboardPage() {
             <span>Comprar créditos</span>
             <small>Comprar créditos, revisar saldo y movimientos.</small>
           </Link>
+          <Link className="border border-slate-700 bg-slate-950 p-6 hover:border-blue-500 hover:bg-blue-950/30" to="/portal/mensajes">
+            <span>Soporte / mensajes</span>
+            <small>Consultar a GMTCH y revisar respuestas.</small>
+          </Link>
         </div>
+
+        <section className="mt-8 border border-slate-800 bg-slate-950 p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-400">
+                Soporte GMTCH
+              </p>
+              <h2 className="mt-2 text-xl font-black uppercase text-white">
+                Mensajes recientes
+              </h2>
+            </div>
+            <Link
+              to="/portal/mensajes"
+              className="border border-blue-500 px-4 py-2 text-xs font-black uppercase text-blue-200 hover:bg-blue-600 hover:text-white"
+            >
+              Abrir bandeja
+            </Link>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            {conversaciones.slice(0, 3).map((conversacion) => (
+              <Link
+                key={conversacion.id}
+                to={`/portal/mensajes?conversacionId=${conversacion.id}`}
+                className="border border-slate-700 bg-black p-4 hover:border-blue-500"
+              >
+                <p className="text-xs font-black uppercase text-white">
+                  {conversacion.asunto || "Soporte Portal Master"}
+                </p>
+                <p className="mt-2 text-[10px] font-black uppercase text-slate-500">
+                  {conversacion.estado || "NUEVA"} / {conversacion.prioridad || "MEDIA"}
+                </p>
+                {conversacion.no_leidos_portal > 0 && (
+                  <p className="mt-2 inline-block bg-red-600 px-2 py-1 text-[10px] font-black uppercase text-white">
+                    {conversacion.no_leidos_portal} nuevo
+                  </p>
+                )}
+              </Link>
+            ))}
+
+            {!conversaciones.length && (
+              <div className="border border-slate-700 bg-black p-4 text-xs font-bold text-slate-400 md:col-span-3">
+                Sin mensajes de soporte por ahora.
+              </div>
+            )}
+          </div>
+        </section>
       </section>
     </main>
   );

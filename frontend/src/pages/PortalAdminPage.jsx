@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   portalAdminCargarCreditos,
   portalAdminCrearCuenta,
@@ -569,12 +569,22 @@ function PortalAdminPage() {
         <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-600">
           OWNER
         </p>
-        <h1 className="text-4xl font-black uppercase text-black">
-          Portal externo File Service
-        </h1>
-        <p className="mt-2 text-xs font-bold uppercase text-gray-500">
-          Administración de cuentas, créditos y solicitudes externas.
-        </p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h1 className="text-4xl font-black uppercase text-black">
+              Portal externo File Service
+            </h1>
+            <p className="mt-2 text-xs font-bold uppercase text-gray-500">
+              Administración de cuentas, créditos y solicitudes externas.
+            </p>
+          </div>
+          <Link
+            to="/mensajes"
+            className="border-2 border-black bg-black px-4 py-3 text-xs font-black uppercase text-white hover:bg-blue-700"
+          >
+            Bandeja mensajes
+          </Link>
+        </div>
       </div>
 
       {error && (

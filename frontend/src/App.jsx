@@ -25,6 +25,8 @@ import PortalMisArchivosPage from "./pages/PortalMisArchivosPage";
 import PortalCreditosPage from "./pages/PortalCreditosPage";
 import PortalAdminPage from "./pages/PortalAdminPage";
 import LeadsPage from "./pages/LeadsPage";
+import MensajesPage from "./pages/MensajesPage";
+import PortalMensajesPage from "./pages/PortalMensajesPage";
 
 const PERMISOS_RUTAS = {
   "/": [
@@ -86,6 +88,14 @@ const PERMISOS_RUTAS = {
   ],
   "/usuarios": ["OWNER"],
   "/portal-admin": ["OWNER"],
+  "/mensajes": [
+    "OWNER",
+    "ADMIN",
+    "SUPERVISOR",
+    "RECEPCION",
+    "OPERADOR_ECU",
+    "TUNER",
+  ],
   "/finanzas": [
     "OWNER",
     "ADMIN",
@@ -153,6 +163,11 @@ const MENU = [
     to: "/finanzas",
     label: "Finanzas / Material",
     roles: ["OWNER", "ADMIN"],
+  },
+  {
+    to: "/mensajes",
+    label: "Mensajes",
+    roles: PERMISOS_RUTAS["/mensajes"],
   },
   {
     to: "/portal-admin",
@@ -1063,6 +1078,14 @@ function App() {
               </PortalProtegido>
             }
           />
+          <Route
+            path="/portal/mensajes"
+            element={
+              <PortalProtegido>
+                <PortalMensajesPage />
+              </PortalProtegido>
+            }
+          />
           <Route path="*" element={<Navigate to="/portal" />} />
         </Routes>
       ) : rutaLoginPublica && !auth ? (
@@ -1324,6 +1347,15 @@ function App() {
                   element={
                     <Protegido usuario={usuario} roles={PERMISOS_RUTAS["/finanzas"]}>
                       <FinanzasPage />
+                    </Protegido>
+                  }
+                />
+
+                <Route
+                  path="/mensajes"
+                  element={
+                    <Protegido usuario={usuario} roles={PERMISOS_RUTAS["/mensajes"]}>
+                      <MensajesPage />
                     </Protegido>
                   }
                 />
