@@ -62,7 +62,18 @@ const rolActual = (req) =>
 const usuarioActualId = (req) => limpiarTexto(req.usuario?.id || req.user?.id);
 
 const obtenerSnapshotUsuario = (usuario) =>
-  limpiarTexto(usuario?.username || usuario?.nombre || usuario?.email || usuario?.id);
+  limpiarTexto(usuario?.username || usuario?.nombre || usuario?.id);
+
+const obtenerSnapshotReqUsuario = (req) =>
+  limpiarTexto(
+    req.usuario?.username ||
+      req.user?.username ||
+      req.usuario?.nombre ||
+      req.user?.nombre ||
+      req.usuario?.id ||
+      req.user?.id ||
+      "sistema"
+  );
 
 const crearErrorHttp = (statusCode, message, extra = {}) => {
   const error = new Error(message);
@@ -168,10 +179,10 @@ const usuarioEventoDesdeReq = (req) =>
   limpiarTexto(
     req.usuario?.username ||
       req.usuario?.nombre ||
-      req.usuario?.email ||
       req.user?.username ||
       req.user?.nombre ||
-      req.user?.email
+      req.usuario?.id ||
+      req.user?.id
   ) || "sistema";
 
 const metadataSensibleTokens = [

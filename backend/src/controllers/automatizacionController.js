@@ -1387,10 +1387,9 @@ const crearIdentidadUsuario = (req) => {
   const id = limpiarTexto(usuario.id);
   const username = limpiarTexto(usuario.username);
   const nombre = limpiarTexto(usuario.nombre);
-  const email = limpiarTexto(usuario.email);
   const rol = upper(usuario.rol);
   const claves = new Set(
-    [id, username, nombre, email]
+    [id, username, nombre]
       .map(normalizarClaveUsuario)
       .filter(Boolean)
   );
@@ -1399,7 +1398,6 @@ const crearIdentidadUsuario = (req) => {
     id,
     username,
     nombre,
-    email,
     rol,
     claves,
   };
@@ -2596,10 +2594,9 @@ const crearIdentidadDesdeUsuario = (usuario = {}) => {
   const id = limpiarTexto(usuario.id);
   const username = limpiarTexto(usuario.username);
   const nombre = limpiarTexto(usuario.nombre);
-  const email = limpiarTexto(usuario.email);
   const rol = upper(usuario.rol);
   const claves = new Set(
-    [id, username, nombre, email]
+    [id, username, nombre]
       .map(normalizarClaveUsuario)
       .filter(Boolean)
   );
@@ -2608,7 +2605,6 @@ const crearIdentidadDesdeUsuario = (usuario = {}) => {
     id,
     username,
     nombre,
-    email,
     rol,
     claves,
   };

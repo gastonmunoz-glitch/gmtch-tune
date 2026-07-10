@@ -97,13 +97,12 @@ const texto = (valor, fallback = "No registrado") => {
 };
 
 const snapshotUsuario = (usuario) =>
-  usuario?.username || usuario?.nombre || usuario?.email || "";
+  usuario?.username || usuario?.nombre || usuario?.id || "";
 
 const usuarioLocalActual = () => ({
   id: leerStorage("userId") || "",
   username: leerStorage("username") || "",
   nombre: leerStorage("nombre") || "",
-  email: "",
 });
 
 const obtenerCampoResponsablePorServicio = (servicio, requiereMecanica = false) => {

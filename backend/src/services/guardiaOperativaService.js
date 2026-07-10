@@ -81,17 +81,15 @@ const crearIdentidadDesdeUsuario = (usuario = {}) => {
   const id = limpiarTexto(usuario.id);
   const username = limpiarTexto(usuario.username);
   const nombre = limpiarTexto(usuario.nombre);
-  const email = limpiarTexto(usuario.email);
   const rol = upper(usuario.rol);
   const claves = new Set(
-    [id, username, nombre, email].map(normalizarClaveUsuario).filter(Boolean)
+    [id, username, nombre].map(normalizarClaveUsuario).filter(Boolean)
   );
 
   return {
     id,
     username,
     nombre,
-    email,
     rol,
     claves,
   };
@@ -150,7 +148,7 @@ const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {
   }
 
   const usuario = await Usuario.findByPk(id, {
-    attributes: ["id", "nombre", "username", "email", "rol", "activo"],
+    attributes: ["id", "nombre", "username", "rol", "activo"],
   });
 
   if (!usuario || usuario.activo === false) {
