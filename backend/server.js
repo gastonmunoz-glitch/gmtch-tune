@@ -283,13 +283,16 @@ const portalCreditoRoutes = require("./src/routes/portalCreditoRoutes");
 const portalAdminRoutes = require("./src/routes/portalAdminRoutes");
 const portalMensajeRoutes = require("./src/routes/portalMensajeRoutes");
 const mensajeRoutes = require("./src/routes/mensajeRoutes");
+const metaWebhookRoutes = require("./src/routes/metaWebhookRoutes");
 const { iniciarSchedulerInterno } = require("./src/services/internalScheduler");
+const { prepararColumnasOmnicanal } = require("./src/services/metaMessagingService");
 
 // ====================== RUTAS PÚBLICAS ======================
 
 app.use("/api/auth", authRoutes);
 app.use("/api/portal/auth", portalAuthRoutes);
 app.use("/api/portal/creditos/flow", portalCreditoRoutes.flowRouter);
+app.use("/api/webhooks/meta", metaWebhookRoutes);
 
 // ====================== RUTAS PROTEGIDAS ======================
 
@@ -1823,6 +1826,9 @@ const startServer = async () => {
     await sequelize.sync();
     console.log("BASE DE DATOS SINCRONIZADA SIN ALTER AUTOMÁTICO");
 
+    await prepararColumnasOmnicanal();
+    console.log("COLUMNAS OMNICANAL VERIFICADAS");
+
     await crearUsuarioMaestro();
 
     console.log("Uploads path:", uploadsPath);
@@ -1838,6 +1844,7 @@ const startServer = async () => {
       console.log("   /api/auth/test");
       console.log("   /api/auth/login");
       console.log("   /api/auth/me");
+      console.log("   /api/webhooks/meta");
       console.log("   /api/portal/auth/login");
       console.log("   /api/portal/files");
       console.log("   /api/portal/creditos");

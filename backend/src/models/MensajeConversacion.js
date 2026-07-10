@@ -27,6 +27,16 @@ const MensajeConversacion = sequelize.define(
       defaultValue: "PORTAL",
     },
 
+    proveedor: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    tipo_mensaje: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
     texto: {
       type: DataTypes.TEXT,
       allowNull: false,
@@ -64,8 +74,28 @@ const MensajeConversacion = sequelize.define(
       allowNull: true,
     },
 
+    external_parent_id: {
+      type: DataTypes.STRING(220),
+      allowNull: true,
+    },
+
+    enviado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
     estado_envio: {
       type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    error_envio: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    payload_hash: {
+      type: DataTypes.STRING(128),
       allowNull: true,
     },
 

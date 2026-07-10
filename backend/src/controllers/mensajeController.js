@@ -6,9 +6,11 @@ const {
   PortalUsuario,
   Usuario,
 } = require("../models");
+const { prepararColumnasOmnicanal } = require("../services/metaMessagingService");
 
 const ESTADOS = ["NUEVA", "EN_ATENCION", "ESPERANDO_CLIENTE", "CERRADA"];
 const PRIORIDADES = ["BAJA", "MEDIA", "ALTA", "URGENTE"];
+const CANALES_EXTERNOS = ["WHATSAPP", "INSTAGRAM", "FACEBOOK"];
 
 const limpiarTexto = (valor) => {
   if (valor === null || valor === undefined) return "";
@@ -77,13 +79,19 @@ const mapearMensaje = (mensaje) => ({
   conversacionId: mensaje.conversacionId,
   direccion: mensaje.direccion,
   canal: mensaje.canal,
+  proveedor: mensaje.proveedor,
+  tipo_mensaje: mensaje.tipo_mensaje,
   texto: mensaje.texto,
   enviado_por_tipo: mensaje.enviado_por_tipo,
   enviado_por_id: mensaje.enviado_por_id,
   enviado_por_nombre: mensaje.enviado_por_nombre,
   leido: mensaje.leido,
   leido_at: mensaje.leido_at,
+  externo_message_id: mensaje.externo_message_id,
+  external_parent_id: mensaje.external_parent_id,
+  enviado_at: mensaje.enviado_at,
   estado_envio: mensaje.estado_envio,
+  error_envio: mensaje.error_envio,
   metadata: mensaje.metadata || {},
   createdAt: mensaje.createdAt,
   updatedAt: mensaje.updatedAt,
@@ -112,10 +120,20 @@ const mapearConversacion = async (conversacion, incluirMensajes = false) => {
   const base = {
     id: json.id,
     canal: json.canal,
+    proveedor: json.proveedor,
+    external_conversation_id: json.external_conversation_id,
+    external_user_id: json.external_user_id,
+    page_id: json.page_id,
+    instagram_account_id: json.instagram_account_id,
+    post_id: json.post_id,
+    comment_id: json.comment_id,
+    ad_id: json.ad_id,
     portalCuentaId: json.portalCuentaId,
     portalUsuarioId: json.portalUsuarioId,
     clienteId: json.clienteId,
     telefono: json.telefono,
+    wa_id: json.wa_id,
+    username_externo: json.username_externo,
     email: json.email,
     nombre_contacto: json.nombre_contacto,
     asunto: json.asunto,
@@ -123,6 +141,9 @@ const mapearConversacion = async (conversacion, incluirMensajes = false) => {
     prioridad: json.prioridad,
     asignado_a_id: json.asignado_a_id,
     ultimo_mensaje_at: json.ultimo_mensaje_at,
+    last_inbound_at: json.last_inbound_at,
+    service_window_expires_at: json.service_window_expires_at,
+    requiere_template: Boolean(json.requiere_template),
     metadata: json.metadata || {},
     no_leidos_internos: noLeidosInternos,
     ultimo_mensaje: ultimoMensaje ? mapearMensaje(ultimoMensaje) : null,
@@ -171,6 +192,8 @@ const includeConversacion = [
 
 const listarConversaciones = async (req, res) => {
   try {
+    await prepararColumnasOmnicanal();
+
     const where = {};
     const estado = limpiarTexto(req.query.estado).toUpperCase();
     const canal = limpiarTexto(req.query.canal).toUpperCase();
@@ -187,6 +210,9 @@ const listarConversaciones = async (req, res) => {
         { nombre_contacto: { [Op.iLike]: `%${search}%` } },
         { email: { [Op.iLike]: `%${search}%` } },
         { telefono: { [Op.iLike]: `%${search}%` } },
+        { wa_id: { [Op.iLike]: `%${search}%` } },
+        { username_externo: { [Op.iLike]: `%${search}%` } },
+        { external_user_id: { [Op.iLike]: `%${search}%` } },
       ];
     }
 
@@ -218,6 +244,8 @@ const listarConversaciones = async (req, res) => {
 
 const obtenerConversacion = async (req, res) => {
   try {
+    await prepararColumnasOmnicanal();
+
     const conversacion = await Conversacion.findByPk(req.params.id, {
       include: includeConversacion,
     });
@@ -253,6 +281,8 @@ const obtenerConversacion = async (req, res) => {
 
 const responderConversacion = async (req, res) => {
   try {
+    await prepararColumnasOmnicanal();
+
     const conversacion = await Conversacion.findByPk(req.params.id);
 
     if (!conversacion) {
@@ -272,16 +302,30 @@ const responderConversacion = async (req, res) => {
     }
 
     const ahora = new Date();
+    const canal = String(conversacion.canal || "PORTAL").toUpperCase();
+    const esCanalExterno = CANALES_EXTERNOS.includes(canal);
     const mensaje = await MensajeConversacion.create({
       conversacionId: conversacion.id,
-      direccion: "SALIENTE",
+      direccion: esCanalExterno ? "SALIENTE_LOCAL" : "SALIENTE",
       canal: conversacion.canal,
+      proveedor: conversacion.proveedor || null,
+      tipo_mensaje: "text",
       texto,
       enviado_por_tipo: "USUARIO_INTERNO",
       enviado_por_id: usuarioIdActual(req),
       enviado_por_nombre: usuarioActual(req),
       leido: false,
-      metadata: {},
+      enviado_at: ahora,
+      estado_envio: esCanalExterno ? "NO_ENVIADO" : "ENVIADO_LOCAL",
+      error_envio: esCanalExterno
+        ? "Respuesta externa aun no habilitada para este canal en Fase 1."
+        : null,
+      metadata: esCanalExterno
+        ? {
+            fase: "OMNICANAL_V2_FASE_1",
+            aviso: "Respuesta externa aun no habilitada para este canal.",
+          }
+        : {},
     });
 
     await conversacion.update({
@@ -290,7 +334,10 @@ const responderConversacion = async (req, res) => {
       ultimo_mensaje_at: ahora,
     });
 
-    res.status(201).json({
+    res.status(esCanalExterno ? 202 : 201).json({
+      aviso: esCanalExterno
+        ? "Respuesta externa aun no habilitada para este canal."
+        : null,
       mensaje: mapearMensaje(mensaje),
       conversacion: await mapearConversacion(conversacion),
     });
@@ -307,6 +354,8 @@ const responderConversacion = async (req, res) => {
 
 const asignarConversacion = async (req, res) => {
   try {
+    await prepararColumnasOmnicanal();
+
     const conversacion = await Conversacion.findByPk(req.params.id);
 
     if (!conversacion) {
@@ -351,6 +400,8 @@ const asignarConversacion = async (req, res) => {
 
 const cambiarEstadoConversacion = async (req, res) => {
   try {
+    await prepararColumnasOmnicanal();
+
     const conversacion = await Conversacion.findByPk(req.params.id);
 
     if (!conversacion) {
@@ -382,6 +433,8 @@ const cambiarEstadoConversacion = async (req, res) => {
 
 const cerrarConversacion = async (req, res) => {
   try {
+    await prepararColumnasOmnicanal();
+
     const conversacion = await Conversacion.findByPk(req.params.id);
 
     if (!conversacion) {

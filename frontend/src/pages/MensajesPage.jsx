@@ -10,12 +10,30 @@ import api, {
 } from "../services/api";
 
 const estados = ["NUEVA", "EN_ATENCION", "ESPERANDO_CLIENTE", "CERRADA"];
+const canales = ["PORTAL", "WHATSAPP", "INSTAGRAM", "FACEBOOK", "MANUAL"];
+const canalesExternos = ["WHATSAPP", "INSTAGRAM", "FACEBOOK"];
 
 const estadoLabel = {
   NUEVA: "Nueva",
   EN_ATENCION: "En atención",
   ESPERANDO_CLIENTE: "Esperando cliente",
   CERRADA: "Cerrada",
+};
+
+const canalLabel = {
+  PORTAL: "Portal Master",
+  WHATSAPP: "WhatsApp",
+  INSTAGRAM: "Instagram",
+  FACEBOOK: "Facebook",
+  MANUAL: "Manual",
+};
+
+const canalClass = {
+  PORTAL: "border-blue-600 bg-blue-50 text-blue-700",
+  WHATSAPP: "border-green-600 bg-green-50 text-green-700",
+  INSTAGRAM: "border-fuchsia-600 bg-fuchsia-50 text-fuchsia-700",
+  FACEBOOK: "border-indigo-600 bg-indigo-50 text-indigo-700",
+  MANUAL: "border-slate-500 bg-slate-100 text-slate-700",
 };
 
 const prioridadClass = {
@@ -45,12 +63,72 @@ const obtenerUsuarioLocal = () => ({
 const nombreResponsable = (usuario) =>
   [usuario?.nombre, usuario?.username, usuario?.rol].filter(Boolean).join(" / ");
 
+const canalConversacion = (conversacion) =>
+  String(conversacion?.canal || "PORTAL").toUpperCase();
+
 const nombreConversacion = (conversacion) =>
   conversacion?.nombre_contacto ||
+  conversacion?.username_externo ||
+  conversacion?.wa_id ||
+  conversacion?.telefono ||
   conversacion?.PortalUsuario?.nombre ||
   conversacion?.Cuenta?.nombre_taller ||
   conversacion?.email ||
-  "Contacto portal";
+  "Contacto externo";
+
+const origenConversacion = (conversacion) => {
+  const canal = canalConversacion(conversacion);
+
+  if (canal === "WHATSAPP") {
+    return `WhatsApp: ${conversacion.wa_id || conversacion.telefono || "sin teléfono"}`;
+  }
+
+  if (canal === "INSTAGRAM") {
+    const base = conversacion.username_externo || conversacion.external_user_id || "usuario externo";
+    const cuenta = conversacion.instagram_account_id
+      ? ` / IG ${conversacion.instagram_account_id}`
+      : "";
+    return `Instagram: ${base}${cuenta}`;
+  }
+
+  if (canal === "FACEBOOK") {
+    const base = conversacion.username_externo || conversacion.external_user_id || "usuario externo";
+    const page = conversacion.page_id ? ` / Page ${conversacion.page_id}` : "";
+    return `Facebook: ${base}${page}`;
+  }
+
+  if (canal === "PORTAL") {
+    return `${conversacion.Cuenta?.nombre_taller || "Cuenta portal"} / ${
+      conversacion.PortalUsuario?.email || conversacion.email || "sin email"
+    }`;
+  }
+
+  return conversacion.email || conversacion.telefono || "Origen manual";
+};
+
+const origenPublicacion = (conversacion) => {
+  const partes = [];
+  if (conversacion.post_id) partes.push(`Post: ${conversacion.post_id}`);
+  if (conversacion.comment_id) partes.push(`Comentario: ${conversacion.comment_id}`);
+  if (conversacion.ad_id) partes.push(`Anuncio: ${conversacion.ad_id}`);
+  return partes.join(" / ");
+};
+
+const estadoVentanaWhatsapp = (conversacion) => {
+  if (canalConversacion(conversacion) !== "WHATSAPP") return null;
+
+  if (conversacion.requiere_template) {
+    return "Fuera de ventana 24h · requiere plantilla";
+  }
+
+  if (conversacion.service_window_expires_at) {
+    return `Puedes responder libremente hasta: ${formatearFecha(
+      conversacion.service_window_expires_at
+    )}`;
+  }
+
+  return "Ventana WhatsApp no calculada";
+};
 
 function MensajesPage() {
   const [searchParams] = useSearchParams();
@@ -59,6 +137,7 @@ function MensajesPage() {
   const [responsables, setResponsables] = useState([]);
   const [filtros, setFiltros] = useState({
     estado: "",
+    canal: "",
     search: "",
   });
   const [respuesta, setRespuesta] = useState("");
@@ -70,6 +149,9 @@ function MensajesPage() {
   const puedeAsignar = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(
     usuario.rol
   );
+  const detalleCanal = canalConversacion(detalle);
+  const detalleEsExterno = canalesExternos.includes(detalleCanal);
+  const ventanaWhatsapp = estadoVentanaWhatsapp(detalle);
 
   const cargarConversaciones = async (params = filtros) => {
     try {
@@ -77,6 +159,7 @@ function MensajesPage() {
       setCargando(true);
       const data = await getConversaciones({
         estado: params.estado || undefined,
+        canal: params.canal || undefined,
         search: params.search || undefined,
       });
       setConversaciones(Array.isArray(data?.conversaciones) ? data.conversaciones : []);
@@ -127,6 +210,11 @@ function MensajesPage() {
   const enviarRespuesta = async () => {
     const texto = respuesta.trim();
 
+    if (detalleEsExterno) {
+      setError("Canal externo conectado en modo recepción. Respuesta desde OS se habilitará en Fase 2.");
+      return;
+    }
+
     if (!detalle?.id || !texto) {
       setError("Escribe una respuesta antes de enviar.");
       return;
@@ -137,7 +225,11 @@ function MensajesPage() {
       setMensaje("");
       await responderConversacion(detalle.id, texto);
       setRespuesta("");
-      setMensaje("Respuesta enviada al portal del Master.");
+      setMensaje(
+        detalleCanal === "PORTAL"
+          ? "Respuesta enviada al portal del Master."
+          : "Respuesta guardada en la conversación."
+      );
       await abrirConversacion(detalle.id);
     } catch (err) {
       setError(err.response?.data?.error || err.message || "No se pudo responder.");
@@ -194,14 +286,14 @@ function MensajesPage() {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-700">
-              Centro de atención
+              Centro de atención omnicanal
             </p>
             <h1 className="mt-2 text-4xl font-black uppercase text-black">
               Bandeja de mensajes
             </h1>
             <p className="mt-2 max-w-3xl text-sm font-bold text-gray-600">
-              Soporte interno para consultas del Portal Master. WhatsApp puede avisar,
-              pero la trazabilidad debe quedar en GMTCH Tune OS.
+              Portal Master, WhatsApp, Instagram y Facebook en una sola bandeja.
+              Fase 1 recibe y registra mensajes externos; las respuestas Meta se habilitarán en Fase 2.
             </p>
           </div>
 
@@ -215,23 +307,44 @@ function MensajesPage() {
           </button>
         </div>
 
-        <form onSubmit={aplicarFiltros} className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr_160px]">
+        <form
+          onSubmit={aplicarFiltros}
+          className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-[170px_180px_1fr_150px]"
+        >
           <select
             value={filtros.estado}
-            onChange={(event) => setFiltros((actual) => ({ ...actual, estado: event.target.value }))}
+            onChange={(event) =>
+              setFiltros((actual) => ({ ...actual, estado: event.target.value }))
+            }
             className="border-2 border-black bg-white px-3 py-2 text-xs font-black uppercase"
           >
-            <option value="">Todos</option>
+            <option value="">Todos los estados</option>
             {estados.map((estado) => (
               <option key={estado} value={estado}>
                 {estadoLabel[estado] || estado}
               </option>
             ))}
           </select>
+          <select
+            value={filtros.canal}
+            onChange={(event) =>
+              setFiltros((actual) => ({ ...actual, canal: event.target.value }))
+            }
+            className="border-2 border-black bg-white px-3 py-2 text-xs font-black uppercase"
+          >
+            <option value="">Todos los canales</option>
+            {canales.map((canal) => (
+              <option key={canal} value={canal}>
+                {canalLabel[canal] || canal}
+              </option>
+            ))}
+          </select>
           <input
             value={filtros.search}
-            onChange={(event) => setFiltros((actual) => ({ ...actual, search: event.target.value }))}
-            placeholder="Buscar por asunto, email, contacto o teléfono"
+            onChange={(event) =>
+              setFiltros((actual) => ({ ...actual, search: event.target.value }))
+            }
+            placeholder="Buscar por asunto, email, contacto, teléfono, usuario externo o wa_id"
             className="border-2 border-black bg-white px-3 py-2 text-xs font-bold"
           />
           <button
@@ -256,45 +369,61 @@ function MensajesPage() {
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-[0.85fr_1.15fr]">
         <div className="space-y-3">
-          {conversaciones.map((conversacion) => (
-            <button
-              type="button"
-              key={conversacion.id}
-              onClick={() => abrirConversacion(conversacion.id)}
-              className={`w-full border-2 bg-white p-4 text-left shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] hover:border-blue-600 ${
-                detalle?.id === conversacion.id ? "border-blue-600" : "border-black"
-              }`}
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`border px-2 py-1 text-[10px] font-black uppercase ${prioridadClass[conversacion.prioridad] || prioridadClass.MEDIA}`}>
-                  {conversacion.prioridad || "MEDIA"}
-                </span>
-                <span className="border border-black px-2 py-1 text-[10px] font-black uppercase">
-                  {estadoLabel[conversacion.estado] || conversacion.estado}
-                </span>
-                {conversacion.no_leidos_internos > 0 && (
-                  <span className="bg-red-600 px-2 py-1 text-[10px] font-black uppercase text-white">
-                    {conversacion.no_leidos_internos} sin leer
+          {conversaciones.map((conversacion) => {
+            const canal = canalConversacion(conversacion);
+            return (
+              <button
+                type="button"
+                key={conversacion.id}
+                onClick={() => abrirConversacion(conversacion.id)}
+                className={`w-full border-2 bg-white p-4 text-left shadow-[5px_5px_0px_0px_rgba(0,0,0,1)] hover:border-blue-600 ${
+                  detalle?.id === conversacion.id ? "border-blue-600" : "border-black"
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`border px-2 py-1 text-[10px] font-black uppercase ${canalClass[canal] || canalClass.MANUAL}`}>
+                    {canalLabel[canal] || canal}
                   </span>
-                )}
-              </div>
-              <p className="mt-3 text-sm font-black uppercase text-black">
-                {conversacion.asunto || "Soporte Portal Master"}
-              </p>
-              <p className="mt-1 text-xs font-bold text-gray-600">
-                {nombreConversacion(conversacion)}
-              </p>
-              <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
-                {conversacion.Cuenta?.nombre_taller || "Cuenta portal"} /{" "}
-                {formatearFecha(conversacion.ultimo_mensaje_at || conversacion.updatedAt)}
-              </p>
-              {conversacion.ultimo_mensaje?.texto && (
-                <p className="mt-2 max-h-10 overflow-hidden text-xs font-semibold text-gray-600">
-                  {conversacion.ultimo_mensaje.texto}
+                  <span className={`border px-2 py-1 text-[10px] font-black uppercase ${prioridadClass[conversacion.prioridad] || prioridadClass.MEDIA}`}>
+                    {conversacion.prioridad || "MEDIA"}
+                  </span>
+                  <span className="border border-black px-2 py-1 text-[10px] font-black uppercase">
+                    {estadoLabel[conversacion.estado] || conversacion.estado}
+                  </span>
+                  {conversacion.no_leidos_internos > 0 && (
+                    <span className="bg-red-600 px-2 py-1 text-[10px] font-black uppercase text-white">
+                      {conversacion.no_leidos_internos} sin leer
+                    </span>
+                  )}
+                </div>
+                <p className="mt-3 text-sm font-black uppercase text-black">
+                  {conversacion.asunto || `${canalLabel[canal] || canal} / mensaje`}
                 </p>
-              )}
-            </button>
-          ))}
+                <p className="mt-1 text-xs font-bold text-gray-600">
+                  {nombreConversacion(conversacion)}
+                </p>
+                <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
+                  {origenConversacion(conversacion)} /{" "}
+                  {formatearFecha(conversacion.ultimo_mensaje_at || conversacion.updatedAt)}
+                </p>
+                {origenPublicacion(conversacion) && (
+                  <p className="mt-1 text-[10px] font-bold uppercase text-gray-500">
+                    {origenPublicacion(conversacion)}
+                  </p>
+                )}
+                {estadoVentanaWhatsapp(conversacion) && (
+                  <p className="mt-2 inline-block border border-green-600 bg-green-50 px-2 py-1 text-[10px] font-black uppercase text-green-700">
+                    {estadoVentanaWhatsapp(conversacion)}
+                  </p>
+                )}
+                {conversacion.ultimo_mensaje?.texto && (
+                  <p className="mt-2 max-h-10 overflow-hidden text-xs font-semibold text-gray-600">
+                    {conversacion.ultimo_mensaje.texto}
+                  </p>
+                )}
+              </button>
+            );
+          })}
 
           {!conversaciones.length && !cargando && (
             <div className="border-2 border-black bg-white p-5 text-sm font-bold text-gray-500">
@@ -311,7 +440,7 @@ function MensajesPage() {
                   Selecciona una conversación
                 </p>
                 <p className="mt-2 text-sm font-bold text-gray-600">
-                  Aquí verás mensajes, responsable, estado y respuesta al Master.
+                  Aquí verás mensajes, canal, origen, responsable y estado.
                 </p>
               </div>
             </div>
@@ -319,15 +448,35 @@ function MensajesPage() {
             <div className="space-y-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <p className="text-xs font-black uppercase text-blue-700">
-                    {detalle.Cuenta?.nombre_taller || "Cuenta portal"}
-                  </p>
-                  <h2 className="mt-1 text-2xl font-black uppercase text-black">
-                    {detalle.asunto || "Soporte Portal Master"}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`border px-2 py-1 text-[10px] font-black uppercase ${canalClass[detalleCanal] || canalClass.MANUAL}`}>
+                      {canalLabel[detalleCanal] || detalleCanal}
+                    </span>
+                    {detalle.proveedor && (
+                      <span className="border border-slate-500 bg-slate-100 px-2 py-1 text-[10px] font-black uppercase text-slate-700">
+                        {detalle.proveedor}
+                      </span>
+                    )}
+                  </div>
+                  <h2 className="mt-2 text-2xl font-black uppercase text-black">
+                    {detalle.asunto || `${canalLabel[detalleCanal] || detalleCanal} / mensaje`}
                   </h2>
                   <p className="mt-1 text-xs font-bold text-gray-600">
-                    {nombreConversacion(detalle)} / {detalle.email || "Sin email"}
+                    {nombreConversacion(detalle)}
                   </p>
+                  <p className="mt-1 text-xs font-bold text-gray-500">
+                    {origenConversacion(detalle)}
+                  </p>
+                  {origenPublicacion(detalle) && (
+                    <p className="mt-1 text-xs font-bold text-gray-500">
+                      {origenPublicacion(detalle)}
+                    </p>
+                  )}
+                  {ventanaWhatsapp && (
+                    <p className="mt-2 inline-block border border-green-600 bg-green-50 px-2 py-1 text-[10px] font-black uppercase text-green-700">
+                      {ventanaWhatsapp}
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <select
@@ -376,9 +525,15 @@ function MensajesPage() {
                 </div>
               )}
 
+              {detalleEsExterno && (
+                <div className="border-2 border-amber-500 bg-amber-50 p-4 text-sm font-black uppercase text-amber-800">
+                  Canal externo conectado en modo recepción. Respuesta desde OS se habilitará en Fase 2.
+                </div>
+              )}
+
               <div className="max-h-[420px] space-y-3 overflow-y-auto border-2 border-black bg-slate-100 p-4">
                 {mensajes.map((item) => {
-                  const interno = item.direccion === "SALIENTE";
+                  const interno = item.direccion !== "ENTRANTE";
                   return (
                     <div
                       key={item.id}
@@ -389,10 +544,15 @@ function MensajesPage() {
                       }`}
                     >
                       <p className="text-[10px] font-black uppercase opacity-80">
-                        {interno ? "GMTCH" : item.enviado_por_nombre || "Master"} /{" "}
-                        {formatearFecha(item.createdAt)}
+                        {interno ? "GMTCH" : item.enviado_por_nombre || nombreConversacion(detalle)} /{" "}
+                        {formatearFecha(item.enviado_at || item.createdAt)}
                       </p>
                       <p className="mt-2 whitespace-pre-wrap leading-6">{item.texto}</p>
+                      {item.estado_envio && (
+                        <p className="mt-2 text-[10px] font-black uppercase opacity-80">
+                          Estado: {item.estado_envio}
+                        </p>
+                      )}
                     </div>
                   );
                 })}
@@ -402,15 +562,21 @@ function MensajesPage() {
                 <textarea
                   value={respuesta}
                   onChange={(event) => setRespuesta(event.target.value)}
-                  placeholder="Escribe respuesta para el portal del Master"
-                  className="min-h-[120px] w-full border-2 border-black bg-white p-3 text-sm font-bold outline-none focus:border-blue-600"
+                  placeholder={
+                    detalleEsExterno
+                      ? "Respuesta externa no habilitada en Fase 1"
+                      : "Escribe respuesta para esta conversación"
+                  }
+                  disabled={detalleEsExterno}
+                  className="min-h-[120px] w-full border-2 border-black bg-white p-3 text-sm font-bold outline-none focus:border-blue-600 disabled:bg-slate-100 disabled:text-slate-500"
                 />
                 <button
                   type="button"
                   onClick={enviarRespuesta}
-                  className="mt-3 bg-black px-5 py-3 text-xs font-black uppercase text-white hover:bg-blue-700"
+                  disabled={detalleEsExterno}
+                  className="mt-3 bg-black px-5 py-3 text-xs font-black uppercase text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
                 >
-                  Responder por portal
+                  {detalleEsExterno ? "Respuesta externa Fase 2" : "Responder"}
                 </button>
               </div>
             </div>

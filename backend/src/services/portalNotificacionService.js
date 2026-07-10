@@ -14,6 +14,15 @@ const CAMPOS_BLOQUEADOS = new Set([
   "flow_token",
 ]);
 
+const EVENTOS_OMNICANAL = new Set([
+  "MENSAJE_OMNICANAL_NUEVO",
+  "WHATSAPP_MENSAJE_NUEVO",
+  "INSTAGRAM_COMENTARIO_NUEVO",
+  "FACEBOOK_MENSAJE_NUEVO",
+  "RESPUESTA_ENVIADA",
+  "RESPUESTA_FALLIDA",
+]);
+
 const limpiarPayload = (valor) => {
   if (Array.isArray(valor)) return valor.map(limpiarPayload);
 
@@ -30,9 +39,13 @@ const limpiarPayload = (valor) => {
 
 const notificarN8nPortal = async (evento, payload = {}) => {
   const webhook = String(process.env.N8N_WEBHOOK_PORTAL_NOTIFICACIONES || "").trim();
+  const eventoNormalizado = String(evento || "").trim().toUpperCase();
 
   if (!webhook) {
-    console.warn("N8N_WEBHOOK_PORTAL_NOTIFICACIONES no configurado. Evento portal omitido:", evento);
+    console.warn(
+      "N8N_WEBHOOK_PORTAL_NOTIFICACIONES no configurado. Evento portal omitido:",
+      eventoNormalizado || evento
+    );
     return { enviado: false, motivo: "WEBHOOK_NO_CONFIGURADO" };
   }
 
@@ -40,7 +53,8 @@ const notificarN8nPortal = async (evento, payload = {}) => {
     await axios.post(
       webhook,
       limpiarPayload({
-        evento,
+        evento: eventoNormalizado || evento,
+        evento_omnicanal: EVENTOS_OMNICANAL.has(eventoNormalizado),
         ...payload,
         fecha: payload.fecha || new Date().toISOString(),
       }),
@@ -51,11 +65,12 @@ const notificarN8nPortal = async (evento, payload = {}) => {
 
     return { enviado: true };
   } catch (error) {
-    console.warn("No se pudo notificar n8n portal:", evento, error.message);
+    console.warn("No se pudo notificar n8n portal:", eventoNormalizado || evento, error.message);
     return { enviado: false, motivo: error.message };
   }
 };
 
 module.exports = {
+  EVENTOS_OMNICANAL,
   notificarN8nPortal,
 };

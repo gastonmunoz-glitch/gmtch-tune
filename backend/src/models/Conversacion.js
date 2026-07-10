@@ -17,6 +17,46 @@ const Conversacion = sequelize.define(
       defaultValue: "PORTAL",
     },
 
+    proveedor: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    external_conversation_id: {
+      type: DataTypes.STRING(220),
+      allowNull: true,
+    },
+
+    external_user_id: {
+      type: DataTypes.STRING(220),
+      allowNull: true,
+    },
+
+    page_id: {
+      type: DataTypes.STRING(220),
+      allowNull: true,
+    },
+
+    instagram_account_id: {
+      type: DataTypes.STRING(220),
+      allowNull: true,
+    },
+
+    post_id: {
+      type: DataTypes.STRING(220),
+      allowNull: true,
+    },
+
+    comment_id: {
+      type: DataTypes.STRING(220),
+      allowNull: true,
+    },
+
+    ad_id: {
+      type: DataTypes.STRING(220),
+      allowNull: true,
+    },
+
     portalCuentaId: {
       type: DataTypes.UUID,
       allowNull: true,
@@ -34,6 +74,16 @@ const Conversacion = sequelize.define(
 
     telefono: {
       type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    wa_id: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+    },
+
+    username_externo: {
+      type: DataTypes.STRING(160),
       allowNull: true,
     },
 
@@ -72,6 +122,22 @@ const Conversacion = sequelize.define(
     ultimo_mensaje_at: {
       type: DataTypes.DATE,
       allowNull: true,
+    },
+
+    last_inbound_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    service_window_expires_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    requiere_template: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
     },
 
     metadata: {
