@@ -6,11 +6,15 @@ const {
   PortalUsuario,
   Usuario,
 } = require("../models");
-const { prepararColumnasOmnicanal } = require("../services/metaMessagingService");
+const {
+  enviarMensajeWhatsApp,
+  prepararColumnasOmnicanal,
+} = require("../services/metaMessagingService");
+const { notificarN8nPortal } = require("../services/portalNotificacionService");
 
 const ESTADOS = ["NUEVA", "EN_ATENCION", "ESPERANDO_CLIENTE", "CERRADA"];
 const PRIORIDADES = ["BAJA", "MEDIA", "ALTA", "URGENTE"];
-const CANALES_EXTERNOS = ["WHATSAPP", "INSTAGRAM", "FACEBOOK"];
+const MAX_TEXTO_RESPUESTA = 4000;
 
 const limpiarTexto = (valor) => {
   if (valor === null || valor === undefined) return "";
@@ -36,6 +40,10 @@ const usuarioActual = (req) =>
   "GMTCH";
 
 const usuarioIdActual = (req) => req.usuario?.id || req.user?.id || null;
+
+const errorEnvioSeguro = (resultado) =>
+  limpiarTexto(resultado?.error?.mensaje) ||
+  "No se pudo enviar el mensaje mediante WhatsApp Cloud API.";
 
 const mapearCuenta = (cuenta) =>
   cuenta
@@ -301,12 +309,131 @@ const responderConversacion = async (req, res) => {
       return res.status(400).json({ error: "El mensaje es obligatorio" });
     }
 
+    if (texto.length > MAX_TEXTO_RESPUESTA) {
+      return res.status(400).json({
+        error: "TEXTO_DEMASIADO_LARGO",
+        message: `El mensaje no puede superar ${MAX_TEXTO_RESPUESTA} caracteres.`,
+      });
+    }
+
     const ahora = new Date();
     const canal = String(conversacion.canal || "PORTAL").toUpperCase();
-    const esCanalExterno = CANALES_EXTERNOS.includes(canal);
+
+    if (["INSTAGRAM", "FACEBOOK"].includes(canal)) {
+      return res.status(400).json({
+        error: "CANAL_NO_HABILITADO",
+        message: "Respuesta externa aún no habilitada para este canal.",
+      });
+    }
+
+    if (canal === "WHATSAPP") {
+      const destinatario = limpiarTexto(conversacion.wa_id || conversacion.telefono);
+      const venceAt = conversacion.service_window_expires_at
+        ? new Date(conversacion.service_window_expires_at)
+        : null;
+      const ventanaInvalida = !venceAt || Number.isNaN(venceAt.getTime());
+      const ventanaVencida = ventanaInvalida || ahora > venceAt;
+
+      if (!destinatario) {
+        return res.status(400).json({
+          error: "WHATSAPP_DESTINATARIO_INVALIDO",
+          message: "La conversación no tiene wa_id ni teléfono para responder.",
+        });
+      }
+
+      if (conversacion.requiere_template || ventanaVencida) {
+        return res.status(400).json({
+          error: "WHATSAPP_REQUIERE_TEMPLATE",
+          message:
+            "La ventana de atención de WhatsApp venció. Debes usar una plantilla aprobada.",
+        });
+      }
+
+      const mensajeWhatsApp = await MensajeConversacion.create({
+        conversacionId: conversacion.id,
+        direccion: "SALIENTE",
+        canal: conversacion.canal,
+        proveedor: conversacion.proveedor || "META",
+        tipo_mensaje: "text",
+        texto,
+        enviado_por_tipo: "USUARIO_INTERNO",
+        enviado_por_id: usuarioIdActual(req),
+        enviado_por_nombre: usuarioActual(req),
+        leido: false,
+        enviado_at: null,
+        estado_envio: "PENDIENTE",
+        error_envio: null,
+        metadata: {
+          fase: "WHATSAPP_OS_FASE_2",
+        },
+      });
+
+      const resultado = await enviarMensajeWhatsApp({
+        to: destinatario,
+        texto,
+        conversacionId: conversacion.id,
+        mensajeId: mensajeWhatsApp.id,
+      });
+
+      if (!resultado.ok) {
+        const errorSeguro = errorEnvioSeguro(resultado);
+
+        await mensajeWhatsApp.update({
+          estado_envio: "FALLIDO",
+          error_envio: errorSeguro,
+        });
+
+        await notificarN8nPortal("WHATSAPP_RESPUESTA_FALLIDA", {
+          conversacion_id: conversacion.id,
+          mensaje_id: mensajeWhatsApp.id,
+          canal,
+          destinatario,
+          error_codigo: resultado.error?.codigo || "WHATSAPP_ENVIO_FALLIDO",
+          error: errorSeguro,
+          fecha: ahora.toISOString(),
+        });
+
+        return res.status(502).json({
+          error: "WHATSAPP_ENVIO_FALLIDO",
+          message: "No se pudo enviar WhatsApp. Revisa token/número/API.",
+          mensaje: mapearMensaje(mensajeWhatsApp),
+        });
+      }
+
+      const enviadoAt = new Date();
+      await mensajeWhatsApp.update({
+        estado_envio: "ENVIADO",
+        externo_message_id: resultado.provider_message_id,
+        enviado_at: enviadoAt,
+        error_envio: null,
+      });
+
+      await conversacion.update({
+        estado: "ESPERANDO_CLIENTE",
+        asignado_a_id: conversacion.asignado_a_id || usuarioIdActual(req),
+        ultimo_mensaje_at: enviadoAt,
+      });
+
+      await notificarN8nPortal("WHATSAPP_RESPUESTA_ENVIADA", {
+        conversacion_id: conversacion.id,
+        mensaje_id: mensajeWhatsApp.id,
+        provider_message_id: resultado.provider_message_id,
+        canal,
+        destinatario,
+        enviado_por_id: usuarioIdActual(req),
+        enviado_por_nombre: usuarioActual(req),
+        fecha: enviadoAt.toISOString(),
+      });
+
+      return res.status(201).json({
+        mensaje: mapearMensaje(mensajeWhatsApp),
+        conversacion: await mapearConversacion(conversacion),
+      });
+    }
+
     const mensaje = await MensajeConversacion.create({
       conversacionId: conversacion.id,
-      direccion: esCanalExterno ? "SALIENTE_LOCAL" : "SALIENTE",
+      direccion: "SALIENTE",
       canal: conversacion.canal,
       proveedor: conversacion.proveedor || null,
       tipo_mensaje: "text",
@@ -316,16 +443,9 @@ const responderConversacion = async (req, res) => {
       enviado_por_nombre: usuarioActual(req),
       leido: false,
       enviado_at: ahora,
-      estado_envio: esCanalExterno ? "NO_ENVIADO" : "ENVIADO_LOCAL",
-      error_envio: esCanalExterno
-        ? "Respuesta externa aun no habilitada para este canal en Fase 1."
-        : null,
-      metadata: esCanalExterno
-        ? {
-            fase: "OMNICANAL_V2_FASE_1",
-            aviso: "Respuesta externa aun no habilitada para este canal.",
-          }
-        : {},
+      estado_envio: "ENVIADO_LOCAL",
+      error_envio: null,
+      metadata: {},
     });
 
     await conversacion.update({
@@ -334,10 +454,8 @@ const responderConversacion = async (req, res) => {
       ultimo_mensaje_at: ahora,
     });
 
-    res.status(esCanalExterno ? 202 : 201).json({
-      aviso: esCanalExterno
-        ? "Respuesta externa aun no habilitada para este canal."
-        : null,
+    res.status(201).json({
+      aviso: null,
       mensaje: mapearMensaje(mensaje),
       conversacion: await mapearConversacion(conversacion),
     });

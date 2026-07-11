@@ -11,7 +11,8 @@ import api, {
 
 const estados = ["NUEVA", "EN_ATENCION", "ESPERANDO_CLIENTE", "CERRADA"];
 const canales = ["PORTAL", "WHATSAPP", "INSTAGRAM", "FACEBOOK", "MANUAL"];
-const canalesExternos = ["WHATSAPP", "INSTAGRAM", "FACEBOOK"];
+const canalesMetaNoHabilitados = ["INSTAGRAM", "FACEBOOK"];
+const MAX_TEXTO_RESPUESTA = 4000;
 
 const estadoLabel = {
   NUEVA: "Nueva",
@@ -114,20 +115,26 @@ const origenPublicacion = (conversacion) => {
   return partes.join(" / ");
 };
 
+const whatsappDentroDeVentana = (conversacion) => {
+  if (canalConversacion(conversacion) !== "WHATSAPP") return false;
+  if (conversacion.requiere_template || !conversacion.service_window_expires_at) {
+    return false;
+  }
+
+  const venceAt = new Date(conversacion.service_window_expires_at);
+  return !Number.isNaN(venceAt.getTime()) && Date.now() <= venceAt.getTime();
+};
+
 const estadoVentanaWhatsapp = (conversacion) => {
   if (canalConversacion(conversacion) !== "WHATSAPP") return null;
 
-  if (conversacion.requiere_template) {
-    return "Fuera de ventana 24h · requiere plantilla";
-  }
-
-  if (conversacion.service_window_expires_at) {
+  if (whatsappDentroDeVentana(conversacion)) {
     return `Puedes responder libremente hasta: ${formatearFecha(
       conversacion.service_window_expires_at
     )}`;
   }
 
-  return "Ventana WhatsApp no calculada";
+  return "Fuera de ventana 24h · requiere plantilla aprobada.";
 };
 
 function MensajesPage() {
@@ -144,13 +151,19 @@ function MensajesPage() {
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
   const [cargando, setCargando] = useState(false);
+  const [enviando, setEnviando] = useState(false);
 
   const usuario = useMemo(obtenerUsuarioLocal, []);
   const puedeAsignar = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(
     usuario.rol
   );
   const detalleCanal = canalConversacion(detalle);
-  const detalleEsExterno = canalesExternos.includes(detalleCanal);
+  const detalleEsMetaNoHabilitado = canalesMetaNoHabilitados.includes(detalleCanal);
+  const whatsappBloqueado =
+    detalleCanal === "WHATSAPP" && !whatsappDentroDeVentana(detalle);
+  const conversacionCerrada = detalle?.estado === "CERRADA";
+  const respuestaBloqueada =
+    detalleEsMetaNoHabilitado || whatsappBloqueado || conversacionCerrada;
   const ventanaWhatsapp = estadoVentanaWhatsapp(detalle);
 
   const cargarConversaciones = async (params = filtros) => {
@@ -210,8 +223,15 @@ function MensajesPage() {
   const enviarRespuesta = async () => {
     const texto = respuesta.trim();
 
-    if (detalleEsExterno) {
-      setError("Canal externo conectado en modo recepción. Respuesta desde OS se habilitará en Fase 2.");
+    if (detalleEsMetaNoHabilitado) {
+      setError(
+        "Canal externo en modo recepción. Respuesta se habilitará en próxima fase."
+      );
+      return;
+    }
+
+    if (whatsappBloqueado) {
+      setError("Fuera de ventana 24h · requiere plantilla aprobada.");
       return;
     }
 
@@ -220,19 +240,43 @@ function MensajesPage() {
       return;
     }
 
+    if (texto.length > MAX_TEXTO_RESPUESTA) {
+      setError(`El mensaje no puede superar ${MAX_TEXTO_RESPUESTA} caracteres.`);
+      return;
+    }
+
     try {
       setError("");
       setMensaje("");
+      setEnviando(true);
       await responderConversacion(detalle.id, texto);
       setRespuesta("");
       setMensaje(
-        detalleCanal === "PORTAL"
-          ? "Respuesta enviada al portal del Master."
-          : "Respuesta guardada en la conversación."
+        detalleCanal === "WHATSAPP"
+          ? "Mensaje de WhatsApp enviado."
+          : detalleCanal === "PORTAL"
+            ? "Respuesta enviada al portal del Master."
+            : "Respuesta guardada en la conversación."
       );
       await abrirConversacion(detalle.id);
     } catch (err) {
-      setError(err.response?.data?.error || err.message || "No se pudo responder.");
+      const data = err.response?.data;
+
+      if (data?.error === "WHATSAPP_REQUIERE_TEMPLATE") {
+        setError(
+          data.message ||
+            "La ventana de atención de WhatsApp venció. Debes usar una plantilla aprobada."
+        );
+      } else if (
+        data?.error === "WHATSAPP_ENVIO_FALLIDO" ||
+        data?.mensaje?.estado_envio === "FALLIDO"
+      ) {
+        setError("No se pudo enviar WhatsApp. Revisa token/número/API.");
+      } else {
+        setError(data?.message || data?.error || err.message || "No se pudo responder.");
+      }
+    } finally {
+      setEnviando(false);
     }
   };
 
@@ -293,7 +337,8 @@ function MensajesPage() {
             </h1>
             <p className="mt-2 max-w-3xl text-sm font-bold text-gray-600">
               Portal Master, WhatsApp, Instagram y Facebook en una sola bandeja.
-              Fase 1 recibe y registra mensajes externos; las respuestas Meta se habilitarán en Fase 2.
+              WhatsApp permite responder dentro de su ventana de 24 horas; Instagram y
+              Facebook continúan en modo recepción.
             </p>
           </div>
 
@@ -412,7 +457,13 @@ function MensajesPage() {
                   </p>
                 )}
                 {estadoVentanaWhatsapp(conversacion) && (
-                  <p className="mt-2 inline-block border border-green-600 bg-green-50 px-2 py-1 text-[10px] font-black uppercase text-green-700">
+                  <p
+                    className={`mt-2 inline-block border px-2 py-1 text-[10px] font-black uppercase ${
+                      whatsappDentroDeVentana(conversacion)
+                        ? "border-green-600 bg-green-50 text-green-700"
+                        : "border-amber-600 bg-amber-50 text-amber-800"
+                    }`}
+                  >
                     {estadoVentanaWhatsapp(conversacion)}
                   </p>
                 )}
@@ -473,7 +524,13 @@ function MensajesPage() {
                     </p>
                   )}
                   {ventanaWhatsapp && (
-                    <p className="mt-2 inline-block border border-green-600 bg-green-50 px-2 py-1 text-[10px] font-black uppercase text-green-700">
+                    <p
+                      className={`mt-2 inline-block border px-2 py-1 text-[10px] font-black uppercase ${
+                        whatsappBloqueado
+                          ? "border-amber-600 bg-amber-50 text-amber-800"
+                          : "border-green-600 bg-green-50 text-green-700"
+                      }`}
+                    >
                       {ventanaWhatsapp}
                     </p>
                   )}
@@ -525,9 +582,9 @@ function MensajesPage() {
                 </div>
               )}
 
-              {detalleEsExterno && (
+              {detalleEsMetaNoHabilitado && (
                 <div className="border-2 border-amber-500 bg-amber-50 p-4 text-sm font-black uppercase text-amber-800">
-                  Canal externo conectado en modo recepción. Respuesta desde OS se habilitará en Fase 2.
+                  Canal externo en modo recepción. Respuesta se habilitará en próxima fase.
                 </div>
               )}
 
@@ -562,21 +619,35 @@ function MensajesPage() {
                 <textarea
                   value={respuesta}
                   onChange={(event) => setRespuesta(event.target.value)}
+                  maxLength={MAX_TEXTO_RESPUESTA}
                   placeholder={
-                    detalleEsExterno
-                      ? "Respuesta externa no habilitada en Fase 1"
-                      : "Escribe respuesta para esta conversación"
+                    conversacionCerrada
+                      ? "La conversación está cerrada"
+                      : detalleEsMetaNoHabilitado
+                        ? "Canal externo en modo recepción"
+                        : whatsappBloqueado
+                          ? "Fuera de ventana 24h · requiere plantilla aprobada"
+                          : "Escribe respuesta para esta conversación"
                   }
-                  disabled={detalleEsExterno}
+                  disabled={respuestaBloqueada || enviando}
                   className="min-h-[120px] w-full border-2 border-black bg-white p-3 text-sm font-bold outline-none focus:border-blue-600 disabled:bg-slate-100 disabled:text-slate-500"
                 />
+                <p className="mt-1 text-right text-[10px] font-bold uppercase text-gray-500">
+                  {respuesta.length}/{MAX_TEXTO_RESPUESTA}
+                </p>
                 <button
                   type="button"
                   onClick={enviarRespuesta}
-                  disabled={detalleEsExterno}
+                  disabled={respuestaBloqueada || enviando}
                   className="mt-3 bg-black px-5 py-3 text-xs font-black uppercase text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
                 >
-                  {detalleEsExterno ? "Respuesta externa Fase 2" : "Responder"}
+                  {enviando
+                    ? "Enviando..."
+                    : respuestaBloqueada
+                      ? "Respuesta no disponible"
+                      : detalleCanal === "WHATSAPP"
+                        ? "Enviar WhatsApp"
+                        : "Responder"}
                 </button>
               </div>
             </div>

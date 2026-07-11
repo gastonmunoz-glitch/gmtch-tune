@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const axios = require("axios");
 const { Op } = require("sequelize");
 const sequelize = require("../config/database");
 const { Conversacion, MensajeConversacion } = require("../models");
@@ -41,6 +42,95 @@ const fechaDesdeTimestampMeta = (timestamp) => {
   const fecha = new Date(ms);
 
   return Number.isNaN(fecha.getTime()) ? new Date() : fecha;
+};
+
+const errorSeguroWhatsApp = (error) => {
+  const providerError = error?.response?.data?.error;
+
+  if (providerError) {
+    return {
+      codigo: limpiarTexto(providerError.code) || "META_API_ERROR",
+      mensaje: recortar(providerError.message || "WhatsApp Cloud API rechazo el mensaje.", 500),
+      tipo: limpiarTexto(providerError.type) || null,
+      fbtrace_id: limpiarTexto(providerError.fbtrace_id) || null,
+    };
+  }
+
+  return {
+    codigo: error?.code || "WHATSAPP_ENVIO_FALLIDO",
+    mensaje: recortar(error?.message || "No se pudo enviar el mensaje de WhatsApp.", 500),
+  };
+};
+
+const enviarMensajeWhatsApp = async ({ to, texto, conversacionId, mensajeId }) => {
+  const accessToken = limpiarTexto(process.env.WHATSAPP_ACCESS_TOKEN);
+  const phoneNumberId = limpiarTexto(process.env.WHATSAPP_PHONE_NUMBER_ID);
+  const version = limpiarTexto(process.env.WHATSAPP_GRAPH_API_VERSION) || "v22.0";
+  const destinatario = limpiarTexto(to).replace(/[^0-9]/g, "");
+  const cuerpo = limpiarTexto(texto);
+
+  if (!accessToken || !phoneNumberId) {
+    return {
+      ok: false,
+      provider_message_id: null,
+      raw: null,
+      error: {
+        codigo: "WHATSAPP_CONFIG_INCOMPLETA",
+        mensaje: "WhatsApp Cloud API no está configurada para enviar mensajes.",
+      },
+    };
+  }
+
+  if (!destinatario || !cuerpo) {
+    return {
+      ok: false,
+      provider_message_id: null,
+      raw: null,
+      error: {
+        codigo: "WHATSAPP_DATOS_INVALIDOS",
+        mensaje: "Destinatario o texto de WhatsApp no válido.",
+      },
+    };
+  }
+
+  try {
+    const response = await axios.post(
+      `https://graph.facebook.com/${encodeURIComponent(version)}/${encodeURIComponent(
+        phoneNumberId
+      )}/messages`,
+      {
+        messaging_product: "whatsapp",
+        to: destinatario,
+        type: "text",
+        text: {
+          preview_url: false,
+          body: cuerpo,
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 15000,
+      }
+    );
+
+    return {
+      ok: true,
+      provider_message_id: limpiarTexto(response.data?.messages?.[0]?.id) || null,
+      raw: response.data || null,
+      referencia: { conversacionId, mensajeId },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      provider_message_id: null,
+      raw: error?.response?.data || null,
+      error: errorSeguroWhatsApp(error),
+      referencia: { conversacionId, mensajeId },
+    };
+  }
 };
 
 const prepararColumnasOmnicanal = async () => {
@@ -429,4 +519,5 @@ module.exports = {
   generarPayloadHash,
   extraerEventosMeta,
   guardarEventoEntrante,
+  enviarMensajeWhatsApp,
 };
