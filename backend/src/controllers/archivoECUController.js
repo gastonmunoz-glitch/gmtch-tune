@@ -22,6 +22,20 @@ const normalizarTexto = limpiarTexto;
 const usuarioActualId = (req) => limpiarTexto(req.usuario?.id || req.user?.id);
 const rolActual = (req) => limpiarTexto(req.usuario?.rol || req.user?.rol).toUpperCase();
 
+const obtenerSnapshotUsuarioInterno = (usuario) => {
+  if (!usuario) return "";
+  return limpiarTexto(usuario.username || usuario.nombre || String(usuario.id));
+};
+
+const obtenerSnapshotReqUsuario = (req) =>
+  limpiarTexto(
+    req.usuario?.username ||
+      req.usuario?.nombre ||
+      String(req.usuario?.id || "sistema")
+  );
+
+const usuarioActual = obtenerSnapshotReqUsuario;
+
 const ROLES_CIERRE_TECNICO_LEGACY = new Set([
   "OWNER",
   "ADMIN",
@@ -31,9 +45,6 @@ const ROLES_CIERRE_TECNICO_LEGACY = new Set([
 
 const puedeCerrarLegacySinResponsable = (req) =>
   ROLES_CIERRE_TECNICO_LEGACY.has(rolActual(req));
-
-const obtenerSnapshotUsuario = (usuario) =>
-  limpiarTexto(usuario?.username || usuario?.nombre || usuario?.email || usuario?.id);
 
 const crearErrorHttp = (statusCode, message, extra = {}) => {
   const error = new Error(message);
@@ -47,7 +58,7 @@ const buscarUsuarioActivoPorId = async (usuarioId) => {
   if (!id) return null;
 
   const usuario = await Usuario.findByPk(id, {
-    attributes: ["id", "nombre", "username", "email", "rol", "activo"],
+    attributes: ["id", "username", "nombre", "rol", "activo"],
   });
 
   if (!usuario || usuario.activo === false) {
@@ -99,7 +110,7 @@ const resolverResponsableArchivoDesdeBody = async (
     }
     return {
       id: String(usuario.id),
-      texto: obtenerSnapshotUsuario(usuario),
+      texto: obtenerSnapshotUsuarioInterno(usuario),
       usuario,
       legacy: false,
     };
@@ -766,18 +777,6 @@ const calcularProcessGuardArchivo = (archivo, ahora = new Date()) => {
 
 const obtenerOrdenId = (body = {}) => {
   return body.ordenId || body.orden_id || body.ordenTrabajoId || body.orden_trabajo_id;
-};
-
-const usuarioActual = (req) => {
-  return (
-    req.usuario?.username ||
-    req.user?.username ||
-    req.usuario?.nombre ||
-    req.user?.nombre ||
-    req.usuario?.rol ||
-    req.user?.rol ||
-    "sistema"
-  );
 };
 
 const normalizarVersiones = (valor) => {
