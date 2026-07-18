@@ -192,14 +192,6 @@ const CATEGORIAS_CLIENTE = [
   { value: "INTERNO", label: "Interno" },
 ];
 
-const GUIA_RECEPCION_LUNES = [
-  "Paso 1 Cliente",
-  "Paso 2 Vehículo",
-  "Paso 3 Motivo / Servicio",
-  "Paso 4 Prioridad / Responsable",
-  "Paso 5 Crear orden",
-];
-
 const SERVICIOS_ORDEN_SUGERIDOS = [
   "Diagnóstico profesional",
   "Revisión DTC",
@@ -290,7 +282,14 @@ function RecepcionRapidaPage() {
 
   const [fotosArchivos, setFotosArchivos] = useState([]);
 
-  const etiquetas = ["Buscar patente", "Cliente", "Vehículo", "Servicio", "Fotos", "Cierre"];
+  const etiquetas = [
+    "Patente",
+    "Cliente",
+    "Vehículo",
+    "Trabajo y encargado",
+    "Fotos",
+    "Revisar y enviar",
+  ];
 
   useEffect(() => {
     escribirStorage("gmtch_paso_recepcion", paso);
@@ -1238,9 +1237,9 @@ function RecepcionRapidaPage() {
         return (
           <div className="space-y-4">
             <div>
-              <h2 className="font-black text-lg uppercase">4. Servicio / Síntomas</h2>
+              <h2 className="font-black text-lg uppercase">4. Trabajo y encargado</h2>
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Recepción registra lo que informa el cliente y lo visible. No diagnostica ECU.
+                Registra qué necesita el cliente y quién se hará cargo.
               </p>
             </div>
 
@@ -1314,7 +1313,7 @@ function RecepcionRapidaPage() {
                 Responsable técnico *
               </label>
               <p className="text-[10px] font-bold uppercase text-gray-600">
-                Obligatorio para crear la orden. Se asignará al área técnica según el servicio seleccionado.
+                Este paso asigna quién tiene la pelota. Una orden sin encargado no puede avanzar.
               </p>
 
             <select
@@ -1452,8 +1451,7 @@ function RecepcionRapidaPage() {
             />
 
             <div className="bg-yellow-50 border-2 border-yellow-500 p-4 text-xs font-bold uppercase leading-relaxed">
-              El mecánico no decide si se retira la ECU. Esa decisión queda para el técnico ECU /
-              operador de lectura según método OBD, BENCH, BOOT o retiro.
+              El técnico ECU decidirá cómo se realizará la lectura. Recepción solo registra lo informado por el cliente.
             </div>
 
             <div className="flex justify-between gap-4">
@@ -1471,7 +1469,7 @@ function RecepcionRapidaPage() {
                 disabled={cargando}
                 className="bg-black text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
               >
-                {cargando ? "Guardando..." : "Guardar Orden y Continuar"}
+                {cargando ? "Guardando..." : "Crear orden y pasar a fotos"}
               </button>
             </div>
           </div>
@@ -1558,7 +1556,7 @@ function RecepcionRapidaPage() {
                 onClick={siguiente}
                 className="bg-black text-white px-6 py-3 font-black uppercase text-xs"
               >
-                Continuar a Cierre
+                Revisar recepción
               </button>
             </div>
           </div>
@@ -1568,25 +1566,29 @@ function RecepcionRapidaPage() {
         return (
           <div className="space-y-6">
             <div>
-              <h2 className="font-black text-lg uppercase">6. Cierre de Recepción</h2>
+              <h2 className="font-black text-lg uppercase">6. Revisar y enviar</h2>
               <p className="text-xs font-bold text-gray-500 uppercase">
                 Al finalizar, la orden queda en cola para diagnóstico.
               </p>
             </div>
 
-            <div className="bg-slate-50 border-4 border-black p-5 space-y-3 text-xs font-bold uppercase">
-              <p>Cliente ID: {clienteId || "No registrado"}</p>
-              <p>Vehículo ID: {vehiculoId || "No registrado"}</p>
-              <p>Orden ID: {ordenId || leerStorage("gmtch_ordenId") || "No registrado"}</p>
-              <p>Estado actual: {ESTADO_ORDEN_INICIAL}</p>
-              <p>Estado siguiente: {ESTADO_ORDEN_FINAL_RECEPCION}</p>
-              <p>Fotos pendientes de subir: {fotosArchivos.length}</p>
+            <div className="bg-slate-50 border-4 border-black p-5 space-y-3 text-sm font-bold">
+              <p><strong>Cliente:</strong> {texto(cliente.nombre)}</p>
+              <p>
+                <strong>Vehículo:</strong> {texto(vehiculo.patente)} · {texto(vehiculo.marca)} {texto(vehiculo.modelo)}
+              </p>
+              <p><strong>Trabajo solicitado:</strong> {texto(orden.servicio_solicitado)}</p>
+              <p><strong>Encargado:</strong> {texto(orden.responsable_tecnico_texto, "Falta seleccionar")}</p>
+              <p>
+                <strong>Fotos:</strong>{" "}
+                {fotosArchivos.length > 0
+                  ? `${fotosArchivos.length} lista(s) para guardar`
+                  : "Sin fotos; la orden quedará incompleta"}
+              </p>
             </div>
 
             <div className="bg-blue-50 border-2 border-blue-600 p-4 text-xs font-bold uppercase leading-relaxed">
-              Siguiente etapa: operador de diagnóstico/scanner. Luego el técnico ECU define el
-              método de lectura y si corresponde desmontaje. Mecánica solo ejecuta trabajos
-              asignados por plataforma.
+              Siguiente paso: diagnóstico. Allí se registran la lectura del scanner y los códigos de falla.
             </div>
 
             <div className="flex justify-between gap-4">
@@ -1604,7 +1606,7 @@ function RecepcionRapidaPage() {
                 disabled={cargando}
                 className="bg-green-600 text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
               >
-                {cargando ? "Finalizando..." : "Finalizar Recepción"}
+                {cargando ? "Enviando..." : "Enviar a diagnóstico"}
               </button>
             </div>
           </div>
@@ -1622,7 +1624,7 @@ function RecepcionRapidaPage() {
           Recepción Operativa
         </h1>
         <p className="text-xs font-black uppercase text-gray-500 mt-2">
-          Ingreso inicial por patente. Scanner, lectura ECU y mecánica se asignan después.
+          Cliente y vehículo son obligatorios. Te guiaremos paso a paso.
         </p>
       </div>
 
@@ -1633,25 +1635,6 @@ function RecepcionRapidaPage() {
           </p>
         </div>
       )}
-
-      <div className="mb-6 border-4 border-blue-700 bg-blue-50 p-4">
-        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-900">
-          Guía visual de recepción rápida
-        </p>
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-5">
-          {GUIA_RECEPCION_LUNES.map((item) => (
-            <div
-              key={item}
-              className="border-2 border-blue-700 bg-white p-3 text-[10px] font-black uppercase text-blue-950"
-            >
-              {item}
-            </div>
-          ))}
-        </div>
-        <p className="mt-3 text-[10px] font-black uppercase text-blue-900">
-          Todo trabajo debe tener cliente, vehículo y motivo claro.
-        </p>
-      </div>
 
       {renderAviso()}
 
@@ -1688,11 +1671,9 @@ function RecepcionRapidaPage() {
       {renderPaso()}
 
       <div className="mt-8 pt-4 border-t border-black flex flex-col md:flex-row justify-between gap-4 md:items-center">
-        <div className="text-[10px] uppercase font-bold text-gray-500">
-          Cliente ID: {clienteId || "No registrado"} | Vehículo ID:{" "}
-          {vehiculoId || "No registrado"} | Orden ID:{" "}
-          {ordenId || leerStorage("gmtch_ordenId") || "No registrado"}
-          {origenRecepcion && <> | Origen: {origenRecepcion}</>}
+        <div className="text-xs font-bold text-gray-500">
+          Paso {paso} de 6 · {etiquetas[paso - 1]}
+          {origenRecepcion && <> · Recepción en curso</>}
         </div>
 
         <button

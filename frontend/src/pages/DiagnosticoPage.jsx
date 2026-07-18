@@ -181,7 +181,9 @@ function DiagnosticoPage() {
 
       mostrarAviso(
         "error",
-        err.response?.data?.error || "No se pudo guardar el diagnóstico."
+        err.response?.data?.message ||
+          err.response?.data?.error ||
+          "No se pudo guardar. Revisa la orden, la captura del scanner y los códigos de falla."
       );
     } finally {
       setCargando(false);
@@ -210,11 +212,11 @@ function DiagnosticoPage() {
     <div className="max-w-6xl mx-auto p-2 space-y-8">
       <div className="bg-black text-white p-8 border-b-8 border-red-600 shadow-2xl">
         <h1 className="text-3xl md:text-5xl font-black italic tracking-tighter uppercase">
-          Diagnóstico obligatorio
+          Registrar diagnóstico
         </h1>
 
         <p className="text-red-400 font-bold text-xs uppercase tracking-[.25em] mt-2">
-          Scanner · DTC · Evidencia previa a File Service
+          Lectura del scanner · fallas · evidencia
         </p>
       </div>
 
@@ -224,9 +226,22 @@ function DiagnosticoPage() {
         onSubmit={handleSubmit}
         className="bg-white p-8 rounded-xl shadow-2xl border-4 border-black space-y-6"
       >
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+          {["1. Elegir orden", "2. Registrar lectura", "3. Anotar fallas", "4. Guardar"].map(
+            (item) => (
+              <div
+                key={item}
+                className="rounded-lg border-2 border-black bg-slate-50 p-3 text-center text-xs font-black uppercase"
+              >
+                {item}
+              </div>
+            )
+          )}
+        </div>
+
         <section className="border-4 border-black p-5 bg-slate-50">
           <h2 className="text-lg font-black uppercase mb-3">
-            Seleccionar orden por patente, cliente o número
+            1. Elegir orden por patente, cliente o número
           </h2>
 
           <input
@@ -292,10 +307,10 @@ function DiagnosticoPage() {
           </section>
         )}
 
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 border-2 border-blue-600 bg-blue-50 p-5">
           <div>
             <label className="block text-[10px] font-black text-slate-500 uppercase mb-2">
-              Fase del diagnóstico
+              2. Momento de la lectura
             </label>
 
             <select
@@ -303,9 +318,9 @@ function DiagnosticoPage() {
               value={formData.fase}
               onChange={(e) => actualizarForm("fase", e.target.value)}
             >
-              <option value="PRE_FILE_SERVICE">Antes de File Service</option>
-              <option value="POST_ESCRITURA">Post escritura / prueba</option>
-              <option value="CONTROL_FINAL">Control final</option>
+              <option value="PRE_FILE_SERVICE">Diagnóstico inicial</option>
+              <option value="POST_ESCRITURA">Prueba después de cargar el MOD</option>
+              <option value="CONTROL_FINAL">Revisión final antes de entregar</option>
             </select>
           </div>
 
@@ -329,7 +344,7 @@ function DiagnosticoPage() {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 border-2 border-black p-5">
           <div>
             <label className="block text-[10px] font-black text-slate-500 uppercase mb-2">
               Síntomas / fallas detectadas
@@ -346,7 +361,7 @@ function DiagnosticoPage() {
           <div>
             <div className="flex items-center justify-between gap-4 mb-2">
               <label className="block text-[10px] font-black text-slate-500 uppercase">
-                Códigos DTC
+                3. Códigos de falla (DTC)
               </label>
 
               <label className="flex items-center gap-2 text-[10px] font-black uppercase">
@@ -374,6 +389,9 @@ function DiagnosticoPage() {
               onChange={(e) => actualizarForm("codigos_dtc", e.target.value)}
               placeholder="P0401, P2002, P20E8..."
             />
+            <p className="mt-2 text-xs font-bold text-slate-600">
+              DTC = códigos de falla leídos por scanner. Si no aparecen códigos, marca “Sin DTC presentes”.
+            </p>
           </div>
         </section>
 
@@ -395,7 +413,7 @@ function DiagnosticoPage() {
           disabled={cargando}
           className="w-full bg-red-600 text-white py-5 rounded-xl font-black text-sm uppercase shadow-xl disabled:bg-gray-400"
         >
-          {cargando ? "Guardando..." : "Certificar diagnóstico obligatorio"}
+          {cargando ? "Guardando..." : "4. Guardar diagnóstico y continuar"}
         </button>
       </form>
     </div>

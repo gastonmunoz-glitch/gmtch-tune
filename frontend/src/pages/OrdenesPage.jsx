@@ -305,6 +305,62 @@ const estadoClase = (estado) => {
   return getStatusColor(estado || "SIN_ESTADO", "solid");
 };
 
+const traducirEstadoPago = (estado) => {
+  const valor = String(estado || "PENDIENTE").toUpperCase();
+  if (valor === "PAGADO") return "Pago confirmado";
+  if (valor === "PARCIAL") return "Pago parcial";
+  if (valor === "ANULADO") return "Pago anulado";
+  return "Pago pendiente";
+};
+
+const obtenerEncargadoOrden = (orden) => {
+  const estado = String(orden?.estado || "").toUpperCase();
+
+  if (["RECEPCIONADO", "PARA_DIAGNOSTICO", "EN_DIAGNOSTICO"].includes(estado)) {
+    return (
+      orden?.diagnostico_asignado_a ||
+      orden?.operador_ecu_asignado_a ||
+      orden?.supervisor_asignado_a ||
+      "Sin encargado"
+    );
+  }
+
+  if (["PARA_MECANICA", "EN_MECANICA"].includes(estado)) {
+    return orden?.mecanico_asignado_a || orden?.supervisor_asignado_a || "Sin encargado";
+  }
+
+  if (["EN_PROGRAMACION", "EN_PROCESO"].includes(estado)) {
+    return (
+      orden?.operador_ecu_asignado_a ||
+      orden?.mecanico_asignado_a ||
+      orden?.supervisor_asignado_a ||
+      "Sin encargado"
+    );
+  }
+
+  return (
+    orden?.operador_ecu_asignado_a ||
+    orden?.mecanico_asignado_a ||
+    orden?.diagnostico_asignado_a ||
+    orden?.supervisor_asignado_a ||
+    "Sin encargado"
+  );
+};
+
+const textoAccionOrdenSimple = (estado) => {
+  const valor = String(estado || "").toUpperCase();
+  if (["RECEPCIONADO", "PARA_DIAGNOSTICO"].includes(valor)) {
+    return "Continuar diagnóstico";
+  }
+  if (["EN_DIAGNOSTICO", "EN_PROGRAMACION", "EN_PROCESO"].includes(valor)) {
+    return "Continuar trabajo";
+  }
+  if (valor === "PARA_MECANICA") return "Continuar trabajo mecánico";
+  if (valor === "LISTO_PARA_ENTREGA") return "Revisar entrega";
+  if (valor === "ENTREGADO") return "Ver historial";
+  return "Continuar trabajo";
+};
+
 const puedeCobrarFrontend = () => {
   const rol = localStorage.getItem("rol");
   const username = String(localStorage.getItem("username") || "").toLowerCase();
@@ -730,11 +786,13 @@ function OrdenesPage() {
     usuarios.find((usuario) => String(usuario.id) === String(usuarioId));
 
   const snapshotUsuario = (usuario) =>
-    usuario?.username || usuario?.nombre || usuario?.email || "";
+    usuario?.username || usuario?.nombre || String(usuario?.id || "");
 
   const mensajeErrorResponsable = (err, fallback) => {
     const data = err.response?.data || {};
-    if (data.error === "RESPONSABLE_BLOQUEADO") {
+    const codigo = String(data.error || data.codigo || "").toUpperCase();
+
+    if (codigo === "RESPONSABLE_BLOQUEADO") {
       const pendientes = Array.isArray(data.pendientes_criticos)
         ? data.pendientes_criticos.slice(0, 3)
         : [];
@@ -751,7 +809,15 @@ function OrdenesPage() {
         .join("\n");
     }
 
-    return data.message || data.error || fallback;
+    if (codigo === "RESPONSABLE_REQUERIDO") {
+      return "Falta seleccionar encargado. Elige quién se hará cargo para continuar.";
+    }
+
+    if (codigo === "RESPONSABLE_INVALIDO") {
+      return "El encargado seleccionado no está activo. Elige otra persona.";
+    }
+
+    return data.message || fallback;
   };
 
   const archivosOrdenSinCierreTecnico = (orden) => {
@@ -1237,11 +1303,11 @@ function OrdenesPage() {
     <div className="max-w-full mx-auto p-2 space-y-10">
       <div className="bg-black text-white p-8 border-b-8 border-blue-600 shadow-2xl">
         <h1 className="text-4xl md:text-5xl font-black italic tracking-tighter uppercase">
-          Fila de Trabajo
+          Órdenes de trabajo
         </h1>
 
         <p className="text-blue-400 font-bold text-xs uppercase tracking-[.3em] mt-2">
-          Prioridad operativa · estados · cobro controlado por Gastón / Camila
+          Qué necesita atención · quién está a cargo · cuál es el siguiente paso
         </p>
       </div>
 
@@ -1475,9 +1541,9 @@ function OrdenesPage() {
             ].filter(Boolean);
             const badgesCumplimiento = [
               fotosOrden.length === 0 ? "Sin fotos" : null,
-              itemsOrden.length === 0 ? "Sin items" : null,
+              itemsOrden.length === 0 ? "Sin servicios detallados" : null,
               itemsPendientesMaterial.length > 0 ? "Material pendiente" : null,
-              !tieneFeedbackOperativo ? "Sin feedback" : null,
+              !tieneFeedbackOperativo ? "Falta comentario final" : null,
               o.origen_recepcion === "RECEPCION_EMERGENCIA_OPERADOR"
                 ? "Recepcion emergencia"
                 : null,
@@ -1488,6 +1554,32 @@ function OrdenesPage() {
             const montoFinal = montoFinalOrden(o);
             const diferenciaPago = Number(o.monto_pagado || 0) - montoFinal;
             const pagoConfirmado = o.estado_pago === "PAGADO";
+            const encargadoPrincipal = obtenerEncargadoOrden(o);
+            const alertasResumen = [
+              procesoGuardCritico
+                ? { label: "Trabajo crítico", clase: "border-red-800 bg-red-700 text-white" }
+                : null,
+              encargadoPrincipal === "Sin encargado"
+                ? { label: "Sin encargado", clase: "border-red-700 bg-red-50 text-red-900" }
+                : null,
+              estadoOrden === "LISTO_PARA_ENTREGA"
+                ? { label: "Listo para entregar", clase: "border-emerald-700 bg-emerald-50 text-emerald-900" }
+                : null,
+              !pagoConfirmado
+                ? { label: "Pago pendiente", clase: "border-amber-600 bg-amber-50 text-amber-900" }
+                : null,
+              fotosOrden.length === 0
+                ? { label: "Sin fotos", clase: "border-amber-600 bg-amber-50 text-amber-900" }
+                : null,
+              itemsPendientesMaterial.length > 0
+                ? { label: "Material pendiente", clase: "border-amber-600 bg-amber-50 text-amber-900" }
+                : null,
+              !tieneFeedbackOperativo
+                ? { label: "Falta comentario final", clase: "border-amber-600 bg-amber-50 text-amber-900" }
+                : null,
+            ]
+              .filter(Boolean)
+              .slice(0, 4);
             const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
               textoQR(o)
             )}`;
@@ -1500,6 +1592,49 @@ function OrdenesPage() {
                   o.prioridad === "URGENTE" ? "ring-4 ring-red-600" : ""
                 }`}
               >
+                <details>
+                  <summary className="list-none cursor-pointer p-5 marker:hidden">
+                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[180px_1fr_auto] xl:items-center">
+                      <div className="border-4 border-black bg-slate-100 p-4 text-center font-mono text-3xl font-black text-black">
+                        {o.Vehiculo?.patente || "S/P"}
+                      </div>
+
+                      <div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="bg-black px-3 py-1 text-[10px] font-black uppercase text-white">
+                            Orden #{String(o.id).padStart(4, "0")}
+                          </span>
+                          <span className={`px-3 py-1 text-[10px] font-black uppercase ${estadoClase(o.estado)}`}>
+                            {getOperationalStatusLabel(o.estado)}
+                          </span>
+                          {alertasResumen.map((alerta) => (
+                            <span
+                              key={`${o.id}-resumen-${alerta.label}`}
+                              className={`border-2 px-3 py-1 text-[10px] font-black uppercase ${alerta.clase}`}
+                            >
+                              {alerta.label}
+                            </span>
+                          ))}
+                        </div>
+
+                        <h3 className="mt-3 text-xl font-black uppercase text-black">
+                          {o.motivo_ingreso || "Trabajo sin descripción"}
+                        </h3>
+                        <p className="mt-1 text-sm font-bold text-slate-600">
+                          Cliente: {o.Vehiculo?.Cliente?.nombre || "No informado"}
+                        </p>
+                        <p className="mt-1 text-sm font-bold text-slate-700">
+                          Encargado: {encargadoPrincipal}
+                        </p>
+                      </div>
+
+                      <span className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-xs font-black uppercase text-white">
+                        {textoAccionOrdenSimple(o.estado)} · Ver detalles
+                      </span>
+                    </div>
+                  </summary>
+
+                  <div className="border-t-4 border-black">
                 <div className="p-5 flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
                   <div className="flex gap-5">
                     {o.vehiculoId ? (
@@ -1576,7 +1711,7 @@ function OrdenesPage() {
                                 : "bg-yellow-300 text-black border-black"
                             }`}
                           >
-                            File Service sin cierre tecnico ({procesosSinCierre.length})
+                            Trabajo técnico incompleto ({procesosSinCierre.length})
                           </span>
                         )}
                       </div>
@@ -1641,9 +1776,8 @@ function OrdenesPage() {
                           }`}
                         >
                           <p>
-                            Esta orden tiene File Service con cierre tecnico pendiente.
-                            No debe quedar como lista final sin post escritura,
-                            resultado tecnico o correccion registrada.
+                            Falta registrar la prueba final o terminar el trabajo técnico.
+                            Abre el archivo ECU para completar el paso pendiente.
                           </p>
                           <div className="mt-2 flex flex-wrap gap-2">
                             {procesosSinCierre.slice(0, 3).map((archivo) => (
@@ -1652,7 +1786,7 @@ function OrdenesPage() {
                                 to={`/archivos-ecu?archivoId=${archivo.id}#post-escritura`}
                                 className="border-2 border-current px-2 py-1"
                               >
-                                File #{archivo.id} -{" "}
+                                Archivo ECU #{archivo.id} -{" "}
                                 {archivo.proceso_guard_estado || "PENDIENTE"}
                               </Link>
                             ))}
@@ -2946,7 +3080,7 @@ function OrdenesPage() {
                         "solid"
                       )}`}
                     >
-                      {o.estado_pago || "PENDIENTE"}
+                      {traducirEstadoPago(o.estado_pago)}
                     </p>
 
                     <p className="text-xl font-black mt-2">
@@ -2962,7 +3096,7 @@ function OrdenesPage() {
                         Estado operativo:{" "}
                         {getOperationalStatusLabel(o.estado || "Pendiente")}
                       </p>
-                      <p>Estado pago: {o.estado_pago || "Pendiente"}</p>
+                      <p>Estado del pago: {traducirEstadoPago(o.estado_pago)}</p>
                       <p>Medio de pago: {o.medio_pago || "Pendiente"}</p>
                       <p>Presupuesto / monto final: {formatearMonto(montoFinal)}</p>
                       <p>
@@ -3029,6 +3163,11 @@ function OrdenesPage() {
                         Confirmar pago y entregar
                       </button>
                     )}
+
+                    <div className="w-full border-2 border-blue-600 bg-blue-50 p-3 text-[10px] font-black uppercase text-blue-900">
+                      <p>Marcar “Listo entrega” termina el trabajo técnico; no confirma pago ni entrega.</p>
+                      <p className="mt-1">Pago confirmado y entrega son registros separados del trabajo técnico.</p>
+                    </div>
                   </div>
 
                   <div className="bg-white border-2 border-black p-4 flex gap-4 items-center">
@@ -3053,6 +3192,8 @@ function OrdenesPage() {
                     </div>
                   </div>
                 </div>
+                  </div>
+                </details>
               </div>
             );
           })}

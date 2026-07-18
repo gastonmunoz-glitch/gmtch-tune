@@ -7,15 +7,15 @@ import {
 } from "../utils/statusStyles";
 
 const ESTADOS = {
-  ORIGINAL_CARGADO: "Original cargado",
+  ORIGINAL_CARGADO: "Archivo original recibido",
   NOTIFICADO_MASTER: "Master notificado",
   MODIFICADO_LISTO: "MOD listo",
   NOTIFICADO_SLAVE: "Slave notificado",
-  POST_ESCRITURA_PENDIENTE: "Post escritura pendiente",
-  POST_ESCRITURA_OK: "Post escritura OK",
+  POST_ESCRITURA_PENDIENTE: "Falta prueba final",
+  POST_ESCRITURA_OK: "Prueba final completada",
   REQUIERE_CORRECCION: "Requiere corrección",
   FINALIZADO: "Finalizado",
-  FINALIZADO_TECNICO: "Finalizado técnico",
+  FINALIZADO_TECNICO: "Trabajo técnico terminado",
   ARCHIVADO: "Archivado",
 };
 
@@ -48,7 +48,7 @@ const FILTROS = [
   { value: "PENDIENTES", label: "Pendientes" },
   { value: "EN_PROCESO", label: "En proceso" },
   { value: "MOD_LISTO", label: "MOD listo" },
-  { value: "PENDIENTE_POST", label: "Post escritura pendiente" },
+  { value: "PENDIENTE_POST", label: "Falta prueba final" },
   { value: "CORRECCIONES", label: "Corrección pendiente" },
   { value: "FINALIZADOS", label: "Finalizados" },
   { value: "ARCHIVADOS", label: "Archivados" },
@@ -183,7 +183,7 @@ const SERVICIO_LABELS = SERVICIOS_FILE_SERVICE.flatMap((grupo) => grupo.opciones
 
 const servicioLabel = (codigo) => SERVICIO_LABELS[codigo] || codigo;
 
-const RUTA_DIAGNOSTICO = "/diagnostico";
+const RUTA_DIAGNOSTICO = "/diagnosticos";
 
 const getApiRoot = () => {
   const base = api.defaults.baseURL || "";
@@ -281,10 +281,10 @@ const processGuardLabel = (estado) => {
   const valor = String(estado || "SIN_RIESGO").toUpperCase();
   const labels = {
     SIN_RIESGO: "Sin riesgo",
-    EN_ESPERA_POST_ESCRITURA: "Esperando post escritura/cierre",
-    ADVERTENCIA: "Advertencia",
-    CRITICO: "Critico",
-    ESCALADO: "Escalado",
+    EN_ESPERA_POST_ESCRITURA: "Falta prueba final",
+    ADVERTENCIA: "Requiere atención",
+    CRITICO: "Atención urgente",
+    ESCALADO: "Atención urgente escalada",
     CERRADO: "Cerrado",
   };
   return labels[valor] || valor;
@@ -323,7 +323,7 @@ const obtenerResponsablePrincipal = (archivo) => {
 };
 
 const snapshotUsuario = (usuario) =>
-  limpiar(usuario?.username || usuario?.nombre || usuario?.email || usuario?.id);
+  limpiar(usuario?.username || usuario?.nombre || usuario?.id);
 
 const ROLES_CIERRE_TECNICO_LEGACY = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"];
 
@@ -416,7 +416,7 @@ const checklistCierreTecnico = (archivo, cierreForm = {}, opciones = {}) => {
     },
     {
       key: "post",
-      label: "Post escritura OK / No aplica",
+      label: "Prueba final completada / No aplica",
       ok: postEstado === "OK" || postNoAplica,
     },
     {
@@ -431,7 +431,7 @@ const checklistCierreTecnico = (archivo, cierreForm = {}, opciones = {}) => {
     },
     {
       key: "cierre",
-      label: "Cierre tecnico",
+      label: "Trabajo técnico terminado",
       ok: Boolean(archivo?.cierre_tecnico_at),
     },
   ];
@@ -447,14 +447,14 @@ const obtenerProximaAccion = (archivo) => {
   }
   if (!archivo.archivo_original) return "Subir archivo original";
   if (archivo.post_escritura_estado === "OK" && !archivo.cierre_tecnico_at) {
-    return "Cerrar proceso tecnico";
+    return "Terminar trabajo técnico";
   }
-  if (archivo.post_escritura_estado === "OK") return "Finalizar técnico";
+  if (archivo.post_escritura_estado === "OK") return "Dejar listo para entrega";
   if (archivo.archivo_modificado && archivo.estado === "MODIFICADO_LISTO") {
     return "Notificar operador ECU";
   }
   if (["NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(archivo.estado)) {
-    return "Registrar post escritura";
+    return "Registrar prueba final";
   }
   if (
     archivo.procesamiento_externo_estado &&
@@ -793,35 +793,59 @@ export default function ArchivosECUPage() {
     console.error(err);
 
     const data = err.response?.data;
+    const codigo = String(data?.error || data?.codigo || "").toUpperCase();
 
     if (data?.bloqueo === "DIAGNOSTICO_OBLIGATORIO") {
       setBloqueoDiagnostico(data);
-      setError(data.error || fallback);
+      setError(
+        data.message ||
+          "Falta diagnóstico antes de crear el trabajo de archivos ECU. Completa ese paso para continuar."
+      );
       return;
     }
 
-    if (data?.error === "RESPONSABLE_BLOQUEADO") {
+    if (codigo === "RESPONSABLE_BLOQUEADO") {
       const detalle = normalizarLista(data.pendientes_criticos)
         .slice(0, 3)
         .map((item) => item.titulo || item.tipo || item.descripcion)
         .filter(Boolean)
         .join(" / ");
       setError(
-        `${data.message || "Responsable bloqueado por pendientes criticos."}${
+        `${data.message || "Este encargado tiene pendientes urgentes. Elige otro o resuelve sus pendientes."}${
           detalle ? ` Pendientes: ${detalle}` : ""
         }`
       );
       return;
     }
 
+    if (codigo === "RESPONSABLE_REQUERIDO") {
+      setError("Falta seleccionar encargado. Elige quién se hará cargo para continuar.");
+      return;
+    }
+
+    if (codigo === "RESPONSABLE_INVALIDO") {
+      setError("El encargado seleccionado no está activo. Elige otra persona.");
+      return;
+    }
+
+    if (codigo.includes("ARCHIVO") && codigo.includes("INVALID")) {
+      setError("Archivo inválido. Usa un formato permitido como .bin, .ori, .zip o .rar.");
+      return;
+    }
+
+    if (codigo.includes("POST_ESCRITURA") || codigo.includes("CIERRE_TECNICO")) {
+      setError("Falta la prueba final antes de terminar el trabajo técnico.");
+      return;
+    }
+
     if (Array.isArray(data?.faltantes) && data.faltantes.length > 0) {
       setError(
-        `${data.message || data.error || fallback}: ${data.faltantes.join(", ")}`
+        `${data.message || fallback}: ${data.faltantes.join(", ")}`
       );
       return;
     }
 
-    setError(data?.error || err.message || fallback);
+    setError(data?.message || err.message || fallback);
   };
 
   const limpiarMensajes = () => {
@@ -923,7 +947,7 @@ export default function ArchivosECUPage() {
     );
 
     if (!serviciosSeleccionados.length) {
-      setError("Debes seleccionar al menos un servicio para File Service.");
+      setError("Falta seleccionar al menos un servicio para el trabajo de archivos ECU.");
       return;
     }
 
@@ -933,7 +957,7 @@ export default function ArchivosECUPage() {
       ) &&
       !limpiar(nuevo.observacion_servicios)
     ) {
-      setError("Debes describir el servicio Custom / Otro para File Service.");
+      setError("Describe qué trabajo especial se necesita antes de continuar.");
       return;
     }
 
@@ -977,7 +1001,7 @@ export default function ArchivosECUPage() {
         },
       });
 
-      setMensaje("Archivo original enviado correctamente a File Service");
+      setMensaje("Archivo original guardado. El trabajo de archivos ECU fue creado.");
 
       setNuevo({
         ordenId: "",
@@ -1013,7 +1037,7 @@ export default function ArchivosECUPage() {
 
       await cargarDatos();
     } catch (err) {
-      mostrarError(err, "Error creando File Service");
+      mostrarError(err, "No se pudo crear el trabajo. Revisa el archivo, el diagnóstico y el encargado.");
     } finally {
       setGuardando(false);
     }
@@ -1104,7 +1128,7 @@ export default function ArchivosECUPage() {
     limpiarMensajes();
 
     if (!archivo.ordenId) {
-      setError("Este File Service no tiene orden asociada para postventa.");
+      setError("Este trabajo no tiene una orden asociada para registrar la corrección.");
       return;
     }
 
@@ -1158,10 +1182,10 @@ export default function ArchivosECUPage() {
         [responsable.campo]: usuario ? snapshotUsuario(usuario) : "",
       });
 
-      setMensaje("Responsable File Service actualizado");
+      setMensaje("Encargado actualizado correctamente.");
       await cargarDatos();
     } catch (err) {
-      mostrarError(err, "Error asignando responsable File Service");
+      mostrarError(err, "No se pudo asignar el encargado. Elige una persona activa.");
     }
   };
 
@@ -1325,12 +1349,12 @@ export default function ArchivosECUPage() {
     };
 
     if (form.post_escritura_estado !== "NO_APLICA" && !form.scanner_post_escritura) {
-      setError("La foto/captura del scanner post escritura es obligatoria");
+      setError("Falta la foto o captura del scanner de la prueba final.");
       return;
     }
 
     if (!form.post_escritura_estado) {
-      setError("Debes seleccionar resultado post escritura");
+      setError("Falta seleccionar el resultado de la prueba final.");
       return;
     }
 
@@ -1338,13 +1362,13 @@ export default function ArchivosECUPage() {
       form.post_escritura_estado === "NO_APLICA" &&
       !limpiar(form.post_escritura_observacion)
     ) {
-      setError("Debes indicar observacion tecnica cuando post escritura no aplica.");
+      setError("Explica por qué la prueba final no aplica.");
       return;
     }
 
     if (!form.post_escritura_sin_dtc && !limpiar(form.post_escritura_dtc)) {
       setError(
-        "Debes ingresar DTC post escritura o marcar SIN DTC POST ESCRITURA"
+        "Ingresa los códigos de falla finales o marca que no hay códigos."
       );
       return;
     }
@@ -1372,7 +1396,7 @@ export default function ArchivosECUPage() {
         },
       });
 
-      setMensaje("Post escritura registrado correctamente");
+      setMensaje("Prueba final registrada correctamente.");
 
       setPostForms((prev) => ({
         ...prev,
@@ -1381,7 +1405,7 @@ export default function ArchivosECUPage() {
 
       await cargarDatos();
     } catch (err) {
-      mostrarError(err, "Error registrando post escritura");
+      mostrarError(err, "No se pudo guardar la prueba final. Revisa scanner, resultado y códigos de falla.");
     }
   };
 
@@ -1395,7 +1419,7 @@ export default function ArchivosECUPage() {
 
     try {
       await api.post(`/archivos-ecu/${archivo.id}/mod-descargado`);
-      setMensaje("MOD marcado como descargado/aplicado. Process Guard activado.");
+      setMensaje("Archivo MOD marcado como aplicado. El seguimiento obligatorio quedó activo.");
       await cargarDatos();
     } catch (err) {
       mostrarError(err, "Error marcando MOD descargado");
@@ -1506,7 +1530,7 @@ export default function ArchivosECUPage() {
     }
 
     const confirmar = window.confirm(
-      "¿Confirmas finalizar técnicamente este File Service? Esto NO cierra el cobro ni la entrega comercial."
+      "¿Confirmas que el trabajo técnico está terminado? Esto no confirma pago ni entrega."
     );
 
     if (!confirmar) return;
@@ -1518,7 +1542,7 @@ export default function ArchivosECUPage() {
         observacion_cierre_tecnico: cierreForm.observacion_cierre_tecnico,
       });
 
-      setMensaje("File Service finalizado técnicamente");
+      setMensaje("Trabajo técnico terminado. Quedó listo para el siguiente paso.");
       await cargarDatos();
     } catch (err) {
       mostrarError(err, "Error finalizando técnicamente");
@@ -1536,7 +1560,7 @@ export default function ArchivosECUPage() {
     }
 
     const confirmar = window.confirm(
-      "¿Seguro que quieres archivar este File Service? No se eliminará, pero saldrá del listado activo."
+      "¿Seguro que quieres archivar este trabajo? No se eliminará, pero saldrá del listado activo."
     );
 
     if (!confirmar) return;
@@ -1547,10 +1571,10 @@ export default function ArchivosECUPage() {
         archivado_comentario: form.archivado_comentario || "",
       });
 
-      setMensaje("File Service archivado correctamente");
+      setMensaje("Trabajo archivado correctamente.");
       await cargarDatos();
     } catch (err) {
-      mostrarError(err, "Error archivando File Service");
+      mostrarError(err, "No se pudo archivar el trabajo. Revisa el motivo e intenta nuevamente.");
     }
   };
 
@@ -1574,9 +1598,9 @@ export default function ArchivosECUPage() {
       <div className="max-w-7xl mx-auto space-y-6">
         <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold">File Service ECU</h1>
+            <h1 className="text-3xl font-bold">Trabajos de archivos ECU</h1>
             <p className="text-slate-400 mt-1">
-              Control de original, MOD, correcciones, post escritura y cierre técnico.
+              Original, archivo modificado, prueba final y trabajo técnico terminado.
             </p>
           </div>
 
@@ -1591,10 +1615,10 @@ export default function ArchivosECUPage() {
 
         <section className="border border-amber-500/40 bg-amber-500/10 rounded-3xl p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
-            Regla operativa File Service
+            Regla operativa de archivos ECU
           </p>
           <p className="mt-2 text-sm md:text-base font-semibold text-amber-50">
-            Todo archivo recibido por WhatsApp debe quedar registrado aquí. Si no está en File Service, no existe oficialmente.
+            Todo archivo recibido debe quedar registrado aquí. Si no está en Archivos ECU, no existe oficialmente.
           </p>
         </section>
 
@@ -1631,7 +1655,7 @@ export default function ArchivosECUPage() {
         )}
 
         <section className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 shadow-xl">
-          <h2 className="text-xl font-semibold mb-4">Nueva solicitud File Service</h2>
+          <h2 className="text-xl font-semibold mb-4">Nuevo trabajo de archivos ECU</h2>
 
           <form onSubmit={crearArchivo} className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-3">
@@ -1712,7 +1736,7 @@ export default function ArchivosECUPage() {
               <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-xs font-bold uppercase text-slate-300">
-                    Responsables File Service
+                    ¿Quién tiene la tarea?
                   </p>
                   <p className="text-[11px] text-slate-500">
                     Debe existir Tuner/Master u Operador ECU asignado antes de enviar.
@@ -1741,7 +1765,7 @@ export default function ArchivosECUPage() {
                         <option value="">Sin asignar</option>
                         {opciones.map((usuario) => (
                           <option key={usuario.id} value={usuario.id}>
-                            {usuario.nombre || usuario.username || usuario.email}
+                            {usuario.nombre || usuario.username || String(usuario.id)}
                             {usuario.rol ? ` (${usuario.rol})` : ""}
                           </option>
                         ))}
@@ -2002,12 +2026,12 @@ export default function ArchivosECUPage() {
                 disabled={guardando}
                 className="w-full md:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 font-semibold"
               >
-                {guardando ? "Guardando..." : "Enviar a File Service"}
+                {guardando ? "Guardando..." : "Crear trabajo de archivos ECU"}
               </button>
 
               <p className="text-xs text-slate-500 mt-3">
-                Regla estricta: antes de enviar a File Service debe existir
-                diagnóstico obligatorio con scanner y DTC o SIN DTC.
+                Antes de crear el trabajo debe existir un diagnóstico con scanner y
+                códigos de falla, o indicar que no hay códigos.
               </p>
             </div>
           </form>
@@ -2016,7 +2040,7 @@ export default function ArchivosECUPage() {
         <section className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 shadow-xl">
           <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between mb-5">
             <div>
-              <h2 className="text-xl font-semibold">Trabajos File Service</h2>
+              <h2 className="text-xl font-semibold">Trabajos de archivos ECU</h2>
               <p className="text-slate-400 text-sm">
                 {archivosFiltrados.length} registros activos
               </p>
@@ -2087,14 +2111,18 @@ export default function ArchivosECUPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-bold text-white">
-                          File #{archivo.id}
+                          Archivo ECU #{archivo.id}
                         </p>
                         <p className="text-xs text-slate-400">
                           Orden #{archivo.ordenId || "Sin orden"}
                         </p>
                       </div>
-                      <span className="rounded-full bg-slate-800 px-2 py-1 text-[10px] font-semibold uppercase text-slate-200">
-                        {archivo.estado || "Sin estado"}
+                      <span
+                        className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase ${badgeClass(
+                          archivo.estado
+                        )}`}
+                      >
+                        {estadoLabel(archivo.estado)}
                       </span>
                     </div>
 
@@ -2143,7 +2171,7 @@ export default function ArchivosECUPage() {
                     </p>
                     <p className="mt-3 text-sm text-slate-500">
                       La lista compacta mantiene filtros y búsqueda sin cargar toda
-                      la ficha técnica de cada File Service.
+                      la ficha técnica de cada trabajo de archivos ECU.
                     </p>
                   </div>
                 </div>
@@ -2242,7 +2270,7 @@ export default function ArchivosECUPage() {
                 archivoActivo &&
                 archivo.archivo_modificado &&
                 archivo.post_escritura_estado !== "OK"
-                  ? "Sin post escritura OK"
+                  ? "Falta prueba final"
                   : null,
                 !archivo.correccion_pendiente && estadoArchivo === "REQUIERE_CORRECCION"
                   ? "Correccion pendiente"
@@ -2253,18 +2281,42 @@ export default function ArchivosECUPage() {
               return (
                 <article
                   key={archivo.id}
+                  id={`archivo-${archivo.id}-datos`}
                   className="border border-slate-800 bg-slate-950/70 rounded-3xl p-5 space-y-5"
                 >
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+                    {[
+                      ["datos", "1. Datos recibidos"],
+                      ["servicios", "2. Servicios"],
+                      ["dtc", "3. Códigos de falla"],
+                      ["encargado", "4. Quién la tiene"],
+                      ["mod", "5. Archivo MOD"],
+                      ["prueba", "6. Prueba final"],
+                      ["cierre", "7. Terminar trabajo"],
+                    ].map(([ancla, label]) => (
+                      <a
+                        key={`${archivo.id}-${ancla}`}
+                        href={`#archivo-${archivo.id}-${ancla}`}
+                        className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-center text-[10px] font-black uppercase text-slate-300 transition hover:border-blue-400 hover:text-white"
+                      >
+                        {label}
+                      </a>
+                    ))}
+                  </div>
+
                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                     <div>
+                      <p className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">
+                        1. Datos recibidos
+                      </p>
                       <div className="flex flex-wrap gap-2 items-center mb-2">
                         <span className="text-lg font-bold">
-                          File #{archivo.id}
+                          Archivo ECU #{archivo.id}
                         </span>
 
                         <span
                           className={`text-xs px-3 py-1 rounded-full border ${badgeClass(
-                            archivo.post_escritura_estado
+                            archivo.estado
                           )}`}
                         >
                           {estadoLabel(archivo.estado)}
@@ -2275,7 +2327,7 @@ export default function ArchivosECUPage() {
                             guardEstado
                           )}`}
                         >
-                          Process Guard: {processGuardLabel(guardEstado)}
+                          Seguimiento obligatorio: {processGuardLabel(guardEstado)}
                         </span>
 
                         {archivo.correccion_pendiente && (
@@ -2301,7 +2353,13 @@ export default function ArchivosECUPage() {
                         {archivo.tipo_servicio || "-"}
                       </p>
 
-                      <div className="mt-3 space-y-2">
+                      <div
+                        id={`archivo-${archivo.id}-servicios`}
+                        className="mt-3 space-y-2 scroll-mt-24"
+                      >
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">
+                          2. Servicios solicitados
+                        </p>
                         <div className="flex flex-wrap gap-2">
                           {(serviciosArchivo.length
                             ? serviciosArchivo
@@ -2322,11 +2380,11 @@ export default function ArchivosECUPage() {
                           </p>
                         )}
 
-                        {dtcsArchivo.length > 0 && (
-                          <div>
-                            <p className="mb-1 text-xs font-bold uppercase text-slate-400">
-                              DTC importados
-                            </p>
+                        <div id={`archivo-${archivo.id}-dtc`} className="scroll-mt-24">
+                          <p className="mb-1 text-xs font-bold uppercase text-slate-400">
+                            3. Códigos de falla (DTC)
+                          </p>
+                          {dtcsArchivo.length > 0 ? (
                             <div className="flex flex-wrap gap-2">
                               {dtcsArchivo.map((dtc) => (
                                 <span
@@ -2337,13 +2395,17 @@ export default function ArchivosECUPage() {
                                 </span>
                               ))}
                             </div>
-                            {archivo.diagnosticoId && (
-                              <p className="mt-1 text-[11px] font-semibold uppercase text-slate-500">
-                                Fuente diagnostico #{archivo.diagnosticoId}
-                              </p>
-                            )}
-                          </div>
-                        )}
+                          ) : (
+                            <p className="text-xs font-semibold text-slate-500">
+                              Sin códigos de falla importados.
+                            </p>
+                          )}
+                          {archivo.diagnosticoId && (
+                            <p className="mt-1 text-[11px] font-semibold uppercase text-slate-500">
+                              Fuente diagnóstico #{archivo.diagnosticoId}
+                            </p>
+                          )}
+                        </div>
                       </div>
 
                       <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold uppercase">
@@ -2394,7 +2456,7 @@ export default function ArchivosECUPage() {
                       <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
                         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-3">
                           <p className="text-xs uppercase text-slate-500">
-                            Responsable principal
+                            Quién debe actuar ahora
                           </p>
                           <p className="font-semibold text-slate-100">
                             {responsablePrincipal}
@@ -2417,22 +2479,21 @@ export default function ArchivosECUPage() {
                         Original por:{" "}
                         {archivo.archivo_original_subido_por || "No registrado"}
                       </p>
-                      <div className="mt-3 rounded-2xl border border-purple-500/30 bg-purple-500/10 p-3 text-left md:text-right">
-                        <p className="font-semibold text-purple-200">
-                          Master notificado internamente
-                        </p>
-                        <p>Sí / No: {archivo.notificado_master_at ? "Sí" : "No"}</p>
-                        <p>
-                          Fecha:{" "}
-                          {archivo.notificado_master_at
-                            ? formatearFecha(archivo.notificado_master_at)
-                            : "No registrado"}
-                        </p>
-                        <p>
-                          Por:{" "}
-                          {archivo.notificado_master_por || "No registrado"}
-                        </p>
-                      </div>
+                      <details className="mt-3 rounded-2xl border border-purple-500/30 bg-purple-500/10 p-3 text-left">
+                        <summary className="cursor-pointer text-xs font-semibold text-purple-200">
+                          Opciones avanzadas · Estado de notificaciones
+                        </summary>
+                        <div className="mt-2 text-xs">
+                          <p>Encargado avisado: {archivo.notificado_master_at ? "Sí" : "No"}</p>
+                          <p>
+                            Fecha:{" "}
+                            {archivo.notificado_master_at
+                              ? formatearFecha(archivo.notificado_master_at)
+                              : "No registrado"}
+                          </p>
+                          <p>Por: {archivo.notificado_master_por || "No registrado"}</p>
+                        </div>
+                      </details>
                     </div>
                   </div>
 
@@ -2442,16 +2503,19 @@ export default function ArchivosECUPage() {
                         Este proceso no puede quedar inconcluso.
                       </p>
                       <p className="mt-1 text-xs text-red-100/90">
-                        Registra post escritura, correccion, nueva lectura o cierre
-                        tecnico. Tiempo abierto:{" "}
+                        Registra la prueba final, una corrección, una nueva lectura o
+                        termina el trabajo técnico. Tiempo abierto:{" "}
                         {formatearDuracionMinutos(guardMinutos)}.
                       </p>
                     </div>
                   )}
 
-                  <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                  <details
+                    id={`archivo-${archivo.id}-encargado`}
+                    className="scroll-mt-24 bg-slate-900 border border-slate-800 rounded-2xl p-4"
+                  >
                     <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-300">
-                      Responsables File Service
+                      4. Quién tiene la tarea
                     </summary>
 
                     <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -2493,7 +2557,7 @@ export default function ArchivosECUPage() {
                                   key={`${responsable.campo}-${usuario.id}`}
                                   value={usuario.id}
                                 >
-                                  {usuario.nombre || usuario.username || usuario.email}
+                                  {usuario.nombre || usuario.username || String(usuario.id)}
                                   {usuario.rol ? ` (${usuario.rol})` : ""}
                                 </option>
                               ))}
@@ -2584,7 +2648,7 @@ export default function ArchivosECUPage() {
                         rel="noreferrer"
                         className="px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-600 text-sm"
                       >
-                        Ver scanner post escritura
+                        Ver scanner de la prueba final
                       </a>
                     )}
                   </div>
@@ -2592,7 +2656,7 @@ export default function ArchivosECUPage() {
                   {versiones.length > 0 && (
                     <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
                       <summary className="cursor-pointer font-semibold">
-                        Historial de MOD cargados
+                        Opciones avanzadas · Historial de archivos MOD
                       </summary>
 
                       <div className="mt-3 space-y-2">
@@ -2634,9 +2698,12 @@ export default function ArchivosECUPage() {
                     </details>
                   )}
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div
+                    id={`archivo-${archivo.id}-mod`}
+                    className="scroll-mt-24 grid grid-cols-1 lg:grid-cols-2 gap-4"
+                  >
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                      <h3 className="font-semibold">Subir MOD / nueva versión</h3>
+                      <h3 className="font-semibold">5. Archivo modificado (MOD)</h3>
 
                       <input
                         type="file"
@@ -2703,7 +2770,7 @@ export default function ArchivosECUPage() {
 
                     <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
                       <summary className="cursor-pointer font-semibold">
-                        Notificaciones / WhatsApp
+                        Opciones avanzadas · Notificaciones
                       </summary>
 
                       <div className="mt-3 space-y-3">
@@ -2723,7 +2790,7 @@ export default function ArchivosECUPage() {
                       </button>
 
                       <p className="text-xs text-slate-500">
-                        La notificacion interna se registra al crear el File Service.
+                        La notificación interna se registra al crear el trabajo.
                         WhatsApp es un aviso manual opcional.
                       </p>
                       </div>
@@ -2732,7 +2799,7 @@ export default function ArchivosECUPage() {
 
                   <details className="bg-red-950/30 border border-red-500/30 rounded-2xl p-4">
                     <summary className="cursor-pointer font-semibold text-red-100">
-                      Solicitar corrección / postventa técnica interna
+                      Opciones avanzadas · Correcciones y postventa
                     </summary>
 
                     <div className="mt-4 space-y-3">
@@ -2875,7 +2942,7 @@ export default function ArchivosECUPage() {
 
                   <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
                     <summary className="cursor-pointer font-semibold text-slate-200">
-                      Procesamiento externo
+                      Opciones avanzadas · Herramienta externa
                     </summary>
 
                     <div className="mt-4 space-y-4">
@@ -3067,28 +3134,31 @@ export default function ArchivosECUPage() {
                     </div>
                   </details>
 
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <div
+                    id="post-escritura"
+                    className="scroll-mt-24 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3"
+                  >
+                    <span id={`archivo-${archivo.id}-prueba`} className="block scroll-mt-24" />
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h3 className="font-semibold">
-                          Post escritura obligatorio
+                          6. Prueba final después de cargar el MOD
                         </h3>
                         <p className="text-xs text-slate-500">
-                          Sin scanner post escritura y DTC/SIN DTC no se permite
-                          finalizar.
+                          Registra el scanner y los códigos de falla antes de terminar.
                         </p>
                         <p className="text-xs font-semibold text-yellow-300 mt-2">
-                          Un archivo sin post escritura registrada es un trabajo inconcluso.
+                          Sin esta prueba, el trabajo queda incompleto.
                         </p>
                       </div>
 
                       {archivo.post_escritura_estado && (
                         <span
                           className={`text-xs px-3 py-1 rounded-full border ${badgeClass(
-                            archivo.estado
+                            archivo.post_escritura_estado
                           )}`}
                         >
-                          {archivo.post_escritura_estado}
+                          {estadoLabel(archivo.post_escritura_estado)}
                         </span>
                       )}
                     </div>
@@ -3104,7 +3174,7 @@ export default function ArchivosECUPage() {
                           {formatearFecha(archivo.post_escritura_at)}
                         </p>
                         <p>
-                          <strong>DTC post escritura:</strong>{" "}
+                          <strong>Códigos de falla en prueba final:</strong>{" "}
                           {archivo.post_escritura_dtc || "-"}
                         </p>
                         <p>
@@ -3117,7 +3187,7 @@ export default function ArchivosECUPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
                         <label className="text-xs text-slate-400 ml-1">
-                          Resultado post escritura
+                          Resultado de la prueba final
                         </label>
                         <select
                           value={postForm.post_escritura_estado}
@@ -3140,7 +3210,7 @@ export default function ArchivosECUPage() {
 
                       <div>
                         <label className="text-xs text-slate-400 ml-1">
-                          Foto/captura scanner post escritura
+                          Foto o captura del scanner en la prueba final
                         </label>
                         <input
                           type="file"
@@ -3169,12 +3239,12 @@ export default function ArchivosECUPage() {
                           )
                         }
                       />
-                      SIN DTC POST ESCRITURA
+                      Sin códigos de falla en la prueba final
                     </label>
 
                     {!postForm.post_escritura_sin_dtc && (
                       <textarea
-                        placeholder="DTC post escritura. Ej: P0401, P2002, U0100..."
+                        placeholder="Códigos de falla finales. Ej: P0401, P2002, U0100..."
                         value={postForm.post_escritura_dtc}
                         onChange={(e) =>
                           actualizarPostForm(
@@ -3203,7 +3273,7 @@ export default function ArchivosECUPage() {
                     />
 
                     <div
-                      id="post-escritura"
+                      id={`archivo-${archivo.id}-cierre`}
                       className={`rounded-2xl border p-4 ${processGuardClass(
                         guardEstado
                       )}`}
@@ -3211,16 +3281,19 @@ export default function ArchivosECUPage() {
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div>
                           <p className="text-sm font-bold uppercase">
-                            Cierre tecnico obligatorio
+                            7. Terminar trabajo técnico
                           </p>
                           <p className="mt-1 text-xs opacity-90">
                             Tiempo desde MOD listo/descargado:{" "}
-                            {formatearDuracionMinutos(guardMinutos)}. SLA:
+                            {formatearDuracionMinutos(guardMinutos)}. Tiempo recomendado:
                             30/60/120/180 min.
                           </p>
                           <p className="mt-1 text-xs opacity-90">
                             Estado: {processGuardLabel(guardEstado)} - Resultado:{" "}
                             {archivo.resultado_tecnico || "PENDIENTE"}
+                          </p>
+                          <p className="mt-2 text-xs font-semibold opacity-90">
+                            Esto termina el trabajo técnico; no confirma pago ni entrega.
                           </p>
                           {archivo.cierre_tecnico_at && (
                             <p className="mt-1 text-xs opacity-90">
@@ -3236,7 +3309,7 @@ export default function ArchivosECUPage() {
 
                       <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
                         <label className="text-xs font-semibold uppercase">
-                          Resultado tecnico
+                          Resultado del trabajo
                           <select
                             value={cierreForm.resultado_tecnico}
                             onChange={(e) =>
@@ -3257,7 +3330,7 @@ export default function ArchivosECUPage() {
                         </label>
 
                         <label className="text-xs font-semibold uppercase">
-                          Observacion cierre tecnico
+                          Observación del trabajo terminado
                           <textarea
                             value={cierreForm.observacion_cierre_tecnico}
                             onChange={(e) =>
@@ -3276,7 +3349,7 @@ export default function ArchivosECUPage() {
 
                       <div className="mt-3 rounded-2xl border border-slate-700 bg-slate-950/70 p-3">
                         <p className="mb-2 text-xs font-black uppercase text-slate-300">
-                          Checklist cierre tecnico
+                          Qué falta para terminar
                         </p>
                         <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                           {checklistTecnico.map((item) => (
@@ -3309,7 +3382,7 @@ export default function ArchivosECUPage() {
                         }
                         className="mt-3 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        Cerrar proceso tecnico
+                        Guardar trabajo técnico terminado
                       </button>
                     </div>
 
@@ -3322,14 +3395,14 @@ export default function ArchivosECUPage() {
                         }
                         className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40"
                       >
-                        Registrar post escritura
+                        Registrar prueba final
                       </button>
 
                       <button
                         onClick={() => solicitarCorreccion(archivo.id)}
                         className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500"
                       >
-                        Solicitar corrección / V2
+                        Pedir corrección
                       </button>
 
                       <button
@@ -3337,21 +3410,20 @@ export default function ArchivosECUPage() {
                         disabled={!puedeFinalizar}
                         className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        Finalizar técnico
+                        Dejar listo para entrega
                       </button>
                     </div>
 
                     {!puedeFinalizar && (
                       <p className="text-xs text-yellow-300">
-                        Finalizar técnico está bloqueado hasta registrar post
-                        escritura OK.
+                        Para dejarlo listo debes completar la prueba final con resultado OK.
                       </p>
                     )}
                   </div>
 
                   <details className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
                     <summary className="cursor-pointer font-semibold text-slate-200">
-                      Archivar File Service
+                      Opciones avanzadas · Archivar trabajo
                     </summary>
 
                     <div className="mt-3 space-y-3">

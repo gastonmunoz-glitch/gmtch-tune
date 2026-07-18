@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { BrowserRouter as Router, Routes, Route, Link, Navigate } from "react-router-dom";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Link,
+  NavLink,
+  Navigate,
+} from "react-router-dom";
 import api from "./services/api";
 import {
   getPriorityColor,
@@ -110,28 +117,28 @@ const PERMISOS_RUTAS = {
 const MENU = [
   {
     to: "/",
-    label: "Dashboard",
+    label: "Inicio",
     roles: PERMISOS_RUTAS["/"],
   },
   {
     to: "/flujo",
-    label: "Nueva Recepcion",
+    label: "Recibir vehículo",
     destacado: true,
     roles: PERMISOS_RUTAS["/flujo"],
   },
   {
     to: "/ordenes",
-    label: "Fila de Trabajo",
+    label: "Órdenes de trabajo",
     roles: PERMISOS_RUTAS["/ordenes"],
   },
   {
     to: "/diagnosticos",
-    label: "Diagnostico / Scanner",
+    label: "Diagnóstico",
     roles: PERMISOS_RUTAS["/diagnosticos"],
   },
   {
     to: "/archivos-ecu",
-    label: "File Service / Tuner",
+    label: "Archivos ECU",
     roles: PERMISOS_RUTAS["/archivos-ecu"],
   },
   {
@@ -141,12 +148,12 @@ const MENU = [
   },
   {
     to: "/leads",
-    label: "Leads / CRM",
+    label: "Seguimiento comercial",
     roles: ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"],
   },
   {
     to: "/vehiculos",
-    label: "Garage",
+    label: "Vehículos",
     roles: PERMISOS_RUTAS["/vehiculos"],
   },
   {
@@ -156,12 +163,12 @@ const MENU = [
   },
   {
     to: "/usuarios",
-    label: "Usuarios / Roles",
+    label: "Equipo y permisos",
     roles: PERMISOS_RUTAS["/usuarios"],
   },
   {
     to: "/finanzas",
-    label: "Finanzas / Material",
+    label: "Caja y materiales",
     roles: ["OWNER", "ADMIN"],
   },
   {
@@ -171,10 +178,180 @@ const MENU = [
   },
   {
     to: "/portal-admin",
-    label: "Portal Masters",
+    label: "Portal Master",
     roles: PERMISOS_RUTAS["/portal-admin"],
   },
 ];
+
+const MENU_POR_ROL = {
+  RECEPCION: [
+    {
+      titulo: "Principal",
+      items: [
+        ["/", "Inicio"],
+        ["/flujo", "Recibir vehículo"],
+        ["/ordenes", "Órdenes y entregas"],
+        ["/clientes", "Clientes"],
+        ["/mensajes", "Mensajes"],
+      ],
+    },
+    {
+      titulo: "Más herramientas",
+      items: [
+        ["/vehiculos", "Vehículos"],
+        ["/fotos", "Fotos"],
+        ["/leads", "Seguimiento comercial"],
+      ],
+    },
+  ],
+  OPERADOR_ECU: [
+    {
+      titulo: "Principal",
+      items: [
+        ["/", "Mis pendientes"],
+        ["/archivos-ecu", "Archivos ECU"],
+        ["/diagnosticos", "Diagnóstico"],
+        ["/ordenes", "Órdenes"],
+        ["/mensajes", "Mensajes"],
+      ],
+    },
+    {
+      titulo: "Más herramientas",
+      items: [
+        ["/flujo", "Recepción de emergencia"],
+        ["/vehiculos", "Vehículos"],
+        ["/fotos", "Fotos"],
+      ],
+    },
+  ],
+  MECANICO: [
+    {
+      titulo: "Principal",
+      items: [
+        ["/", "Mis pendientes"],
+        ["/ordenes", "Mis trabajos"],
+        ["/fotos", "Fotos"],
+        ["/diagnosticos", "Diagnóstico"],
+      ],
+    },
+    {
+      titulo: "Más herramientas",
+      items: [["/vehiculos", "Vehículos"]],
+    },
+  ],
+  TUNER: [
+    {
+      titulo: "Principal",
+      items: [
+        ["/", "Mis pendientes"],
+        ["/archivos-ecu", "Archivos ECU"],
+        ["/ordenes", "Órdenes"],
+        ["/mensajes", "Mensajes"],
+      ],
+    },
+  ],
+  SUPERVISOR: [
+    {
+      titulo: "Principal",
+      items: [
+        ["/", "Control de operación"],
+        ["/ordenes", "Órdenes"],
+        ["/archivos-ecu", "Archivos ECU"],
+        ["/diagnosticos", "Diagnóstico"],
+        ["/mensajes", "Mensajes"],
+      ],
+    },
+    {
+      titulo: "Más herramientas",
+      items: [
+        ["/flujo", "Recepción"],
+        ["/clientes", "Clientes"],
+        ["/vehiculos", "Vehículos"],
+        ["/fotos", "Fotos"],
+        ["/leads", "Seguimiento comercial"],
+      ],
+    },
+  ],
+  OPERADOR_SCANNER: [
+    {
+      titulo: "Principal",
+      items: [
+        ["/", "Mis pendientes"],
+        ["/diagnosticos", "Diagnóstico"],
+        ["/ordenes", "Órdenes"],
+        ["/fotos", "Fotos"],
+      ],
+    },
+    {
+      titulo: "Más herramientas",
+      items: [["/vehiculos", "Vehículos"]],
+    },
+  ],
+  ADMIN: [
+    { titulo: "Centro de mando", items: [["/", "Centro de mando"]] },
+    {
+      titulo: "Operación",
+      items: [
+        ["/flujo", "Recepción"],
+        ["/ordenes", "Órdenes"],
+        ["/diagnosticos", "Diagnóstico"],
+        ["/archivos-ecu", "Archivos ECU"],
+        ["/fotos", "Fotos"],
+      ],
+    },
+    { titulo: "Comercial", items: [["/leads", "Seguimiento comercial"]] },
+    {
+      titulo: "Clientes",
+      items: [
+        ["/clientes", "Clientes"],
+        ["/vehiculos", "Vehículos"],
+      ],
+    },
+    { titulo: "Portal Master", items: [["/portal-admin", "Portal Master"]] },
+    { titulo: "Mensajes", items: [["/mensajes", "Mensajes"]] },
+    {
+      titulo: "Administración",
+      items: [
+        ["/finanzas", "Caja y materiales"],
+        ["/usuarios", "Equipo y permisos"],
+      ],
+    },
+  ],
+};
+
+MENU_POR_ROL.OWNER = MENU_POR_ROL.ADMIN;
+
+const obtenerSeccionesMenu = (usuario) => {
+  const visibles = MENU.filter((item) => tieneRol(usuario, item.roles));
+  const porRuta = new Map(visibles.map((item) => [item.to, item]));
+  const configuracion = MENU_POR_ROL[rolNormalizado(usuario)];
+
+  if (!configuracion) {
+    return [{ titulo: "Principal", items: visibles }];
+  }
+
+  const usadas = new Set();
+  const secciones = configuracion
+    .map((seccion) => ({
+      titulo: seccion.titulo,
+      items: seccion.items
+        .map(([to, label]) => {
+          const base = porRuta.get(to);
+          if (!base) return null;
+          usadas.add(to);
+          return { ...base, label };
+        })
+        .filter(Boolean),
+    }))
+    .filter((seccion) => seccion.items.length > 0);
+
+  const restantes = visibles.filter((item) => !usadas.has(item.to));
+  if (restantes.length > 0) {
+    secciones.push({ titulo: "Más herramientas", items: restantes });
+  }
+
+  return secciones;
+};
 
 const leerUsuarioLocal = () => {
   const token = localStorage.getItem("token");
@@ -234,43 +411,43 @@ const obtenerPerfilDashboardRol = (usuario) => {
   const rol = rolNormalizado(usuario);
   const perfiles = {
     OWNER: {
-      titulo: "Vista completa OWNER",
-      foco: "Caja, ventas, operacion, File Service, CRM y automatizaciones.",
+      titulo: "Centro de mando completo",
+      foco: "Caja, clientes, operación, archivos ECU y herramientas del sistema.",
       operacion: "Control total",
     },
     ADMIN: {
-      titulo: "Vista completa ADMIN",
-      foco: "Caja, ventas, operacion, File Service, CRM y automatizaciones.",
+      titulo: "Centro de mando administrativo",
+      foco: "Caja, clientes, operación, archivos ECU y herramientas del sistema.",
       operacion: "Control administrativo",
     },
     SUPERVISOR: {
-      titulo: "Vista supervisor",
-      foco: "Operacion general, responsables, atrasos, File Service resumido y automatizaciones en lectura.",
+      titulo: "Control de operación",
+      foco: "Atrasos, encargados, bloqueos y trabajos de archivos ECU.",
       operacion: "Sin caja global detallada",
     },
     RECEPCION: {
-      titulo: "Vista recepcion",
+      titulo: "Recepción y entregas",
       foco: "Ordenes activas, listos para entrega, pagos pendientes, entregadas hoy y clientes prioritarios.",
       operacion: "Sin caja global",
     },
     OPERADOR_ECU: {
-      titulo: "Vista operador ECU",
-      foco: "Ordenes relacionadas, diagnostico, MOD listo, post escritura, correcciones y recepcion de emergencia.",
+      titulo: "Trabajo ECU de hoy",
+      foco: "Órdenes asignadas, diagnóstico, archivos listos, prueba final y correcciones.",
       operacion: "Sin ventas ni caja global",
     },
     OPERADOR_SCANNER: {
-      titulo: "Vista scanner",
+      titulo: "Diagnósticos de hoy",
       foco: "Diagnosticos asignados, recepcion tecnica y ordenes que requieren revision.",
       operacion: "Sin ventas ni caja global",
     },
     MECANICO: {
-      titulo: "Vista mecanica",
-      foco: "Ordenes mecanicas, intervencion fisica, material recuperado, servicios pendientes y feedback.",
+      titulo: "Trabajos mecánicos de hoy",
+      foco: "Órdenes asignadas, trabajo físico, material y comentario final.",
       operacion: "Sin ventas ni caja global",
     },
     TUNER: {
-      titulo: "Vista tuner",
-      foco: "File Service, MOD pendientes, correcciones y archivos listos.",
+      titulo: "Archivos ECU de hoy",
+      foco: "Archivos modificados pendientes, correcciones y trabajos listos.",
       operacion: "Sin ventas ni caja global",
     },
   };
@@ -1160,7 +1337,7 @@ function App() {
                   )}
 
                   <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">
-                    Role Access System
+                    Acceso según tu rol
                   </p>
 
                   <p className="text-[10px] font-black text-white uppercase mt-3">
@@ -1181,19 +1358,31 @@ function App() {
                 </button>
               </div>
 
-              <ul className="flex-1 p-4 space-y-2">
-                {MENU.filter((item) => tieneRol(usuario, item.roles)).map((item) => (
-                  <li key={item.to}>
-                    <Link
-                      to={item.to}
-                      onClick={closeSidebar}
-                      className={item.destacado ? destacadoStyle : linkStyle}
-                    >
-                      {item.label}
-                    </Link>
-                  </li>
+              <div className="flex-1 overflow-y-auto p-4 space-y-5">
+                {obtenerSeccionesMenu(usuario).map((seccion) => (
+                  <section key={seccion.titulo}>
+                    <p className="mb-2 px-3 text-[9px] font-black uppercase tracking-[0.18em] text-slate-500">
+                      {seccion.titulo}
+                    </p>
+                    <ul className="space-y-2">
+                      {seccion.items.map((item) => (
+                        <li key={item.to}>
+                          <NavLink
+                            to={item.to}
+                            end={item.to === "/"}
+                            onClick={closeSidebar}
+                            className={({ isActive }) =>
+                              estiloMenu(item.destacado, isActive)
+                            }
+                          >
+                            {item.label}
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))}
-              </ul>
+              </div>
 
               <div className="p-4 border-t border-gray-800">
                 <button
@@ -1380,10 +1569,18 @@ function App() {
 }
 
 const linkStyle =
-  "block p-3 text-gray-400 font-bold uppercase text-xs hover:bg-gray-900 hover:text-white rounded-lg transition";
+  "block rounded-lg border border-transparent p-3 text-xs font-bold uppercase text-gray-400 transition hover:bg-gray-900 hover:text-white";
 
 const destacadoStyle =
-  "block p-3 bg-blue-600 text-white font-black uppercase text-xs rounded-lg hover:bg-white hover:text-black transition";
+  "block rounded-lg border border-blue-500 bg-blue-600 p-3 text-xs font-black uppercase text-white transition hover:bg-white hover:text-black";
+
+const estiloMenu = (destacado, activo) => {
+  if (activo) {
+    return "block rounded-lg border border-white bg-white p-3 text-xs font-black uppercase text-black shadow";
+  }
+
+  return destacado ? destacadoStyle : linkStyle;
+};
 
 const Protegido = ({ usuario, roles, children }) => {
   if (!tieneRol(usuario, roles)) {
@@ -1943,6 +2140,15 @@ const AlertaNotificacionFlotante = ({
 
 function Dashboard({ usuario, actualizarNotificaciones }) {
   const rol = rolNormalizado(usuario);
+  const esGestor = ["OWNER", "ADMIN"].includes(rol);
+  const esSupervisor = rol === "SUPERVISOR";
+  const esRecepcion = rol === "RECEPCION";
+  const esOperario = [
+    "OPERADOR_SCANNER",
+    "OPERADOR_ECU",
+    "MECANICO",
+    "TUNER",
+  ].includes(rol);
   const usernameActual = String(usuario?.username || usuario?.nombre || "").trim();
   const perfilRol = obtenerPerfilDashboardRol(usuario);
   const puedeVerBase = ["OWNER", "ADMIN", "SUPERVISOR", "RECEPCION"].includes(rol);
@@ -3619,7 +3825,13 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <h1 className="text-4xl md:text-5xl font-black text-black uppercase tracking-tighter">
-            Panel de Operaciones
+            {esGestor
+              ? "Centro de mando"
+              : esSupervisor
+              ? "Control de operación"
+              : esRecepcion
+              ? "Recepción de hoy"
+              : "Tus tareas de hoy"}
           </h1>
 
           <p className="text-xs font-black uppercase text-gray-500 mt-2">
@@ -3641,9 +3853,30 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           disabled={cargandoDashboard}
           className="bg-black text-white px-6 py-3 rounded-lg font-black uppercase text-xs hover:bg-blue-700 disabled:opacity-50 transition"
         >
-          {cargandoDashboard ? "Actualizando..." : "Actualizar dashboard"}
+          {cargandoDashboard ? "Actualizando..." : "Actualizar"}
         </button>
       </div>
+
+      {esGestor && (
+        <DashboardGroupTitle
+          title="Hoy"
+          text="Lo urgente y lo que necesita una decisión ahora."
+        />
+      )}
+
+      {esRecepcion && <ResumenRecepcionDashboard stats={stats} />}
+
+      {(esOperario || esRecepcion) && mostrarMisPendientes && (
+        <MisPendientesSection
+          title="Tus tareas de hoy"
+          data={misPendientes.data}
+          error={misPendientes.error}
+        />
+      )}
+
+      {(esGestor || esSupervisor) && (
+        <SemaforoOperativo semaforo={stats.semaforoOperativo} />
+      )}
 
       <ReglaOperativaGMTCH />
 
@@ -3658,13 +3891,8 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         mostrarScheduler={mostrarScheduler}
       />
 
-      <SemaforoOperativo semaforo={stats.semaforoOperativo} />
-
-      {mostrarMisPendientes && !mostrarCumplimientoOperativo && (
-        <MisPendientesSection
-          data={misPendientes.data}
-          error={misPendientes.error}
-        />
+      {!esGestor && !esSupervisor && (
+        <SemaforoOperativo semaforo={stats.semaforoOperativo} />
       )}
 
       {mostrarCumplimientoOperativo && (
@@ -3690,30 +3918,16 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
       {mostrarMisPendientes && mostrarCumplimientoOperativo && (
         <MisPendientesSection
+          title={esSupervisor ? "Pendientes y responsables" : "Tus tareas de hoy"}
           data={misPendientes.data}
           error={misPendientes.error}
         />
       )}
 
-      {mostrarCRM && <CRMComercialDashboardSection leads={stats.leads} />}
-
-      {mostrarAgentesIA && (
-        <AgentesIAGMTCHSection
-          estado={agentesIA}
-          onActualizar={cargarAgentesIA}
-        />
-      )}
-
-      {mostrarAutomatizaciones && (
-        <AutomatizacionesGMTCHSection
-          estado={automatizaciones}
-          puedeGenerarReportes={puedeGenerarReportesAutomatizacion}
-          puedeVerFinanzas={puedeVerFinanzasAutomatizacion}
-          puedeVerMaterial={puedeVerMaterialAutomatizacion}
-          puedeVerScheduler={mostrarScheduler}
-          soloLectura={!["OWNER", "ADMIN"].includes(rol)}
-          onEjecutar={ejecutarAutomatizacion}
-          onSchedulerRunOnce={ejecutarSchedulerAhora}
+      {esGestor && (
+        <DashboardGroupTitle
+          title="Operación"
+          text="Trabajos, bloqueos y próximos pasos del taller."
         />
       )}
 
@@ -3753,19 +3967,68 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
 
       <AccionesRapidasCentroMando usuario={usuario} />
 
+      {esGestor && (
+        <DashboardGroupTitle
+          title="Clientes"
+          text="Seguimiento comercial y clientes que necesitan respuesta."
+        />
+      )}
+
+      {mostrarCRM && <CRMComercialDashboardSection leads={stats.leads} />}
+
+      {esGestor && (
+        <DashboardGroupTitle
+          title="Caja"
+          text="Resumen comercial separado del cierre técnico y la entrega."
+        />
+      )}
+
       {mostrarComercial ? (
         <FinanzasDashboardV2 stats={stats} formatoCLP={formatoCLP} />
-      ) : (
-        <section className="border-4 border-black bg-white p-4 rounded-2xl text-xs font-black uppercase text-gray-500">
-          Métricas comerciales ocultas para este rol.
-        </section>
-      )}
+      ) : null}
 
       <DashboardGraficos
         mostrarComercial={mostrarComercial}
         graficos={stats.graficos}
         formatoCLP={formatoCLP}
       />
+
+      {esGestor && (
+        <DashboardGroupTitle
+          title="Sistema"
+          text="Automatizaciones y herramientas avanzadas de administración."
+        />
+      )}
+
+      {mostrarAgentesIA && (
+        <AgentesIAGMTCHSection
+          estado={agentesIA}
+          onActualizar={cargarAgentesIA}
+        />
+      )}
+
+      {mostrarAutomatizaciones && (
+        <details
+          open={esGestor}
+          className="rounded-3xl border-4 border-black bg-white p-4"
+        >
+          <summary className="cursor-pointer text-sm font-black uppercase">
+            Herramientas avanzadas del sistema
+          </summary>
+          <div className="mt-5">
+            <AutomatizacionesGMTCHSection
+              estado={automatizaciones}
+              puedeGenerarReportes={puedeGenerarReportesAutomatizacion}
+              puedeVerFinanzas={puedeVerFinanzasAutomatizacion}
+              puedeVerMaterial={puedeVerMaterialAutomatizacion}
+              puedeVerScheduler={mostrarScheduler}
+              soloLectura={!["OWNER", "ADMIN"].includes(rol)}
+              onEjecutar={ejecutarAutomatizacion}
+              onSchedulerRunOnce={ejecutarSchedulerAhora}
+            />
+          </div>
+        </details>
+      )}
 
       {mostrarOperacion && (
         <DashboardSection title="Operación">
@@ -3780,9 +4043,9 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       )}
 
       {puedeVerFileService && (
-        <DashboardSection title="File Service">
+        <DashboardSection title="Archivos ECU">
           <StatCard label="Activos" val={stats.fileServiceActivos} color="border-purple-500" />
-          <StatCard label="Pendientes post escritura" val={stats.fileServicePostPendiente} color="border-yellow-500" />
+          <StatCard label="Falta prueba final" val={stats.fileServicePostPendiente} color="border-yellow-500" />
           <StatCard label="Correcciones pendientes" val={stats.fileServiceCorrecciones} color="border-red-500" />
         </DashboardSection>
       )}
@@ -3802,6 +4065,59 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
     </div>
   );
 }
+
+const DashboardGroupTitle = ({ title, text }) => (
+  <div className="border-b-4 border-black pb-3">
+    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">
+      Modo simple
+    </p>
+    <h2 className="mt-1 text-3xl font-black uppercase text-black">{title}</h2>
+    <p className="mt-1 text-sm font-bold text-slate-600">{text}</p>
+  </div>
+);
+
+const ResumenRecepcionDashboard = ({ stats }) => {
+  const tarjetas = [
+    ["Listos para entregar", stats.listasEntrega, "border-emerald-600", "/ordenes"],
+    ["Pagos pendientes", stats.pendientesPago, "border-amber-500", "/ordenes"],
+    ["Recepciones de hoy", stats.trabajosIngresadosHoy, "border-blue-600", "/ordenes"],
+  ];
+
+  return (
+    <section className="rounded-3xl border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-700">
+            Tu acción principal
+          </p>
+          <h2 className="mt-1 text-2xl font-black uppercase">Recibir vehículo</h2>
+          <p className="mt-1 text-sm font-bold text-slate-600">
+            Empieza por la patente y el sistema te guiará paso a paso.
+          </p>
+        </div>
+        <Link
+          to="/flujo"
+          className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-4 text-sm font-black uppercase text-white transition hover:bg-black"
+        >
+          Iniciar recepción
+        </Link>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+        {tarjetas.map(([label, value, color, to]) => (
+          <Link
+            key={label}
+            to={to}
+            className={`rounded-2xl border-4 bg-slate-50 p-4 transition hover:-translate-y-0.5 ${color}`}
+          >
+            <p className="text-xs font-black uppercase text-slate-600">{label}</p>
+            <p className="mt-1 text-3xl font-black text-black">{numeroDashboard(value)}</p>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+};
 
 const nivelClassCentro = (nivel) => {
   if (nivel === "rojo") return getStatusColor("ALERTA", "soft");
@@ -3872,9 +4188,9 @@ const CumplimientoOperativoSection = ({ data, error }) => {
   const tarjetas = [
     ["Ordenes sin fotos", resumen.ordenes_sin_fotos, "border-red-500"],
     ["Ordenes sin items", resumen.ordenes_sin_items, "border-amber-500"],
-    ["Sin feedback", resumen.ordenes_sin_feedback, "border-yellow-500"],
+    ["Falta comentario final", resumen.ordenes_sin_feedback, "border-yellow-500"],
     ["Material pendiente", resumen.items_material_pendiente, "border-orange-500"],
-    ["FS sin post escritura", resumen.file_service_sin_post_escritura, "border-blue-500"],
+    ["Archivos sin prueba final", resumen.file_service_sin_post_escritura, "border-blue-500"],
     ["Correcciones pendientes", resumen.file_service_correccion_pendiente, "border-red-700"],
     ["Recepciones emergencia", resumen.ordenes_emergencia_operador, "border-purple-500"],
   ];
@@ -3998,7 +4314,7 @@ const tiempoSeveridadClass = (severidad) => {
 };
 
 const labelAccionTiempo = (url = "") => {
-  if (url.includes("/archivos-ecu")) return "Ver File Service";
+  if (url.includes("/archivos-ecu")) return "Ver archivo ECU";
   if (url.includes("/ordenes")) return "Ver orden";
   return "Revisar";
 };
@@ -4013,7 +4329,7 @@ const TiemposMuertosSection = ({ data, error }) => {
     ["Recepcion sin diagnostico", resumen.recepcion_sin_diagnostico, "border-amber-500"],
     ["Programacion >24h", resumen.programacion_atrasada, "border-red-600"],
     ["Listas sin entrega", resumen.listas_sin_entrega, "border-red-700"],
-    ["File Service atrasado", resumen.file_service_atrasado, "border-blue-600"],
+    ["Archivos ECU atrasados", resumen.file_service_atrasado, "border-blue-600"],
     ["Material pendiente", resumen.material_pendiente_atrasado, "border-orange-500"],
   ];
 
@@ -4025,10 +4341,10 @@ const TiemposMuertosSection = ({ data, error }) => {
             Tiempos muertos
           </p>
           <h2 className="mt-1 text-2xl font-black uppercase text-black">
-            SLA operativo referencial
+            Tiempos recomendados
           </h2>
           <p className="mt-2 text-xs font-bold uppercase text-gray-500">
-            SLA operativo referencial - horas corridas. No es ranking, sancion ni bono.
+            Tiempos corridos de referencia. No es ranking, sanción ni bono.
           </p>
         </div>
         <p className="text-[10px] font-black uppercase text-gray-400">
@@ -4055,7 +4371,7 @@ const TiemposMuertosSection = ({ data, error }) => {
 
       <div className="mt-5 rounded-2xl border-4 border-slate-950 bg-slate-950 p-4 text-white">
         <h3 className="text-sm font-black uppercase text-blue-300">
-          Top alertas SLA
+          Trabajos con mayor atraso
         </h3>
         <div className="mt-3 space-y-3">
           {alertas.length === 0 ? (
@@ -4074,7 +4390,7 @@ const TiemposMuertosSection = ({ data, error }) => {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full bg-black px-3 py-1 text-[10px] font-black uppercase text-white">
-                        {alerta.severidad || "SEGUIMIENTO"}
+                        {traducirSeveridad(alerta.severidad)}
                       </span>
                       <span className="text-[10px] font-black uppercase opacity-70">
                         {alerta.tipo}
@@ -4139,8 +4455,8 @@ const CierreDiarioOperativoSection = ({ data, error }) => {
     ["Activas", resumen.ordenes_activas, "border-slate-500"],
     ["Listas sin entregar", resumen.listas_sin_entrega, "border-red-600"],
     ["Pagos pendientes", resumen.pagos_pendientes, "border-red-700"],
-    ["File Service pendiente", resumen.file_service_pendiente, "border-blue-600"],
-    ["FS sin post escritura", resumen.file_service_sin_post_escritura, "border-amber-500"],
+    ["Archivos ECU pendientes", resumen.file_service_pendiente, "border-blue-600"],
+    ["Archivos sin prueba final", resumen.file_service_sin_post_escritura, "border-amber-500"],
     ["FS sin cierre técnico", resumen.file_service_sin_cierre_tecnico, "border-red-500"],
     ["Material pendiente", resumen.material_pendiente, "border-orange-500"],
     ["Sin fotos", resumen.ordenes_sin_fotos, "border-purple-500"],
@@ -4207,7 +4523,7 @@ const CierreDiarioOperativoSection = ({ data, error }) => {
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-full bg-black px-3 py-1 text-[10px] font-black uppercase text-white">
-                          {pendiente.severidad || "ATENCION"}
+                          {traducirSeveridad(pendiente.severidad)}
                         </span>
                         <span className="text-[10px] font-black uppercase opacity-70">
                           {pendiente.tipo}
@@ -4343,15 +4659,53 @@ const misPendientesSeveridadClass = (severidad) => {
   return "border-slate-400 bg-slate-50 text-slate-800";
 };
 
-const labelAccionPendiente = (url = "") => {
+const traducirSeveridad = (severidad) => {
+  const valor = String(severidad || "INFO").toUpperCase();
+  if (valor === "CRITICO") return "Urgente";
+  if (valor === "ATENCION") return "Requiere atención";
+  if (valor === "SEGUIMIENTO") return "Para revisar";
+  return "Información";
+};
+
+const traducirEstadoOrden = (estado) => {
+  const valor = String(estado || "").toUpperCase();
+  const estados = {
+    RECEPCIONADO: "Esperando diagnóstico",
+    PARA_DIAGNOSTICO: "Listo para diagnóstico",
+    EN_DIAGNOSTICO: "En diagnóstico",
+    EN_PROCESO: "En trabajo",
+    PARA_MECANICA: "Esperando mecánica",
+    LISTO_PARA_ENTREGA: "Listo para entregar",
+    ENTREGADO: "Entregado",
+    FINALIZADO_TECNICO: "Trabajo técnico terminado",
+  };
+
+  return estados[valor] || valor.replaceAll("_", " ").toLowerCase() || "Sin estado";
+};
+
+const traducirTipoPendiente = (tipo) => {
+  const valor = String(tipo || "Pendiente").toUpperCase();
+  const tipos = {
+    POST_ESCRITURA: "Prueba final",
+    POST_ESCRITURA_PENDIENTE: "Falta prueba final",
+    SIN_FEEDBACK: "Falta comentario final",
+    RESPONSABLE_BLOQUEADO: "Encargado bloqueado",
+    MATERIAL_PENDIENTE: "Material pendiente",
+    SERVICIO_PENDIENTE: "Servicio pendiente",
+  };
+
+  return tipos[valor] || valor.replaceAll("_", " ").toLowerCase();
+};
+
+const textoAccionSimple = (url = "") => {
   if (url.includes("/ordenes")) return "Ver orden";
-  if (url.includes("/archivos-ecu")) return "Ver File Service";
-  if (url.includes("/flujo")) return "Ir a recepcion";
+  if (url.includes("/archivos-ecu")) return "Ver archivo ECU";
+  if (url.includes("/flujo")) return "Ir a recepción";
   if (url.includes("/fotos")) return "Ver fotos";
   return "Revisar";
 };
 
-const MisPendientesSection = ({ data, error }) => {
+const MisPendientesSection = ({ title = "Tus tareas de hoy", data, error }) => {
   const resumen = data?.resumen || {};
   const pendientes = Array.isArray(data?.pendientes) ? data.pendientes.slice(0, 6) : [];
   const hayCriticos = pendientes.some(
@@ -4359,9 +4713,9 @@ const MisPendientesSection = ({ data, error }) => {
   );
   const total = numeroDashboard(resumen.total);
   const tarjetas = [
-    ["Ordenes asignadas", resumen.ordenes_asignadas],
-    ["Sin feedback", resumen.ordenes_sin_feedback],
-    ["Post escritura", resumen.post_escritura_pendiente],
+    ["Órdenes asignadas", resumen.ordenes_asignadas],
+    ["Falta comentario final", resumen.ordenes_sin_feedback],
+    ["Falta prueba final", resumen.post_escritura_pendiente],
     ["Correcciones", resumen.correcciones_pendientes],
     ["Material", resumen.material_recuperado_pendiente],
     ["Servicios", resumen.servicios_sin_cerrar],
@@ -4375,7 +4729,7 @@ const MisPendientesSection = ({ data, error }) => {
             Pendientes asociados a tu usuario
           </p>
           <h2 className="mt-1 text-2xl font-black uppercase">
-            Mis pendientes
+            {title}
           </h2>
           <p className="mt-2 text-xs font-bold uppercase text-slate-400">
             No es ranking ni sancion; es una lista de tareas operativas.
@@ -4397,7 +4751,7 @@ const MisPendientesSection = ({ data, error }) => {
 
       {hayCriticos && (
         <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-100 p-3 text-xs font-black uppercase text-red-900">
-          Debes resolver los pendientes criticos antes de recibir nuevos trabajos.
+          Necesitas resolver las tareas urgentes antes de recibir nuevos trabajos.
         </div>
       )}
 
@@ -4431,10 +4785,10 @@ const MisPendientesSection = ({ data, error }) => {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-black px-3 py-1 text-[10px] font-black uppercase text-white">
-                      {pendiente.severidad || "INFO"}
+                      {traducirSeveridad(pendiente.severidad)}
                     </span>
                     <span className="text-[10px] font-black uppercase opacity-70">
-                      {pendiente.tipo}
+                      {traducirTipoPendiente(pendiente.tipo)}
                     </span>
                   </div>
                   <h3 className="mt-2 text-sm font-black uppercase">
@@ -4444,13 +4798,13 @@ const MisPendientesSection = ({ data, error }) => {
                     {pendiente.descripcion || "Requiere revision operativa."}
                   </p>
                   <p className="mt-2 text-[11px] font-black uppercase opacity-75">
-                    Orden #{pendiente.ordenId || "-"} - File #{pendiente.archivoECUId || "-"} -{" "}
+                    Orden #{pendiente.ordenId || "-"} - Archivo ECU #{pendiente.archivoECUId || "-"} -{" "}
                     {pendiente.patente || "Sin patente"}
                   </p>
                   <p className="mt-1 text-[11px] font-bold uppercase opacity-75">
                     {pendiente.cliente || "Cliente no registrado"} -{" "}
                     {pendiente.vehiculo || "Vehiculo no registrado"} - Estado:{" "}
-                    {pendiente.estado || "-"}
+                    {traducirEstadoOrden(pendiente.estado)}
                   </p>
                 </div>
 
@@ -4459,11 +4813,11 @@ const MisPendientesSection = ({ data, error }) => {
                     to={pendiente.accion_url}
                     className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-[10px] font-black uppercase text-white transition hover:bg-blue-700"
                   >
-                    {labelAccionPendiente(pendiente.accion_url)}
+                    {textoAccionSimple(pendiente.accion_url)}
                   </Link>
                 ) : (
                   <span className="rounded-xl border-2 border-current px-4 py-3 text-[10px] font-black uppercase opacity-70">
-                    Sin accion directa
+                    Pide ayuda a tu supervisor
                   </span>
                 )}
               </div>
@@ -4504,7 +4858,7 @@ const SemaforoOperativo = ({ semaforo }) => (
         </p>
       </div>
       <span className="inline-block border-2 border-current px-4 py-2 text-xs font-black uppercase">
-        Centro de Mando V2
+        Estado del taller
       </span>
     </div>
   </section>
@@ -5301,7 +5655,7 @@ const ColaTrabajoDiaSection = ({ items = [] }) => (
 const FileServiceCentroMandoSection = ({ items = [] }) => (
   <section className="space-y-4">
     <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
-      File Service
+      Archivos ECU
     </h2>
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {items.map((item) => (
@@ -5330,10 +5684,10 @@ const ProcessGuardDashboardSection = ({ resumen = {}, cargando, onRevisar }) => 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-500">
-            Procesos sin cierre
+            Seguimiento obligatorio
           </h2>
           <p className="mt-1 text-[11px] font-bold uppercase text-gray-400">
-            Cierre tecnico obligatorio despues de MOD listo/descargado
+            Trabajos que todavía necesitan prueba final o término técnico
           </p>
         </div>
         <button
@@ -5342,7 +5696,7 @@ const ProcessGuardDashboardSection = ({ resumen = {}, cargando, onRevisar }) => 
           disabled={cargando}
           className="rounded-xl border-4 border-black bg-red-700 px-4 py-3 text-[10px] font-black uppercase text-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition hover:bg-red-600 disabled:opacity-50"
         >
-          {cargando ? "Revisando..." : "Revisar Process Guard"}
+          {cargando ? "Revisando..." : "Revisar trabajos bloqueados"}
         </button>
       </div>
 
@@ -5353,7 +5707,7 @@ const ProcessGuardDashboardSection = ({ resumen = {}, cargando, onRevisar }) => 
             <p className="mt-2 text-4xl font-black">{total}</p>
           </div>
           <div className={nivelClassCentro(criticos > 0 ? "rojo" : "verde") + " border-4 rounded-xl p-4"}>
-            <p className="text-[10px] font-black uppercase">Criticos</p>
+            <p className="text-[10px] font-black uppercase">Atención urgente</p>
             <p className="mt-2 text-4xl font-black">{criticos}</p>
           </div>
         </div>
@@ -5665,7 +6019,7 @@ const AccionesRapidasCentroMando = ({ usuario }) => (
         <QuickAction to="/ordenes" label="Ver ordenes" />
       )}
       {tieneRol(usuario, PERMISOS_RUTAS["/archivos-ecu"]) && (
-        <QuickAction to="/archivos-ecu" label="Ver File Service" />
+        <QuickAction to="/archivos-ecu" label="Ver archivos ECU" />
       )}
       {tieneRol(usuario, PERMISOS_RUTAS["/portal-admin"]) && (
         <QuickAction to="/portal-admin" label="Portal admin" />
