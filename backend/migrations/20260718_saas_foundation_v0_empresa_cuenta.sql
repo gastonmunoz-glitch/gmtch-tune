@@ -24,10 +24,14 @@ CREATE TABLE IF NOT EXISTS empresa_cuentas (
     CHECK (plan IN ('INTERNO', 'STARTER', 'PRO', 'MASTER', 'ENTERPRISE'))
 );
 
+ALTER TABLE empresa_cuentas
+  ALTER COLUMN id SET DEFAULT uuid_generate_v4();
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_empresa_cuentas_slug
   ON empresa_cuentas (slug);
 
 INSERT INTO empresa_cuentas (
+  id,
   nombre,
   slug,
   plan,
@@ -41,6 +45,7 @@ INSERT INTO empresa_cuentas (
   "updatedAt"
 )
 VALUES (
+  uuid_generate_v4(),
   'Gmtch Tune',
   'gmtch',
   'INTERNO',
