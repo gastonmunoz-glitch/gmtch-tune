@@ -1,11 +1,32 @@
 import { useEffect, useRef, useState } from "react";
-import api from "../services/api";
+import api, { getContextoPatente } from "../services/api";
 
 const ESTADO_ORDEN_INICIAL = "RECEPCIONADO";
 const ESTADO_ORDEN_FINAL_RECEPCION = "PARA_DIAGNOSTICO";
 const MODO_RECEPCION_NORMAL = "NORMAL";
 const MODO_RECEPCION_URGENTE = "URGENTE";
 const ROLES_PUEDEN_DEJAR_POR_ASIGNAR = ["OWNER", "ADMIN", "SUPERVISOR"];
+const ESTADOS_BUSQUEDA_PATENTE = Object.freeze({
+  IDLE: "IDLE",
+  BUSCANDO: "BUSCANDO",
+  ENCONTRADO: "ENCONTRADO",
+  MULTIPLES: "MULTIPLES",
+  NO_ENCONTRADO: "NO_ENCONTRADO",
+  ERROR: "ERROR",
+});
+
+const ETIQUETAS_ALERTA_PATENTE = {
+  VEHICULO_INACTIVO: "El vehículo está inactivo. Revisa antes de continuar.",
+  CLIENTE_VIP: "Cliente VIP.",
+  CLIENTE_FLOTA: "Cliente de flota.",
+  CLIENTE_TALLER_ALIADO: "Taller aliado.",
+  CLIENTE_GARANTIA: "Cliente con garantía o reclamo.",
+  ORDEN_ACTIVA: "Este vehículo ya tiene una orden activa.",
+  ORDEN_LISTA_SIN_ENTREGAR: "Hay una orden lista que todavía no fue entregada.",
+  REGULARIZACION_PENDIENTE: "Hay datos pendientes de regularizar.",
+  FILE_SERVICE_PENDIENTE: "Hay un File Service pendiente.",
+  MATERIAL_PENDIENTE: "Hay material pendiente de registrar.",
+};
 
 const ESTADO_INICIAL_CLIENTE = {
   nombre: "",
@@ -79,9 +100,10 @@ const calcularPasoInicial = () => {
 
 const normalizarPatente = (valor) => {
   return String(valor || "")
+    .normalize("NFKC")
     .trim()
     .toUpperCase()
-    .replace(/[\s.-]/g, "");
+    .replace(/[\s.\-\u2010-\u2015\u2212]/gu, "");
 };
 
 const formatearFecha = (fecha) => {
@@ -212,21 +234,6 @@ const obtenerCategoriaServicioPorCampo = (campoId) => {
   return "OTRO";
 };
 
-const obtenerOrdenesVehiculo = (vehiculo) => {
-  const ordenes =
-    vehiculo?.OrdenTrabajos ||
-    vehiculo?.Ordenes ||
-    vehiculo?.ordenes ||
-    vehiculo?.ordenTrabajos ||
-    [];
-
-  return Array.isArray(ordenes) ? ordenes : [];
-};
-
-const obtenerClienteVehiculo = (vehiculo) => {
-  return vehiculo?.Cliente || vehiculo?.cliente || vehiculo?.ClienteAsociado || null;
-};
-
 const CATEGORIAS_CLIENTE = [
   { value: "NORMAL", label: "Normal" },
   { value: "VIP", label: "VIP" },
@@ -300,6 +307,8 @@ const normalizarListaResponsables = (data) => {
 
 function RecepcionRapidaPage() {
   const fotosInputRef = useRef(null);
+  const busquedaPatenteAbortRef = useRef(null);
+  const busquedaPatenteSecuenciaRef = useRef(0);
   const rolUsuario = String(leerStorage("rol") || "").toUpperCase();
   const esRecepcionEmergenciaOperador = rolUsuario === "OPERADOR_ECU";
   const puedeDejarPorAsignar = ROLES_PUEDEN_DEJAR_POR_ASIGNAR.includes(rolUsuario);
@@ -314,8 +323,11 @@ function RecepcionRapidaPage() {
   const [cargandoResponsables, setCargandoResponsables] = useState(true);
 
   const [patenteBusqueda, setPatenteBusqueda] = useState("");
-  const [vehiculoEncontrado, setVehiculoEncontrado] = useState(null);
-  const [busquedaRealizada, setBusquedaRealizada] = useState(false);
+  const [estadoBusquedaPatente, setEstadoBusquedaPatente] = useState(
+    ESTADOS_BUSQUEDA_PATENTE.IDLE
+  );
+  const [contextoPatente, setContextoPatente] = useState(null);
+  const [errorBusquedaPatente, setErrorBusquedaPatente] = useState("");
 
   const [cliente, setCliente] = useState({ ...ESTADO_INICIAL_CLIENTE });
   const [clienteId, setClienteId] = useState(() => leerStorage("gmtch_clienteId"));
@@ -342,6 +354,13 @@ function RecepcionRapidaPage() {
   useEffect(() => {
     escribirStorage("gmtch_paso_recepcion", paso);
   }, [paso]);
+
+  useEffect(
+    () => () => {
+      busquedaPatenteAbortRef.current?.abort();
+      busquedaPatenteSecuenciaRef.current += 1;
+    }, []
+  );
 
   useEffect(() => {
     let activo = true;
@@ -564,7 +583,6 @@ function RecepcionRapidaPage() {
     setOrdenId(null);
 
     setFotosArchivos([]);
-    setVehiculoEncontrado(null);
     limpiarStorageFlujo();
   };
 
@@ -602,74 +620,167 @@ function RecepcionRapidaPage() {
     return mensaje;
   };
 
+  const actualizarPatenteBusqueda = (valor) => {
+    busquedaPatenteAbortRef.current?.abort();
+    busquedaPatenteSecuenciaRef.current += 1;
+    setPatenteBusqueda(normalizarPatente(valor));
+    setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.IDLE);
+    setContextoPatente(null);
+    setErrorBusquedaPatente("");
+  };
+
   const buscarPatente = async () => {
     const patente = normalizarPatente(patenteBusqueda);
 
     if (!patente) {
-      mostrarAviso("error", "Debes ingresar una patente para buscar.");
+      setContextoPatente(null);
+      setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.ERROR);
+      setErrorBusquedaPatente("Debes ingresar una patente para buscar.");
       return;
     }
 
+    busquedaPatenteAbortRef.current?.abort();
+    const controlador = new AbortController();
+    const secuencia = busquedaPatenteSecuenciaRef.current + 1;
+    busquedaPatenteAbortRef.current = controlador;
+    busquedaPatenteSecuenciaRef.current = secuencia;
+
+    setPatenteBusqueda(patente);
+    setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.BUSCANDO);
+    setContextoPatente(null);
+    setErrorBusquedaPatente("");
+    limpiarAviso();
+
     try {
-      setCargando(true);
-      setBusquedaRealizada(true);
-      limpiarAviso();
-      limpiarContextoTrabajo();
-      setPatenteBusqueda(patente);
-
-      const res = await api.get(`/vehiculos/patente/${patente}`);
-      const encontrado = res.data;
-      const clienteAsociado = obtenerClienteVehiculo(encontrado);
-      const nuevoVehiculoId = obtenerVehiculoId(encontrado);
-      const nuevoClienteId = obtenerClienteId(clienteAsociado || encontrado);
-
-      setVehiculoEncontrado(encontrado);
-      setVehiculo({
-        patente: encontrado?.patente || patente,
-        marca: encontrado?.marca || "",
-        modelo: encontrado?.modelo || "",
-        anio: encontrado?.anio || "",
-        vin: encontrado?.vin || "",
+      const contexto = await getContextoPatente(patente, {
+        signal: controlador.signal,
       });
-      setCliente({
-        nombre: clienteAsociado?.nombre || "",
-        telefono: clienteAsociado?.telefono || "",
-        categoria_cliente: normalizarCategoriaCliente(
-          clienteAsociado?.categoria_cliente
-        ),
-      });
-      setOrden((prev) => ({
-        ...prev,
-        prioridad: esModoUrgente
-          ? "URGENTE"
-          : prioridadSugeridaPorCategoria(clienteAsociado?.categoria_cliente),
-      }));
 
-      if (nuevoVehiculoId) {
-        setVehiculoId(nuevoVehiculoId);
-        escribirStorage("gmtch_vehiculoId", nuevoVehiculoId);
-      }
-
-      if (nuevoClienteId) {
-        setClienteId(nuevoClienteId);
-        escribirStorage("gmtch_clienteId", nuevoClienteId);
-      }
-
-      mostrarAviso("ok", "Patente encontrada. Puedes crear una nueva orden para este vehículo.");
-    } catch (err) {
-      if (err.response?.status === 404) {
-        setVehiculoEncontrado(null);
-        setVehiculo({ ...ESTADO_INICIAL_VEHICULO, patente });
-        mostrarAviso("ok", "Patente no registrada. Crear cliente y vehículo nuevo.");
-        setPaso(2);
+      if (
+        controlador.signal.aborted ||
+        secuencia !== busquedaPatenteSecuenciaRef.current
+      ) {
         return;
       }
 
-      console.error("ERROR BUSCANDO PATENTE:", err.response?.data || err.message);
-      mostrarAviso("error", mensajeErrorAmigable(err, "Búsqueda de patente"));
+      setContextoPatente(contexto);
+
+      if (contexto?.resultado === "EXACTO") {
+        setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.ENCONTRADO);
+      } else if (contexto?.resultado === "AMBIGUO") {
+        setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.MULTIPLES);
+      } else {
+        setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.NO_ENCONTRADO);
+      }
+    } catch (err) {
+      if (
+        controlador.signal.aborted ||
+        err?.code === "ERR_CANCELED" ||
+        secuencia !== busquedaPatenteSecuenciaRef.current
+      ) {
+        return;
+      }
+
+      const status = err.response?.status;
+      const codigo = err.response?.data?.codigo || err.response?.data?.error;
+      let mensaje =
+        "No pudimos buscar esta patente. Revisa la conexión e inténtalo nuevamente.";
+
+      if (status === 400 && codigo === "PATENTE_INVALIDA") {
+        mensaje =
+          err.response?.data?.message ||
+          "La patente tiene un formato inválido. Revisa los caracteres ingresados.";
+      } else if (status === 503 && codigo === "EMPRESA_NO_DISPONIBLE") {
+        mensaje =
+          "Tu sesión no tiene una empresa disponible. Vuelve a iniciar sesión o contacta a un administrador.";
+      }
+
+      setContextoPatente(null);
+      setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.ERROR);
+      setErrorBusquedaPatente(mensaje);
+      console.error("ERROR BUSCANDO CONTEXTO DE PATENTE:", codigo || err.message);
     } finally {
-      setCargando(false);
+      if (secuencia === busquedaPatenteSecuenciaRef.current) {
+        busquedaPatenteAbortRef.current = null;
+      }
     }
+  };
+
+  const aplicarDatosContexto = (vehiculoContexto, clienteContexto) => {
+    if (!vehiculoContexto?.id || !clienteContexto?.id) {
+      mostrarAviso(
+        "error",
+        "El vehículo no tiene un cliente válido asociado. Corrige la relación antes de crear la orden."
+      );
+      return;
+    }
+
+    if (vehiculoContexto.activo === false) {
+      mostrarAviso(
+        "error",
+        "Este vehículo está inactivo. Debe reactivarse antes de usarlo en una nueva recepción."
+      );
+      return;
+    }
+
+    setVehiculo({
+      patente: vehiculoContexto.patente || patenteBusqueda,
+      marca: vehiculoContexto.marca || "",
+      modelo: vehiculoContexto.modelo || "",
+      anio: vehiculoContexto.anio || "",
+      vin: vehiculoContexto.vin || "",
+    });
+    setCliente({
+      nombre: clienteContexto.nombre || "",
+      telefono: Object.prototype.hasOwnProperty.call(clienteContexto, "telefono")
+        ? clienteContexto.telefono || ""
+        : "",
+      categoria_cliente: normalizarCategoriaCliente(
+        clienteContexto.categoria_cliente
+      ),
+    });
+    setVehiculoId(vehiculoContexto.id);
+    setClienteId(clienteContexto.id);
+    setOrdenId(null);
+    escribirStorage("gmtch_vehiculoId", vehiculoContexto.id);
+    escribirStorage("gmtch_clienteId", clienteContexto.id);
+    borrarStorage("gmtch_ordenId");
+    mostrarAviso(
+      "ok",
+      "Datos seleccionados. Puedes revisar las sugerencias y crear una nueva orden."
+    );
+  };
+
+  const iniciarIngresoNuevo = () => {
+    const patente = contextoPatente?.patente || normalizarPatente(patenteBusqueda);
+    setCliente({ ...ESTADO_INICIAL_CLIENTE });
+    setClienteId(null);
+    setVehiculo({ ...ESTADO_INICIAL_VEHICULO, patente });
+    setVehiculoId(null);
+    setOrdenId(null);
+    borrarStorage("gmtch_clienteId");
+    borrarStorage("gmtch_vehiculoId");
+    borrarStorage("gmtch_ordenId");
+    setPaso(2);
+  };
+
+  const aplicarServicioSugerido = (servicio) => {
+    if (!servicio) return;
+    setOrden((prev) => ({ ...prev, servicio_solicitado: servicio }));
+    mostrarAviso("ok", `Servicio sugerido seleccionado: ${servicio}.`);
+  };
+
+  const aplicarResponsableSugerido = (responsable) => {
+    if (!responsable?.id) return;
+    setOrden((prev) => ({
+      ...prev,
+      responsable_tecnico_id: String(responsable.id),
+      responsable_tecnico_texto: snapshotUsuario(responsable),
+    }));
+    mostrarAviso(
+      "ok",
+      `Encargado sugerido seleccionado: ${snapshotUsuario(responsable)}.`
+    );
   };
 
   const crearOrdenParaVehiculoExistente = () => {
@@ -678,14 +789,13 @@ function RecepcionRapidaPage() {
       return;
     }
 
-    setOrden({
-      ...ESTADO_INICIAL_ORDEN,
+    setOrden((prev) => ({
+      ...prev,
       prioridad: esModoUrgente
         ? "URGENTE"
-        : prioridadSugeridaPorCategoria(cliente.categoria_cliente),
-    });
+        : prev.prioridad || prioridadSugeridaPorCategoria(cliente.categoria_cliente),
+    }));
     setOrdenId(null);
-    setFotosArchivos([]);
     borrarStorage("gmtch_ordenId");
     mostrarAviso("ok", "Vehículo seleccionado. Completa los datos de la nueva orden.");
     setPaso(4);
@@ -1078,13 +1188,18 @@ function RecepcionRapidaPage() {
   };
 
   const limpiarFlujo = () => {
+    busquedaPatenteAbortRef.current?.abort();
+    busquedaPatenteSecuenciaRef.current += 1;
+    busquedaPatenteAbortRef.current = null;
     setModoRecepcion(MODO_RECEPCION_NORMAL);
     setPaso(1);
     setAviso(null);
     setAdvertenciasBackend([]);
     setOrigenRecepcion("");
     setPatenteBusqueda("");
-    setBusquedaRealizada(false);
+    setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.IDLE);
+    setContextoPatente(null);
+    setErrorBusquedaPatente("");
     limpiarContextoTrabajo(false);
   };
 
@@ -1124,74 +1239,317 @@ function RecepcionRapidaPage() {
     );
   };
 
-  const renderResumenVehiculoEncontrado = () => {
-    if (!vehiculoEncontrado) return null;
+  const renderContextoPatente = () => {
+    if (estadoBusquedaPatente === ESTADOS_BUSQUEDA_PATENTE.IDLE) return null;
 
-    const clienteAsociado = obtenerClienteVehiculo(vehiculoEncontrado);
-    const ordenes = obtenerOrdenesVehiculo(vehiculoEncontrado);
-    const ordenesActivas = ordenes.filter(
-      (item) => String(item.estado || "").toUpperCase() !== "ENTREGADO"
-    );
-    const ultimaVisita =
-      vehiculoEncontrado.ultimaVisita ||
-      ordenes
-        .map((item) => item.createdAt || item.updatedAt)
-        .filter(Boolean)
-        .sort()
-        .at(-1);
+    if (estadoBusquedaPatente === ESTADOS_BUSQUEDA_PATENTE.BUSCANDO) {
+      return (
+        <div className="border-4 border-black bg-slate-50 p-5 text-sm font-black uppercase">
+          Buscando datos e historial de la patente...
+        </div>
+      );
+    }
+
+    if (estadoBusquedaPatente === ESTADOS_BUSQUEDA_PATENTE.ERROR) {
+      return (
+        <div className="border-4 border-red-700 bg-red-50 p-5 text-red-900">
+          <p className="font-black uppercase">No se pudo completar la búsqueda</p>
+          <p className="mt-2 text-sm font-bold">{errorBusquedaPatente}</p>
+          <p className="mt-2 text-xs font-bold uppercase">
+            Tu formulario no fue modificado. Corrige la patente o vuelve a intentar.
+          </p>
+        </div>
+      );
+    }
+
+    if (estadoBusquedaPatente === ESTADOS_BUSQUEDA_PATENTE.NO_ENCONTRADO) {
+      return (
+        <div className="border-4 border-blue-700 bg-blue-50 p-5 space-y-4">
+          <div>
+            <h3 className="font-black uppercase text-lg">Vehículo nuevo</h3>
+            <p className="mt-1 text-sm font-bold">
+              No encontramos esta patente en el historial Gmtch.
+            </p>
+            <p className="mt-1 text-sm font-bold">Puedes crear un ingreso nuevo.</p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={iniciarIngresoNuevo}
+              className="bg-blue-700 text-white px-6 py-3 font-black uppercase text-xs"
+            >
+              Crear cliente y vehículo nuevo
+            </button>
+            <button
+              type="button"
+              disabled
+              title="Disponible en una siguiente fase"
+              className="border-2 border-gray-400 bg-gray-100 text-gray-500 px-6 py-3 font-black uppercase text-xs cursor-not-allowed"
+            >
+              Buscar datos externos — disponible próximamente
+            </button>
+          </div>
+          <p className="text-xs font-bold text-gray-600">
+            Datos externos por patente se habilitarán en una siguiente fase.
+          </p>
+        </div>
+      );
+    }
+
+    if (estadoBusquedaPatente === ESTADOS_BUSQUEDA_PATENTE.MULTIPLES) {
+      const coincidencias = Array.isArray(contextoPatente?.coincidencias)
+        ? contextoPatente.coincidencias
+        : [];
+
+      return (
+        <div className="border-4 border-amber-600 bg-amber-50 p-5 space-y-4">
+          <div>
+            <h3 className="font-black uppercase text-lg">
+              Encontramos más de un vehículo
+            </h3>
+            <p className="mt-1 text-sm font-bold">
+              Confirma cuál corresponde. No cambiaremos tus datos hasta que elijas uno.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {coincidencias.map((item) => {
+              const seleccionado = String(vehiculoId || "") === String(item.id);
+              const puedeUsar = item.activo !== false && Boolean(item.cliente?.id);
+
+              return (
+                <div
+                  key={item.id}
+                  className={`border-2 p-4 ${
+                    seleccionado ? "border-green-700 bg-green-50" : "border-black bg-white"
+                  }`}
+                >
+                  <p className="font-black uppercase">
+                    {texto(item.patente)} · {texto(item.marca)} {texto(item.modelo)}{" "}
+                    {item.anio || ""}
+                  </p>
+                  <p className="mt-1 text-xs font-bold uppercase text-gray-600">
+                    Cliente: {texto(item.cliente?.nombre)} · Categoría:{" "}
+                    {texto(item.cliente?.categoria_cliente, "Normal")}
+                  </p>
+                  {!puedeUsar && (
+                    <p className="mt-2 text-xs font-black uppercase text-red-700">
+                      Vehículo inactivo o sin cliente válido.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!puedeUsar || seleccionado}
+                    onClick={() => aplicarDatosContexto(item, item.cliente)}
+                    className="mt-3 bg-black text-white px-4 py-2 font-black uppercase text-xs disabled:bg-gray-400"
+                  >
+                    {seleccionado ? "Vehículo seleccionado" : "Usar este vehículo"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {coincidencias.some(
+            (item) => String(item.id) === String(vehiculoId || "")
+          ) && (
+            <button
+              type="button"
+              onClick={crearOrdenParaVehiculoExistente}
+              className="bg-green-700 text-white px-6 py-3 font-black uppercase text-xs"
+            >
+              Continuar con el vehículo seleccionado
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    const vehiculoContexto = contextoPatente?.vehiculo;
+    const clienteContexto = contextoPatente?.cliente;
+    const alertas = Array.isArray(contextoPatente?.alertas)
+      ? contextoPatente.alertas
+      : [];
+    const ordenesRecientes = Array.isArray(contextoPatente?.ultimas_ordenes)
+      ? contextoPatente.ultimas_ordenes
+      : [];
+    const serviciosFrecuentes = Array.isArray(contextoPatente?.servicios_frecuentes)
+      ? contextoPatente.servicios_frecuentes
+      : [];
+    const diagnosticos = Array.isArray(contextoPatente?.diagnosticos_recientes)
+      ? contextoPatente.diagnosticos_recientes
+      : [];
+    const archivosEcu = Array.isArray(contextoPatente?.archivos_ecu_recientes)
+      ? contextoPatente.archivos_ecu_recientes
+      : [];
+    const responsables = Object.entries(contextoPatente?.responsable_sugerido || {})
+      .filter(([, responsable]) => responsable?.id)
+      .filter(
+        ([, responsable], indice, lista) =>
+          lista.findIndex(
+            ([, candidato]) => String(candidato.id) === String(responsable.id)
+          ) === indice
+      );
+    const contextoAplicado =
+      vehiculoContexto?.id && String(vehiculoId || "") === String(vehiculoContexto.id);
 
     return (
-      <div className="border-4 border-black bg-slate-50 p-5 space-y-4">
+      <div className="border-4 border-black bg-slate-50 p-5 space-y-5">
         <div>
           <h3 className="font-black uppercase text-lg">
-            Vehículo encontrado: {texto(vehiculoEncontrado.patente)}
+            Encontramos este vehículo en el historial Gmtch.
           </h3>
-          <p className="text-xs font-bold uppercase text-gray-500">
-            {texto(vehiculoEncontrado.marca)} {texto(vehiculoEncontrado.modelo)}{" "}
-            {vehiculoEncontrado.anio || ""}
-          </p>
-          <p className="text-xs font-bold uppercase text-gray-500">
-            VIN: {texto(vehiculoEncontrado.vin)}
+          <p className="mt-1 text-sm font-bold">
+            Puedes usar estos datos o mantener la información actual.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-bold uppercase">
-          <div className="bg-white border border-black p-3">
-            Cliente: {texto(clienteAsociado?.nombre)}
+        <div className="grid grid-cols-1 gap-3 text-xs font-bold uppercase md:grid-cols-3">
+          <div className="border border-black bg-white p-3">
+            Vehículo: {texto(vehiculoContexto?.patente)} ·{" "}
+            {texto(vehiculoContexto?.marca)} {texto(vehiculoContexto?.modelo)}{" "}
+            {vehiculoContexto?.anio || ""}
           </div>
-          <div className="bg-white border border-black p-3">
-            Telefono: {texto(clienteAsociado?.telefono)}
+          <div className="border border-black bg-white p-3">
+            Cliente: {texto(clienteContexto?.nombre)}
           </div>
-          <div className="bg-white border border-black p-3">
-            Email: {texto(clienteAsociado?.email)}
+          <div className="border border-black bg-white p-3">
+            Categoría: {texto(clienteContexto?.categoria_cliente, "Normal")}
           </div>
-          <div className="bg-white border border-black p-3">
-            Ultima visita: {formatearFecha(ultimaVisita)}
+          {Object.prototype.hasOwnProperty.call(clienteContexto || {}, "telefono") && (
+            <div className="border border-black bg-white p-3">
+              Teléfono: {texto(clienteContexto?.telefono)}
+            </div>
+          )}
+          <div className="border border-black bg-white p-3">
+            VIN: {texto(vehiculoContexto?.vin)}
           </div>
-          <div className="bg-white border border-black p-3">
-            Ordenes activas: {ordenesActivas.length}
+          <div className="border border-black bg-white p-3">
+            Última visita: {formatearFecha(ordenesRecientes[0]?.createdAt)}
           </div>
         </div>
 
-        {ordenesActivas.length > 0 && (
+        {alertas.length > 0 && (
+          <div>
+            <p className="mb-2 text-xs font-black uppercase">Atención antes de continuar</p>
+            <div className="flex flex-wrap gap-2">
+              {alertas.map((alerta) => (
+                <span
+                  key={alerta}
+                  className="border-2 border-amber-700 bg-amber-100 px-3 py-2 text-xs font-black uppercase text-amber-950"
+                >
+                  {ETIQUETAS_ALERTA_PATENTE[alerta] || alerta}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {ordenesRecientes.length > 0 && (
           <div className="space-y-2">
-            <p className="text-xs font-black uppercase">Ordenes activas</p>
-            {ordenesActivas.map((item) => (
-              <div key={item.id} className="border border-black bg-white p-3 text-xs font-bold uppercase">
-                Orden #{item.id} - {texto(item.estado, "Sin estado")} -{" "}
-                {texto(item.motivo_ingreso, "Sin motivo")}
+            <p className="text-xs font-black uppercase">Últimas órdenes</p>
+            {ordenesRecientes.map((item) => (
+              <div key={item.id} className="border border-black bg-white p-3 text-xs font-bold">
+                Orden #{item.id} · {texto(item.estado, "Sin estado")} ·{" "}
+                {texto(item.servicio, "Sin servicio resumido")} ·{" "}
+                {formatearFecha(item.createdAt)}
               </div>
             ))}
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={crearOrdenParaVehiculoExistente}
-          className="bg-black text-white px-6 py-3 font-black uppercase text-xs"
-        >
-          Crear nueva orden para este vehículo
-        </button>
+        {(diagnosticos.length > 0 || archivosEcu.length > 0) && (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="border border-black bg-white p-3">
+              <p className="text-xs font-black uppercase">Diagnósticos recientes</p>
+              {diagnosticos.length ? (
+                diagnosticos.map((item) => (
+                  <p key={item.id} className="mt-2 text-xs font-bold">
+                    {texto(item.fase, "Diagnóstico")} · {texto(item.resumen_dtc)}
+                  </p>
+                ))
+              ) : (
+                <p className="mt-2 text-xs font-bold text-gray-500">Sin registros recientes.</p>
+              )}
+            </div>
+            <div className="border border-black bg-white p-3">
+              <p className="text-xs font-black uppercase">File Service reciente</p>
+              {archivosEcu.length ? (
+                archivosEcu.map((item) => (
+                  <p key={item.id} className="mt-2 text-xs font-bold">
+                    {texto(item.estado, "Sin estado")} ·{" "}
+                    {item.servicios_solicitados?.length
+                      ? item.servicios_solicitados.join(", ")
+                      : "Sin servicio resumido"}
+                  </p>
+                ))
+              ) : (
+                <p className="mt-2 text-xs font-bold text-gray-500">Sin registros recientes.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {serviciosFrecuentes.length > 0 && (
+          <div>
+            <p className="mb-2 text-xs font-black uppercase">Servicios frecuentes · elige si aplica</p>
+            <div className="flex flex-wrap gap-2">
+              {serviciosFrecuentes.map((item) => (
+                <button
+                  key={item.servicio}
+                  type="button"
+                  onClick={() => aplicarServicioSugerido(item.servicio)}
+                  className="border-2 border-blue-700 bg-blue-50 px-3 py-2 text-xs font-black uppercase text-blue-900"
+                >
+                  {item.servicio} ({item.veces})
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {responsables.length > 0 && (
+          <div>
+            <p className="mb-2 text-xs font-black uppercase">Encargados sugeridos · elige si aplica</p>
+            <div className="flex flex-wrap gap-2">
+              {responsables.map(([tipo, responsable]) => (
+                <button
+                  key={`${tipo}-${responsable.id}`}
+                  type="button"
+                  onClick={() => aplicarResponsableSugerido(responsable)}
+                  className="border-2 border-violet-700 bg-violet-50 px-3 py-2 text-xs font-black uppercase text-violet-900"
+                >
+                  {snapshotUsuario(responsable)} · {tipo.replaceAll("_", " ")}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!contextoAplicado ? (
+          <button
+            type="button"
+            disabled={!contextoPatente?.puede_autocompletar}
+            onClick={() => aplicarDatosContexto(vehiculoContexto, clienteContexto)}
+            className="bg-black text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
+          >
+            Usar estos datos
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={crearOrdenParaVehiculoExistente}
+            className="bg-green-700 text-white px-6 py-3 font-black uppercase text-xs"
+          >
+            Crear nueva orden para este vehículo
+          </button>
+        )}
+
+        {!contextoPatente?.puede_autocompletar && !contextoAplicado && (
+          <p className="text-xs font-black uppercase text-red-700">
+            Este resultado no se puede usar automáticamente. Revisa que el vehículo esté activo y tenga cliente asociado.
+          </p>
+        )}
       </div>
     );
   };
@@ -1213,9 +1571,13 @@ function RecepcionRapidaPage() {
                 className="border border-black p-3 w-full font-black uppercase"
                 placeholder="Patente"
                 value={patenteBusqueda}
-                onChange={(e) => setPatenteBusqueda(normalizarPatente(e.target.value))}
+                onChange={(e) => actualizarPatenteBusqueda(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  if (
+                    e.key === "Enter" &&
+                    !e.repeat &&
+                    estadoBusquedaPatente !== ESTADOS_BUSQUEDA_PATENTE.BUSCANDO
+                  ) {
                     e.preventDefault();
                     buscarPatente();
                   }
@@ -1225,24 +1587,18 @@ function RecepcionRapidaPage() {
               <button
                 type="button"
                 onClick={buscarPatente}
-                disabled={cargando}
+                disabled={
+                  estadoBusquedaPatente === ESTADOS_BUSQUEDA_PATENTE.BUSCANDO
+                }
                 className="bg-black text-white px-6 py-3 font-black uppercase text-xs disabled:bg-gray-400"
               >
-                {cargando ? "Buscando..." : "Buscar"}
+                {estadoBusquedaPatente === ESTADOS_BUSQUEDA_PATENTE.BUSCANDO
+                  ? "Buscando..."
+                  : "Buscar datos"}
               </button>
             </div>
 
-            {renderResumenVehiculoEncontrado()}
-
-            {busquedaRealizada && !vehiculoEncontrado && (
-              <button
-                type="button"
-                onClick={() => setPaso(2)}
-                className="bg-blue-600 text-white px-6 py-3 font-black uppercase text-xs"
-              >
-                Crear cliente y vehículo nuevo
-              </button>
-            )}
+            {renderContextoPatente()}
           </div>
         );
 

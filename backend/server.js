@@ -267,6 +267,7 @@ app.get("/api/health", (req, res) => {
 const authRoutes = require("./src/routes/authRoutes");
 const usuarioRoutes = require("./src/routes/usuarioRoutes");
 const clienteRoutes = require("./src/routes/clienteRoutes");
+const vehiculoContextoRoutes = require("./src/routes/vehiculoContextoRoutes");
 const ordenTrabajoRoutes = require("./src/routes/ordenTrabajoRoutes");
 const diagnosticoRoutes = require("./src/routes/diagnosticoRoutes");
 const archivoECURoutes = require("./src/routes/archivoECURoutes");
@@ -368,6 +369,24 @@ app.use(
     DELETE: ["OWNER"],
   }),
   clienteRoutes
+);
+
+app.use(
+  "/api/vehiculos/contexto-patente",
+  autenticar,
+  permitirPorMetodo({
+    GET: [
+      "OWNER",
+      "ADMIN",
+      "SUPERVISOR",
+      "RECEPCION",
+      "OPERADOR_SCANNER",
+      "OPERADOR_ECU",
+      "MECANICO",
+      "TUNER",
+    ],
+  }),
+  vehiculoContextoRoutes
 );
 
 // ====================== VEHÍCULOS DIRECTO SQL V6 ======================

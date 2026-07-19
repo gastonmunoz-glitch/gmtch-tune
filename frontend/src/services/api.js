@@ -70,4 +70,11 @@ export const cerrarConversacion = (id) =>
     .patch(`/mensajes/conversaciones/${id}/cerrar`)
     .then((response) => response.data);
 
+export const getContextoPatente = (patente, opciones = {}) =>
+  api
+    .get(`/vehiculos/contexto-patente/${encodeURIComponent(String(patente || ""))}`, {
+      signal: opciones.signal,
+    })
+    .then((response) => response.data);
+
 export default api;
