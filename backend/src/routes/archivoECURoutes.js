@@ -44,16 +44,58 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 80 * 1024 * 1024,
-  },
-});
+const TAMANO_MAXIMO = 80 * 1024 * 1024;
+const crearUpload = () =>
+  multer({
+    storage,
+    limits: {
+      fileSize: TAMANO_MAXIMO,
+    },
+  });
 
-const manejarSubidaArchivo = upload.single("archivo");
-const manejarPostEscritura = upload.single("scanner_post_escritura");
-const manejarProcesamientoExterno = upload.single("archivo_resultado");
+const manejarMulter = (middleware, descripcion) => (req, res, next) => {
+  middleware(req, res, (error) => {
+    if (!error) return next();
+
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({
+        error: "ARCHIVO_DEMASIADO_GRANDE",
+        message: `${descripcion} supera el maximo permitido de 80 MB.`,
+      });
+    }
+
+    if (error instanceof multer.MulterError) {
+      return res.status(400).json({
+        error: "ARCHIVO_INVALIDO",
+        codigo: error.code,
+        message: `No se pudo procesar ${descripcion}.`,
+      });
+    }
+
+    return res.status(400).json({
+      error: "ARCHIVO_INVALIDO",
+      message: error.message || `No se pudo procesar ${descripcion}.`,
+    });
+  });
+};
+
+const uploadArchivoECU = crearUpload();
+// La UI existente usa este flujo tanto para binarios ECU como para evidencia
+// (imagenes/PDF). Se conserva la compatibilidad y el limite comun de 80 MB.
+const uploadScanner = crearUpload();
+
+const manejarSubidaArchivo = manejarMulter(
+  uploadArchivoECU.single("archivo"),
+  "el archivo ECU"
+);
+const manejarPostEscritura = manejarMulter(
+  uploadScanner.single("scanner_post_escritura"),
+  "la evidencia de scanner post escritura"
+);
+const manejarProcesamientoExterno = manejarMulter(
+  uploadArchivoECU.single("archivo_resultado"),
+  "el archivo de resultado externo"
+);
 
 router.post("/", manejarSubidaArchivo, crearArchivoECU);
 

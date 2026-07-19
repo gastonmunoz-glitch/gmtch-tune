@@ -38,6 +38,55 @@ const ArchivoECU = sequelize.define(
       defaultValue: "MEDIA",
     },
 
+    creado_en_modo_urgente: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    motivo_urgencia: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    requiere_regularizacion: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    regularizacion_pendientes: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
+
+    regularizar_antes_de_entrega: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    urgente_creado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    urgente_creado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    regularizado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    regularizado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
     tipo_servicio: {
       type: DataTypes.STRING(120),
       allowNull: true,

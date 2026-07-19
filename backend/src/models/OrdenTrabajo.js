@@ -32,6 +32,55 @@ const OrdenTrabajo = sequelize.define(
       defaultValue: "MEDIA",
     },
 
+    creado_en_modo_urgente: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    motivo_urgencia: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    requiere_regularizacion: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    regularizacion_pendientes: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
+
+    regularizar_antes_de_entrega: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    urgente_creado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    urgente_creado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    regularizado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    regularizado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
     estado: {
       type: DataTypes.STRING(50),
       allowNull: false,
@@ -66,8 +115,23 @@ const OrdenTrabajo = sequelize.define(
       allowNull: true,
     },
 
+    recepcionado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    origen_recepcion: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
     diagnostico_asignado_a_id: {
       type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    diagnostico_asignado_a: {
+      type: DataTypes.STRING(100),
       allowNull: true,
     },
 
@@ -76,13 +140,38 @@ const OrdenTrabajo = sequelize.define(
       allowNull: true,
     },
 
+    operador_ecu_asignado_a: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
     mecanico_asignado_a_id: {
       type: DataTypes.UUID,
       allowNull: true,
     },
 
+    mecanico_asignado_a: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
     supervisor_asignado_a_id: {
       type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    supervisor_asignado_a: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    tecnico_finalizado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    tecnico_finalizado_at: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
 
@@ -196,6 +285,42 @@ const OrdenTrabajo = sequelize.define(
 
     entregado_por_id: {
       type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    entregado_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    entregado_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    observacion_cierre: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+
+    archivada: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+
+    archivada_motivo: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+    },
+
+    archivada_por: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    archivada_at: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
 

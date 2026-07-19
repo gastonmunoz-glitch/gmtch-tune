@@ -3,6 +3,9 @@ import api from "../services/api";
 
 const ESTADO_ORDEN_INICIAL = "RECEPCIONADO";
 const ESTADO_ORDEN_FINAL_RECEPCION = "PARA_DIAGNOSTICO";
+const MODO_RECEPCION_NORMAL = "NORMAL";
+const MODO_RECEPCION_URGENTE = "URGENTE";
+const ROLES_PUEDEN_DEJAR_POR_ASIGNAR = ["OWNER", "ADMIN", "SUPERVISOR"];
 
 const ESTADO_INICIAL_CLIENTE = {
   nombre: "",
@@ -21,11 +24,14 @@ const ESTADO_INICIAL_VEHICULO = {
 const ESTADO_INICIAL_ORDEN = {
   kilometraje: "",
   servicio_solicitado: "",
+  motivo_urgencia: "",
   sintomas_cliente: "",
   observaciones_visuales: "",
   prioridad: "MEDIA",
   responsable_tecnico_id: "",
   responsable_tecnico_texto: "",
+  override_guardia: false,
+  motivo_override: "",
   requiere_scanner: true,
   requiere_lectura_ecu: true,
   requiere_mecanica: false,
@@ -98,6 +104,44 @@ const texto = (valor, fallback = "No registrado") => {
 
 const snapshotUsuario = (usuario) =>
   usuario?.username || usuario?.nombre || usuario?.id || "";
+
+const textoAdvertenciaUrgente = (valor) => {
+  const codigo = String(valor || "").trim().toUpperCase();
+  const etiquetas = {
+    KILOMETRAJE_PENDIENTE: "Falta kilometraje",
+    SINTOMAS_PENDIENTES: "Faltan síntomas del cliente",
+    MONTO_PENDIENTE: "Falta monto",
+    DETALLES_PENDIENTES: "Faltan detalles del trabajo",
+    FOTOS_PENDIENTES: "Faltan fotos de ingreso",
+    RESPONSABLE_PENDIENTE: "Falta asignar encargado",
+    DIAGNOSTICO_PENDIENTE: "Falta diagnóstico",
+    AUDITORIA_OPERATIVA_PENDIENTE:
+      "Recepción guardada; quedó pendiente registrar parte de la auditoría",
+    NOTIFICACION_INTERNA_PENDIENTE:
+      "Recepción guardada; quedó pendiente una notificación interna",
+  };
+
+  return etiquetas[codigo] || String(valor || "").trim();
+};
+
+const normalizarAdvertenciasBackend = (data) => {
+  const candidatas = [
+    data?.advertencias,
+    data?.advertencias_operativas,
+    data?.warnings,
+    data?.warning,
+    data?.advertencia,
+  ];
+
+  return candidatas
+    .flatMap((valor) => (Array.isArray(valor) ? valor : valor ? [valor] : []))
+    .map((valor) =>
+      typeof valor === "string"
+        ? textoAdvertenciaUrgente(valor)
+        : String(valor?.message || valor?.mensaje || valor?.detalle || "").trim()
+    )
+    .filter(Boolean);
+};
 
 const usuarioLocalActual = () => ({
   id: leerStorage("userId") || "",
@@ -258,10 +302,13 @@ function RecepcionRapidaPage() {
   const fotosInputRef = useRef(null);
   const rolUsuario = String(leerStorage("rol") || "").toUpperCase();
   const esRecepcionEmergenciaOperador = rolUsuario === "OPERADOR_ECU";
+  const puedeDejarPorAsignar = ROLES_PUEDEN_DEJAR_POR_ASIGNAR.includes(rolUsuario);
 
   const [paso, setPaso] = useState(() => calcularPasoInicial());
   const [cargando, setCargando] = useState(false);
   const [aviso, setAviso] = useState(null);
+  const [advertenciasBackend, setAdvertenciasBackend] = useState([]);
+  const [modoRecepcion, setModoRecepcion] = useState(MODO_RECEPCION_NORMAL);
   const [usuariosResponsables, setUsuariosResponsables] = useState([]);
   const [errorResponsables, setErrorResponsables] = useState("");
   const [cargandoResponsables, setCargandoResponsables] = useState(true);
@@ -281,6 +328,7 @@ function RecepcionRapidaPage() {
   const [origenRecepcion, setOrigenRecepcion] = useState("");
 
   const [fotosArchivos, setFotosArchivos] = useState([]);
+  const esModoUrgente = modoRecepcion === MODO_RECEPCION_URGENTE;
 
   const etiquetas = [
     "Patente",
@@ -328,6 +376,52 @@ function RecepcionRapidaPage() {
 
   const limpiarAviso = () => {
     setAviso(null);
+  };
+
+  const registrarAdvertenciasBackend = (data, adicionales = []) => {
+    const advertencias = [
+      ...normalizarAdvertenciasBackend(data),
+      ...adicionales,
+    ].filter(Boolean);
+
+    setAdvertenciasBackend([...new Set(advertencias)]);
+  };
+
+  const seleccionarModoRecepcion = (modo) => {
+    const siguienteModo =
+      modo === MODO_RECEPCION_URGENTE
+        ? MODO_RECEPCION_URGENTE
+        : MODO_RECEPCION_NORMAL;
+
+    setModoRecepcion(siguienteModo);
+    setAdvertenciasBackend([]);
+    setOrden((prev) => ({
+      ...prev,
+      override_guardia: false,
+      motivo_override: "",
+      prioridad:
+        siguienteModo === MODO_RECEPCION_URGENTE
+          ? "URGENTE"
+          : prioridadSugeridaPorCategoria(cliente.categoria_cliente),
+    }));
+  };
+
+  const obtenerPendientesRegularizacion = () => {
+    if (!esModoUrgente) return [];
+
+    const kilometraje = Number(limpiarNumero(orden.kilometraje));
+    const monto = Number(limpiarNumero(orden.monto_total));
+
+    return [
+      !Number.isFinite(kilometraje) || kilometraje <= 0 ? "Kilometraje" : null,
+      !String(orden.sintomas_cliente || "").trim() ? "Síntomas del cliente" : null,
+      !Number.isFinite(monto) || monto <= 0 ? "Monto" : null,
+      !String(orden.observaciones_visuales || "").trim()
+        ? "Detalles del trabajo"
+        : null,
+      !orden.responsable_tecnico_id ? "Encargado" : null,
+      fotosArchivos.length === 0 ? "Fotos de ingreso" : null,
+    ].filter(Boolean);
   };
 
   const siguiente = () => {
@@ -456,14 +550,17 @@ function RecepcionRapidaPage() {
     return ordenId || leerStorage("gmtch_ordenId") || null;
   };
 
-  const limpiarContextoTrabajo = () => {
+  const limpiarContextoTrabajo = (usarModoUrgente = esModoUrgente) => {
     setCliente({ ...ESTADO_INICIAL_CLIENTE });
     setClienteId(null);
 
     setVehiculo({ ...ESTADO_INICIAL_VEHICULO });
     setVehiculoId(null);
 
-    setOrden({ ...ESTADO_INICIAL_ORDEN });
+    setOrden({
+      ...ESTADO_INICIAL_ORDEN,
+      prioridad: usarModoUrgente ? "URGENTE" : ESTADO_INICIAL_ORDEN.prioridad,
+    });
     setOrdenId(null);
 
     setFotosArchivos([]);
@@ -543,7 +640,9 @@ function RecepcionRapidaPage() {
       });
       setOrden((prev) => ({
         ...prev,
-        prioridad: prioridadSugeridaPorCategoria(clienteAsociado?.categoria_cliente),
+        prioridad: esModoUrgente
+          ? "URGENTE"
+          : prioridadSugeridaPorCategoria(clienteAsociado?.categoria_cliente),
       }));
 
       if (nuevoVehiculoId) {
@@ -581,7 +680,9 @@ function RecepcionRapidaPage() {
 
     setOrden({
       ...ESTADO_INICIAL_ORDEN,
-      prioridad: prioridadSugeridaPorCategoria(cliente.categoria_cliente),
+      prioridad: esModoUrgente
+        ? "URGENTE"
+        : prioridadSugeridaPorCategoria(cliente.categoria_cliente),
     });
     setOrdenId(null);
     setFotosArchivos([]);
@@ -692,11 +793,13 @@ function RecepcionRapidaPage() {
     const observacionesVisuales = String(orden.observaciones_visuales ?? "").trim();
 
     return [
-      "=== RECEPCIÓN GMTCH TUNE ===",
+      esModoUrgente
+        ? "=== RECEPCIÓN URGENTE GMTCH TUNE ==="
+        : "=== RECEPCIÓN GMTCH TUNE ===",
       `Servicio solicitado: ${servicioSolicitado || "No informado"}`,
       "",
       "Síntomas indicados por cliente:",
-      sintomasCliente || "No informado",
+      sintomasCliente || (esModoUrgente ? "Pendiente de regularizar" : "No informado"),
       "",
       "Observaciones visibles de recepción:",
       observacionesVisuales || "Sin observaciones visibles registradas",
@@ -716,6 +819,7 @@ function RecepcionRapidaPage() {
 
     const kilometraje = limpiarNumero(orden.kilometraje);
     const servicioSolicitado = String(orden.servicio_solicitado ?? "").trim();
+    const motivoUrgencia = String(orden.motivo_urgencia ?? "").trim();
     const sintomasCliente = String(orden.sintomas_cliente ?? "").trim();
     const montoTotal = limpiarNumero(orden.monto_total);
 
@@ -724,17 +828,32 @@ function RecepcionRapidaPage() {
       return;
     }
 
-    if (!kilometraje || !servicioSolicitado || !sintomasCliente || !montoTotal) {
+    if (!servicioSolicitado) {
+      mostrarAviso("error", "Debes indicar el servicio solicitado.");
+      return;
+    }
+
+    if (esModoUrgente && !motivoUrgencia) {
+      mostrarAviso("error", "Debes explicar el motivo de la urgencia.");
+      return;
+    }
+
+    if (!esModoUrgente && (!kilometraje || !sintomasCliente || !montoTotal)) {
       mostrarAviso("error", "Complete kilometraje, servicio solicitado, síntomas y monto.");
       return;
     }
 
-    if (cargandoResponsables) {
+    const puedeContinuarPorAsignar = esModoUrgente && puedeDejarPorAsignar;
+
+    if (cargandoResponsables && !puedeContinuarPorAsignar) {
       mostrarAviso("error", "Espera a que carguen los responsables activos.");
       return;
     }
 
-    if (errorResponsables || usuariosTecnicosActivos.length === 0) {
+    if (
+      (errorResponsables || usuariosTecnicosActivos.length === 0) &&
+      !puedeContinuarPorAsignar
+    ) {
       mostrarAviso(
         "error",
         errorResponsables ||
@@ -745,8 +864,18 @@ function RecepcionRapidaPage() {
 
     const responsableTecnico = usuarioResponsableSeleccionado();
 
-    if (!responsableTecnico) {
+    if (!responsableTecnico && !puedeContinuarPorAsignar) {
       mostrarAviso("error", "Debes seleccionar un responsable técnico para continuar.");
+      return;
+    }
+
+    if (
+      esModoUrgente &&
+      puedeDejarPorAsignar &&
+      orden.override_guardia &&
+      !String(orden.motivo_override || "").trim()
+    ) {
+      mostrarAviso("error", "Debes justificar el override de guardia.");
       return;
     }
 
@@ -760,31 +889,51 @@ function RecepcionRapidaPage() {
       const categoriaServicio = obtenerCategoriaServicioPorCampo(
         campoResponsable.campoId
       );
-      const responsableTexto = snapshotUsuario(responsableTecnico);
+      const responsableTexto = responsableTecnico
+        ? snapshotUsuario(responsableTecnico)
+        : "";
       const usuarioRecepcion = usuarioLocalActual();
       const recepcionadoPorTexto = snapshotUsuario(usuarioRecepcion);
+      const pendientesRegularizacion = obtenerPendientesRegularizacion();
 
       const payload = {
         vehiculoId: idParaBackend(idVehiculoActual),
         vehiculo_id: idParaBackend(idVehiculoActual),
-        prioridad: orden.prioridad || "MEDIA",
-        kilometraje: Number(kilometraje),
-        motivo_ingreso: construirMotivoIngreso(),
-        monto_total: Number(montoTotal),
-        estado: ESTADO_ORDEN_INICIAL,
-        origen_recepcion: esRecepcionEmergenciaOperador
-          ? "RECEPCION_EMERGENCIA_OPERADOR"
+        prioridad: esModoUrgente ? "URGENTE" : orden.prioridad || "MEDIA",
+        kilometraje: kilometraje ? Number(kilometraje) : null,
+        motivo_ingreso: esModoUrgente
+          ? sintomasCliente
+          : construirMotivoIngreso(),
+        sintomas: esModoUrgente ? sintomasCliente || undefined : undefined,
+        observaciones: esModoUrgente
+          ? String(orden.observaciones_visuales || "").trim() || undefined
           : undefined,
+        monto_total: montoTotal ? Number(montoTotal) : 0,
+        estado: ESTADO_ORDEN_INICIAL,
+        origen_recepcion:
+          !esModoUrgente && esRecepcionEmergenciaOperador
+            ? "RECEPCION_EMERGENCIA_OPERADOR"
+            : undefined,
+        modo_urgente: esModoUrgente,
+        motivo_urgencia: esModoUrgente ? motivoUrgencia : undefined,
+        override_guardia:
+          esModoUrgente && puedeDejarPorAsignar
+            ? orden.override_guardia === true
+            : undefined,
+        motivo_override:
+          esModoUrgente && puedeDejarPorAsignar && orden.override_guardia
+            ? String(orden.motivo_override || "").trim()
+            : undefined,
         categoria_servicio: categoriaServicio,
         tipo_servicio: servicioSolicitado,
         servicio: servicioSolicitado,
-        responsable_tecnico_id: responsableTecnico.id,
-        responsable_tecnico: responsableTexto,
-        responsable_tecnico_texto: responsableTexto,
+        responsable_tecnico_id: responsableTecnico?.id || undefined,
+        responsable_tecnico: responsableTexto || undefined,
+        responsable_tecnico_texto: responsableTexto || undefined,
         recepcionado_por_id: usuarioRecepcion.id || undefined,
         recepcionado_por: recepcionadoPorTexto || undefined,
-        [campoResponsable.campoId]: responsableTecnico.id,
-        [campoResponsable.campoTexto]: responsableTexto,
+        [campoResponsable.campoId]: responsableTecnico?.id || undefined,
+        [campoResponsable.campoTexto]: responsableTexto || undefined,
       };
 
       const res = await api.post("/ordenes", payload);
@@ -801,11 +950,22 @@ function RecepcionRapidaPage() {
       setOrdenId(nuevaOrdenId);
       setOrigenRecepcion(origenBackend);
       escribirStorage("gmtch_ordenId", nuevaOrdenId);
+      registrarAdvertenciasBackend(
+        res.data,
+        pendientesRegularizacion.length > 0
+          ? [
+              `Recepción urgente creada. Regulariza antes de entregar: ${pendientesRegularizacion.join(
+                ", "
+              )}.`,
+            ]
+          : []
+      );
 
       mostrarAviso("ok", "Orden creada correctamente. Continúa con las fotos de respaldo.");
       setPaso(5);
     } catch (err) {
       console.error("ERROR AL GUARDAR ORDEN:", err.response?.data || err.message);
+      registrarAdvertenciasBackend(err.response?.data);
       mostrarAviso(
         "error",
         mensajeErrorResponsable(err, mensajeErrorAmigable(err, "Orden"))
@@ -851,24 +1011,16 @@ function RecepcionRapidaPage() {
     };
 
     try {
-      await api.put(`/ordenes/${idOrdenActual}`, payload);
+      const res = await api.patch(`/ordenes/${idOrdenActual}`, payload);
+      registrarAdvertenciasBackend(res.data);
       return true;
-    } catch (errorPut) {
+    } catch (errorPatch) {
       console.warn(
-        "No se pudo actualizar por PUT, intentando PATCH:",
-        errorPut.response?.data || errorPut.message
+        "No se pudo actualizar estado por PATCH:",
+        errorPatch.response?.data || errorPatch.message
       );
-
-      try {
-        await api.patch(`/ordenes/${idOrdenActual}`, payload);
-        return true;
-      } catch (errorPatch) {
-        console.warn(
-          "No se pudo actualizar estado por PATCH:",
-          errorPatch.response?.data || errorPatch.message
-        );
-        return false;
-      }
+      registrarAdvertenciasBackend(errorPatch.response?.data, advertenciasBackend);
+      return false;
     }
   };
 
@@ -880,7 +1032,7 @@ function RecepcionRapidaPage() {
       return;
     }
 
-    if (!fotosArchivos.length) {
+    if (!fotosArchivos.length && !esModoUrgente) {
       const continuar = window.confirm(
         "No hay fotos seleccionadas. Lo recomendado es subir respaldo exterior e interior. Deseas finalizar sin fotos?"
       );
@@ -888,6 +1040,12 @@ function RecepcionRapidaPage() {
       if (!continuar) {
         return;
       }
+    }
+
+    if (!fotosArchivos.length && esModoUrgente) {
+      registrarAdvertenciasBackend(null, [
+        "Recepción urgente sin fotos. Debes regularizar el respaldo visual antes de entregar.",
+      ]);
     }
 
     try {
@@ -899,7 +1057,11 @@ function RecepcionRapidaPage() {
       const estadoActualizado = await actualizarOrdenAParaDiagnostico();
 
       if (estadoActualizado) {
-        alert("Recepción finalizada. La orden quedó lista para diagnóstico.");
+        alert(
+          esModoUrgente
+            ? "Recepción urgente guardada. Revisa los datos pendientes antes de entregar."
+            : "Recepción finalizada. La orden quedó lista para diagnóstico."
+        );
       } else {
         alert(
           "Recepción guardada. No se pudo mover automáticamente a diagnóstico, pero la orden quedó registrada."
@@ -916,12 +1078,14 @@ function RecepcionRapidaPage() {
   };
 
   const limpiarFlujo = () => {
+    setModoRecepcion(MODO_RECEPCION_NORMAL);
     setPaso(1);
     setAviso(null);
+    setAdvertenciasBackend([]);
     setOrigenRecepcion("");
     setPatenteBusqueda("");
     setBusquedaRealizada(false);
-    limpiarContextoTrabajo();
+    limpiarContextoTrabajo(false);
   };
 
   const abrirSelectorFotos = () => {
@@ -934,11 +1098,28 @@ function RecepcionRapidaPage() {
     const estilos =
       aviso.tipo === "ok"
         ? "bg-green-100 border-green-600 text-green-900"
+        : aviso.tipo === "warning"
+          ? "bg-amber-100 border-amber-600 text-amber-950"
         : "bg-red-100 border-red-600 text-red-900";
 
     return (
       <div className={`mb-6 border-4 p-4 font-black uppercase text-xs ${estilos}`}>
         {aviso.mensaje}
+      </div>
+    );
+  };
+
+  const renderAdvertenciasBackend = () => {
+    if (!advertenciasBackend.length) return null;
+
+    return (
+      <div className="mb-6 border-4 border-amber-500 bg-amber-50 p-4 text-amber-950">
+        <p className="text-xs font-black uppercase">Pendiente de regularizar</p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs font-bold">
+          {advertenciasBackend.map((advertencia) => (
+            <li key={advertencia}>{advertencia}</li>
+          ))}
+        </ul>
       </div>
     );
   };
@@ -1243,22 +1424,28 @@ function RecepcionRapidaPage() {
               </p>
             </div>
 
-            <input
-              className="border border-black p-3 w-full"
-              placeholder="Kilometraje"
-              type="number"
-              value={orden.kilometraje ?? ""}
-              onChange={(e) =>
-                setOrden((prev) => ({
-                  ...prev,
-                  kilometraje: e.target.value ?? "",
-                }))
-              }
-            />
+            <div>
+              <label className="mb-1 block text-[10px] font-black uppercase text-gray-500">
+                Kilometraje {esModoUrgente ? "· Completar después" : "*"}
+              </label>
+              <input
+                className="border border-black p-3 w-full"
+                placeholder="Kilometraje"
+                type="number"
+                value={orden.kilometraje ?? ""}
+                onChange={(e) =>
+                  setOrden((prev) => ({
+                    ...prev,
+                    kilometraje: e.target.value ?? "",
+                  }))
+                }
+              />
+            </div>
 
             <select
               className="border border-black p-3 w-full bg-white font-bold"
-              value={orden.prioridad ?? "MEDIA"}
+              value={esModoUrgente ? "URGENTE" : orden.prioridad ?? "MEDIA"}
+              disabled={esModoUrgente}
               onChange={(e) =>
                 setOrden((prev) => ({
                   ...prev,
@@ -1308,12 +1495,36 @@ function RecepcionRapidaPage() {
               }
             />
 
+            {esModoUrgente && (
+              <div className="border-4 border-red-600 bg-red-50 p-4">
+                <label className="mb-1 block text-xs font-black uppercase text-red-900">
+                  Motivo de la urgencia *
+                </label>
+                <p className="mb-3 text-[10px] font-bold uppercase text-red-800">
+                  Explica por qué esta recepción debe ingresar de inmediato.
+                </p>
+                <textarea
+                  className="w-full border-2 border-red-700 bg-white p-3"
+                  placeholder="Ej: vehículo inmovilizado, cliente en ruta o ventana técnica crítica"
+                  value={orden.motivo_urgencia ?? ""}
+                  onChange={(e) =>
+                    setOrden((prev) => ({
+                      ...prev,
+                      motivo_urgencia: e.target.value ?? "",
+                    }))
+                  }
+                />
+              </div>
+            )}
+
             <div className="border-4 border-black bg-blue-50 p-4 space-y-2">
               <label className="block text-xs font-black uppercase text-black">
-                Responsable técnico *
+                Responsable técnico {esModoUrgente && puedeDejarPorAsignar ? "· opcional en urgente" : "*"}
               </label>
               <p className="text-[10px] font-bold uppercase text-gray-600">
-                Este paso asigna quién tiene la pelota. Una orden sin encargado no puede avanzar.
+                {esModoUrgente && puedeDejarPorAsignar
+                  ? "Puedes dejarla por asignar, pero debe tener encargado antes del cierre técnico o la entrega."
+                  : "Este paso asigna quién tiene la pelota. Una orden sin encargado no puede avanzar."}
               </p>
 
             <select
@@ -1333,10 +1544,16 @@ function RecepcionRapidaPage() {
                   ...prev,
                   responsable_tecnico_id: e.target.value,
                   responsable_tecnico_texto: snapshotUsuario(responsable),
+                  override_guardia: false,
+                  motivo_override: "",
                 }));
               }}
             >
-              <option value="">Seleccionar responsable técnico</option>
+              <option value="">
+                {esModoUrgente && puedeDejarPorAsignar
+                  ? "Por asignar · regularizar después"
+                  : "Seleccionar responsable técnico"}
+              </option>
               {usuariosTecnicosActivos.map((usuario) => (
                 <option key={usuario.id} value={usuario.id}>
                   {usuario.nombre || "Sin nombre"} / {usuario.username || "sin username"} / {usuario.rol}
@@ -1350,37 +1567,98 @@ function RecepcionRapidaPage() {
               </p>
             )}
 
+            {esModoUrgente && puedeDejarPorAsignar && !orden.responsable_tecnico_id && (
+              <p className="border-2 border-amber-500 bg-amber-50 p-2 text-[10px] font-black uppercase text-amber-900">
+                Quedará en cola por asignar. Debes asignar un encargado antes del cierre técnico o la entrega.
+              </p>
+            )}
+
               {cargandoResponsables && (
                 <p className="border-2 border-blue-600 bg-white p-2 text-[10px] font-black uppercase text-blue-900">
-                  Cargando responsables activos...
+                  {esModoUrgente && puedeDejarPorAsignar
+                    ? "Cargando responsables. Puedes enviar por asignar."
+                    : "Cargando responsables activos..."}
                 </p>
               )}
 
               {!cargandoResponsables && !errorResponsables && usuariosTecnicosActivos.length === 0 && (
-                <p className="border-2 border-red-600 bg-red-50 p-2 text-[10px] font-black uppercase text-red-900">
-                  No se pudieron cargar responsables activos. Revisa usuarios activos antes de crear la orden.
+                <p className={`border-2 p-2 text-[10px] font-black uppercase ${
+                  esModoUrgente && puedeDejarPorAsignar
+                    ? "border-amber-500 bg-amber-50 text-amber-900"
+                    : "border-red-600 bg-red-50 text-red-900"
+                }`}>
+                  {esModoUrgente && puedeDejarPorAsignar
+                    ? "No hay responsables disponibles. La orden quedará por asignar."
+                    : "No se pudieron cargar responsables activos. Revisa usuarios activos antes de crear la orden."}
                 </p>
             )}
 
             {errorResponsables && (
-              <p className="border-2 border-red-600 bg-red-50 p-2 text-[10px] font-black uppercase text-red-900">
-                {errorResponsables}
+              <p className={`border-2 p-2 text-[10px] font-black uppercase ${
+                esModoUrgente && puedeDejarPorAsignar
+                  ? "border-amber-500 bg-amber-50 text-amber-900"
+                  : "border-red-600 bg-red-50 text-red-900"
+              }`}>
+                {esModoUrgente && puedeDejarPorAsignar
+                  ? `${errorResponsables} Puedes enviar la orden por asignar.`
+                  : errorResponsables}
               </p>
             )}
 
+            {esModoUrgente &&
+              puedeDejarPorAsignar &&
+              orden.responsable_tecnico_id && (
+                <div className="border-2 border-red-400 bg-red-50 p-3 text-red-950">
+                  <label className="flex items-start gap-2 text-[10px] font-black uppercase">
+                    <input
+                      type="checkbox"
+                      checked={orden.override_guardia === true}
+                      onChange={(e) =>
+                        setOrden((prev) => ({
+                          ...prev,
+                          override_guardia: e.target.checked,
+                          motivo_override: e.target.checked
+                            ? prev.motivo_override
+                            : "",
+                        }))
+                      }
+                    />
+                    Autorizar asignación aunque este encargado tenga bloqueos críticos
+                  </label>
+                  {orden.override_guardia && (
+                    <textarea
+                      className="mt-3 w-full border-2 border-red-500 bg-white p-2 text-xs"
+                      placeholder="Motivo obligatorio del override"
+                      value={orden.motivo_override || ""}
+                      onChange={(e) =>
+                        setOrden((prev) => ({
+                          ...prev,
+                          motivo_override: e.target.value,
+                        }))
+                      }
+                    />
+                  )}
+                </div>
+              )}
+
             </div>
 
-            <textarea
-              className="border border-black p-3 w-full"
-              placeholder="Síntomas indicados por el cliente. Ej: pierde fuerza, humo, testigo motor, regeneraciones constantes, no parte, etc."
-              value={orden.sintomas_cliente ?? ""}
-              onChange={(e) =>
-                setOrden((prev) => ({
-                  ...prev,
-                  sintomas_cliente: e.target.value ?? "",
-                }))
-              }
-            />
+            <div>
+              <label className="mb-1 block text-[10px] font-black uppercase text-gray-500">
+                Síntomas {esModoUrgente ? "· Completar después" : "*"}
+              </label>
+              <textarea
+                className="border border-black p-3 w-full"
+                placeholder="Síntomas indicados por el cliente. Ej: pierde fuerza, humo, testigo motor, regeneraciones constantes, no parte, etc."
+                value={orden.sintomas_cliente ?? ""}
+                onChange={(e) =>
+                  setOrden((prev) => ({
+                    ...prev,
+                    sintomas_cliente: e.target.value ?? "",
+                  }))
+                }
+              />
+            </div>
 
             <textarea
               className="border border-black p-3 w-full"
@@ -1438,17 +1716,22 @@ function RecepcionRapidaPage() {
               </label>
             </div>
 
-            <input
-              className="border border-black p-3 w-full"
-              placeholder="Monto estimado o total ($)"
-              value={orden.monto_total ?? ""}
-              onChange={(e) =>
-                setOrden((prev) => ({
-                  ...prev,
-                  monto_total: e.target.value ?? "",
-                }))
-              }
-            />
+            <div>
+              <label className="mb-1 block text-[10px] font-black uppercase text-gray-500">
+                Monto {esModoUrgente ? "· Completar después" : "*"}
+              </label>
+              <input
+                className="border border-black p-3 w-full"
+                placeholder="Monto estimado o total ($)"
+                value={orden.monto_total ?? ""}
+                onChange={(e) =>
+                  setOrden((prev) => ({
+                    ...prev,
+                    monto_total: e.target.value ?? "",
+                  }))
+                }
+              />
+            </div>
 
             <div className="bg-yellow-50 border-2 border-yellow-500 p-4 text-xs font-bold uppercase leading-relaxed">
               El técnico ECU decidirá cómo se realizará la lectura. Recepción solo registra lo informado por el cliente.
@@ -1481,9 +1764,17 @@ function RecepcionRapidaPage() {
             <div>
               <h2 className="font-black text-lg uppercase">5. Fotos de Ingreso</h2>
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Respaldo visual del estado del vehículo al momento de recepción.
+                {esModoUrgente
+                  ? "Puedes continuar sin fotos y regularizarlas antes de la entrega."
+                  : "Respaldo visual del estado del vehículo al momento de recepción."}
               </p>
             </div>
+
+            {esModoUrgente && fotosArchivos.length === 0 && (
+              <div className="border-2 border-amber-500 bg-amber-50 p-4 text-xs font-black uppercase text-amber-900">
+                Fotos pendientes. La recepción urgente puede continuar, pero la orden debe regularizarse antes de entregar.
+              </div>
+            )}
 
             <div className="border border-black p-3 text-xs font-bold uppercase bg-gray-50">
               Orden actual: {obtenerOrdenActual() || "No detectada"}
@@ -1578,6 +1869,9 @@ function RecepcionRapidaPage() {
                 <strong>Vehículo:</strong> {texto(vehiculo.patente)} · {texto(vehiculo.marca)} {texto(vehiculo.modelo)}
               </p>
               <p><strong>Trabajo solicitado:</strong> {texto(orden.servicio_solicitado)}</p>
+              {esModoUrgente && (
+                <p><strong>Motivo urgente:</strong> {texto(orden.motivo_urgencia)}</p>
+              )}
               <p><strong>Encargado:</strong> {texto(orden.responsable_tecnico_texto, "Falta seleccionar")}</p>
               <p>
                 <strong>Fotos:</strong>{" "}
@@ -1586,6 +1880,22 @@ function RecepcionRapidaPage() {
                   : "Sin fotos; la orden quedará incompleta"}
               </p>
             </div>
+
+            {esModoUrgente && obtenerPendientesRegularizacion().length > 0 && (
+              <div className="border-4 border-amber-500 bg-amber-50 p-5 text-amber-950">
+                <p className="text-sm font-black uppercase">
+                  Regularizar antes de entregar
+                </p>
+                <p className="mt-1 text-xs font-bold uppercase">
+                  Esta recepción urgente quedará con estos datos pendientes:
+                </p>
+                <ul className="mt-3 list-disc pl-5 text-xs font-black uppercase">
+                  {obtenerPendientesRegularizacion().map((pendiente) => (
+                    <li key={pendiente}>{pendiente}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="bg-blue-50 border-2 border-blue-600 p-4 text-xs font-bold uppercase leading-relaxed">
               Siguiente paso: diagnóstico. Allí se registran la lectura del scanner y los códigos de falla.
@@ -1628,15 +1938,52 @@ function RecepcionRapidaPage() {
         </p>
       </div>
 
-      {esRecepcionEmergenciaOperador && (
+      <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => seleccionarModoRecepcion(MODO_RECEPCION_NORMAL)}
+          className={`border-4 p-4 text-left transition ${
+            !esModoUrgente
+              ? "border-black bg-black text-white"
+              : "border-gray-400 bg-white text-gray-700"
+          }`}
+        >
+          <span className="block text-xs font-black uppercase">Recepción normal</span>
+          <span className="mt-1 block text-[10px] font-bold uppercase opacity-75">
+            Completa todos los datos antes de crear la orden.
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => seleccionarModoRecepcion(MODO_RECEPCION_URGENTE)}
+          className={`border-4 p-4 text-left transition ${
+            esModoUrgente
+              ? "border-red-700 bg-red-700 text-white"
+              : "border-red-300 bg-red-50 text-red-900"
+          }`}
+        >
+          <span className="block text-xs font-black uppercase">Recepción rápida urgente</span>
+          <span className="mt-1 block text-[10px] font-bold uppercase opacity-80">
+            Motivo obligatorio; kilometraje, síntomas, monto y fotos pueden regularizarse después.
+          </span>
+        </button>
+      </div>
+
+      {esModoUrgente && (
         <div className="mb-6 border-4 border-amber-500 bg-amber-50 p-4">
           <p className="text-[11px] font-black uppercase text-amber-900">
-            Recepcion de emergencia operador: registra solo datos minimos. No puedes cobrar ni entregar desde este flujo.
+            Crea el trabajo ahora y completa datos después. Los campos pendientes deben regularizarse antes del cierre técnico o la entrega.
           </p>
+          {!puedeDejarPorAsignar && (
+            <p className="mt-2 text-[10px] font-bold uppercase text-amber-900">
+              Tu rol debe seleccionar un encargado activo. Solo OWNER, ADMIN o SUPERVISOR pueden dejar la orden por asignar.
+            </p>
+          )}
         </div>
       )}
 
       {renderAviso()}
+      {renderAdvertenciasBackend()}
 
       <div className="flex justify-between mb-8 gap-2">
         {etiquetas.map((label, idx) => {

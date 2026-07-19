@@ -33,6 +33,7 @@ const TABLAS = {
 };
 
 const LIMITE_LECTURA = 800;
+const LIMITE_OPERATIVO = 5000;
 let tablaPreparada = false;
 
 const limpiarTexto = (valor) => {
@@ -53,6 +54,61 @@ const booleano = (valor) =>
   valor === "1" ||
   upper(valor) === "TRUE" ||
   upper(valor) === "SI";
+
+const listaJson = (valor) => {
+  if (Array.isArray(valor)) return valor.filter(Boolean);
+  if (typeof valor !== "string" || !valor.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(valor);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+};
+
+const esCreadoEnModoUrgente = (registro = {}) =>
+  booleano(registro.creado_en_modo_urgente);
+
+const requiereRegularizacion = (registro = {}) =>
+  booleano(registro.requiere_regularizacion) ||
+  listaJson(registro.regularizacion_pendientes).length > 0;
+
+const pendientesRegularizacion = (registro = {}) =>
+  listaJson(registro.regularizacion_pendientes).map((pendiente) =>
+    typeof pendiente === "string"
+      ? pendiente
+      : pendiente?.codigo || pendiente?.tipo || pendiente?.mensaje
+  ).filter(Boolean);
+
+const ordenPorAsignar = (orden = {}, items = []) =>
+  ![
+    orden.diagnostico_asignado_a_id,
+    orden.operador_ecu_asignado_a_id,
+    orden.mecanico_asignado_a_id,
+    orden.supervisor_asignado_a_id,
+  ].some((valor) => Boolean(limpiarTexto(valor))) &&
+  !items.some(
+    (item) =>
+      upper(item.estado) !== "ANULADO" &&
+      Boolean(limpiarTexto(item.responsable_id))
+  );
+
+const archivoPorAsignar = (archivo = {}) =>
+  ![
+    archivo.tuner_asignado_a_id,
+    archivo.operador_ecu_asignado_a_id,
+    archivo.slave_asignado_a_id,
+  ].some((valor) => Boolean(limpiarTexto(valor)));
+
+const postEscrituraCumplida = (archivo = {}) => {
+  const estado = upper(archivo.post_escritura_estado);
+  return (
+    estado === "OK" ||
+    (estado === "NO_APLICA" &&
+      Boolean(limpiarTexto(archivo.post_escritura_observacion)))
+  );
+};
 
 const fechaValida = (valor) => {
   if (!valor) return null;
@@ -162,17 +218,64 @@ const tablaExiste = async (tableName) => {
 
 const leerTabla = async (tableName, limit = LIMITE_LECTURA) => {
   if (!(await tablaExiste(tableName))) return [];
+  const esTablaOperativaPrincipal = [TABLAS.ordenes, TABLAS.archivos].includes(
+    tableName
+  );
 
   try {
+    const tabla = quoteIdent(tableName);
+    const sql = tableName === TABLAS.ordenes
+      ? `
+        SELECT *
+        FROM (
+          SELECT * FROM ${tabla}
+          WHERE COALESCE("archivada", false) = true
+             OR UPPER(COALESCE("estado", '')) = 'ENTREGADO'
+          ORDER BY "updatedAt" DESC
+          LIMIT :limit
+        ) AS historicas
+        UNION ALL
+        SELECT *
+        FROM (
+          SELECT * FROM ${tabla}
+          WHERE COALESCE("archivada", false) = false
+            AND UPPER(COALESCE("estado", '')) <> 'ENTREGADO'
+          ORDER BY "updatedAt" DESC
+          LIMIT :operationalLimit
+        ) AS activas
+      `
+      : tableName === TABLAS.archivos
+        ? `
+          SELECT *
+          FROM (
+            SELECT * FROM ${tabla}
+            WHERE COALESCE("archivado", false) = true
+               OR UPPER(COALESCE("estado", '')) IN ('FINALIZADO_TECNICO', 'FINALIZADO', 'ARCHIVADO')
+            ORDER BY "updatedAt" DESC
+            LIMIT :limit
+          ) AS historicos
+          UNION ALL
+          SELECT *
+          FROM (
+            SELECT * FROM ${tabla}
+            WHERE COALESCE("archivado", false) = false
+              AND UPPER(COALESCE("estado", '')) NOT IN ('FINALIZADO_TECNICO', 'FINALIZADO', 'ARCHIVADO')
+            ORDER BY "updatedAt" DESC
+            LIMIT :operationalLimit
+          ) AS activos
+        `
+        : `SELECT * FROM ${tabla} ORDER BY 1 DESC LIMIT :limit`;
+
     return await sequelize.query(
-      `SELECT * FROM ${quoteIdent(tableName)} LIMIT :limit`,
+      sql,
       {
-        replacements: { limit },
+        replacements: { limit, operationalLimit: LIMITE_OPERATIVO },
         type: QueryTypes.SELECT,
       }
     );
   } catch (error) {
     console.warn(`Automatizaciones: no se pudo leer ${tableName}:`, error.message);
+    if (esTablaOperativaPrincipal) throw error;
     return [];
   }
 };
@@ -197,6 +300,17 @@ const esArchivoActivo = (archivo) => {
     !["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(estadoArchivo)
   );
 };
+
+const ESTADOS_ORDEN_TERMINALES = new Set([
+  "ENTREGADO",
+  "ANULADO",
+  "CANCELADO",
+  "ARCHIVADO",
+]);
+
+const esOrdenActiva = (orden) =>
+  !booleano(orden?.archivada) &&
+  !ESTADOS_ORDEN_TERMINALES.has(upper(orden?.estado));
 
 const cargarContexto = async () => {
   const [
@@ -299,7 +413,7 @@ const prioridadGeneral = (alertas = []) => {
 
 const crearRevisionBase = (ctx) => {
   const ahora = new Date();
-  const ordenesActivas = ctx.ordenes.filter((orden) => upper(orden.estado) !== "ENTREGADO");
+  const ordenesActivas = ctx.ordenes.filter(esOrdenActiva);
   const archivosActivos = ctx.archivos.filter(esArchivoActivo);
 
   const ordenesSinResponsable = ordenesActivas.filter(
@@ -327,7 +441,7 @@ const crearRevisionBase = (ctx) => {
     ["ORIGINAL_CARGADO", "NOTIFICADO_MASTER"].includes(upper(archivo.estado))
   );
   const postEscrituraPendiente = archivosActivos.filter((archivo) => {
-    const postOk = upper(archivo.post_escritura_estado) === "OK";
+    const postOk = postEscrituraCumplida(archivo);
     return (
       !postOk &&
       (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
@@ -802,7 +916,7 @@ const revisionFinanzasData = (ctx) => {
     (item) => upper(item.estado) === "PENDIENTE_REVISION"
   );
   const pendientesPago = ctx.ordenes.filter(
-    (orden) => upper(orden.estado) !== "ENTREGADO" && upper(orden.estado_pago) !== "PAGADO"
+    (orden) => esOrdenActiva(orden) && upper(orden.estado_pago) !== "PAGADO"
   );
   const fondoReserva = ctx.fondo.reduce((total, movimiento) => {
     const tipo = upper(movimiento.tipo);
@@ -1091,10 +1205,10 @@ const crearCumplimientoOperativoData = (ctx) => {
     }
   });
 
-  const ordenesActivas = ctx.ordenes.filter(
-    (orden) => upper(orden.estado) !== "ENTREGADO" && !booleano(orden.archivada)
-  );
+  const ordenesActivas = ctx.ordenes.filter(esOrdenActiva);
   const archivosActivos = ctx.archivos.filter(esArchivoActivo);
+  const ordenesUrgentes = ordenesActivas.filter(esCreadoEnModoUrgente);
+  const archivosUrgentes = archivosActivos.filter(esCreadoEnModoUrgente);
 
   const itemMaterialCumplido = (item, ordenId) => {
     const itemId = Number(item.id);
@@ -1147,9 +1261,12 @@ const crearCumplimientoOperativoData = (ctx) => {
         (item) => Number(item.ordenId) === ordenId
       );
       const emergencia = upper(orden.origen_recepcion) === "RECEPCION_EMERGENCIA_OPERADOR";
+      const urgente = esCreadoEnModoUrgente(orden);
+      const sinRegularizar = urgente && requiereRegularizacion(orden);
+      const porAsignar = urgente && ordenPorAsignar(orden, itemsOrden);
 
       if (!fotosOrden.length) pendientes.push("SIN_FOTOS");
-      if (!itemsOrden.length) pendientes.push("SIN_ITEMS");
+      if (!itemsOrden.length && !urgente) pendientes.push("SIN_ITEMS");
       if (!limpiarTexto(orden.feedback_por) && !limpiarTexto(orden.feedback_operario)) {
         pendientes.push("SIN_FEEDBACK");
       }
@@ -1158,6 +1275,11 @@ const crearCumplimientoOperativoData = (ctx) => {
         pendientes.push("PAGO_PENDIENTE_LISTO_ENTREGA");
       }
       if (emergencia) pendientes.push("RECEPCION_EMERGENCIA");
+      if (sinRegularizar) pendientes.push("URGENTE_SIN_REGULARIZAR");
+      if (porAsignar) pendientes.push("POR_ASIGNAR");
+      if (sinRegularizar && booleano(orden.regularizar_antes_de_entrega)) {
+        pendientes.push("PENDIENTE_ANTES_DE_ENTREGA");
+      }
 
       if (!pendientes.length) return null;
 
@@ -1238,6 +1360,10 @@ const crearCumplimientoOperativoData = (ctx) => {
         recepcionado_por_id: orden.recepcionado_por_id || null,
         responsables,
         diagnosticos_count: diagnosticosOrden.length,
+        creado_en_modo_urgente: urgente,
+        requiere_regularizacion: sinRegularizar,
+        regularizacion_pendientes: pendientesRegularizacion(orden),
+        por_asignar: porAsignar,
         pendientes,
       };
     })
@@ -1247,8 +1373,11 @@ const crearCumplimientoOperativoData = (ctx) => {
     .map((archivo) => {
       const pendientes = [];
       const estadoArchivo = upper(archivo.estado);
-      const postOk = upper(archivo.post_escritura_estado) === "OK";
+      const postOk = postEscrituraCumplida(archivo);
       const activoMas24h = horasDesde(archivo.updatedAt || archivo.createdAt, ahora) > 24;
+      const urgente = esCreadoEnModoUrgente(archivo);
+      const sinRegularizar = urgente && requiereRegularizacion(archivo);
+      const porAsignar = urgente && archivoPorAsignar(archivo);
 
       if (
         !postOk &&
@@ -1263,6 +1392,11 @@ const crearCumplimientoOperativoData = (ctx) => {
         pendientes.push("CORRECCION_PENDIENTE");
       }
       if (activoMas24h) pendientes.push("ACTIVO_MAS_24H");
+      if (sinRegularizar) pendientes.push("URGENTE_SIN_REGULARIZAR");
+      if (porAsignar) pendientes.push("POR_ASIGNAR");
+      if (sinRegularizar && booleano(archivo.regularizar_antes_de_entrega)) {
+        pendientes.push("PENDIENTE_ANTES_DE_ENTREGA");
+      }
 
       if (!pendientes.length) return null;
 
@@ -1290,6 +1424,10 @@ const crearCumplimientoOperativoData = (ctx) => {
         estado: archivo.estado || "SIN_ESTADO",
         tipo_servicio: archivo.tipo_servicio || "No registrado",
         responsable_principal: responsable,
+        creado_en_modo_urgente: urgente,
+        requiere_regularizacion: sinRegularizar,
+        regularizacion_pendientes: pendientesRegularizacion(archivo),
+        por_asignar: porAsignar,
         pendientes,
       };
     })
@@ -1319,6 +1457,27 @@ const crearCumplimientoOperativoData = (ctx) => {
     ordenes_listas_pago_pendiente: ordenes_con_pendientes.filter((orden) =>
       orden.pendientes.includes("PAGO_PENDIENTE_LISTO_ENTREGA")
     ).length,
+    urgentes_sin_regularizar:
+      ordenesUrgentes.filter(requiereRegularizacion).length +
+      archivosUrgentes.filter(requiereRegularizacion).length,
+    ordenes_creadas_rapidas: ordenesUrgentes.length,
+    file_service_urgente: archivosUrgentes.length,
+    pendientes_antes_de_entrega:
+      ordenesUrgentes.filter(
+        (orden) =>
+          requiereRegularizacion(orden) &&
+          booleano(orden.regularizar_antes_de_entrega)
+      ).length +
+      archivosUrgentes.filter(
+        (archivo) =>
+          requiereRegularizacion(archivo) &&
+          booleano(archivo.regularizar_antes_de_entrega)
+      ).length,
+    por_asignar:
+      ordenesUrgentes.filter((orden) =>
+        ordenPorAsignar(orden, itemsPorOrden.get(Number(orden.id)) || [])
+      ).length +
+      archivosUrgentes.filter(archivoPorAsignar).length,
   };
 
   const alertas = [];
@@ -1357,6 +1516,37 @@ const crearCumplimientoOperativoData = (ctx) => {
       mensaje: `${resumen.ordenes_emergencia_operador} recepcion(es) fueron creadas por operador.`,
     });
   }
+  if (resumen.urgentes_sin_regularizar > 0) {
+    alertas.push({
+      tipo: "ATENCION",
+      titulo: "Urgentes sin regularizar",
+      mensaje: `${resumen.urgentes_sin_regularizar} trabajo(s) urgente(s) deben completar datos antes del cierre o entrega.`,
+    });
+  }
+  if (resumen.por_asignar > 0) {
+    alertas.push({
+      tipo: "ATENCION",
+      titulo: "Trabajos urgentes por asignar",
+      mensaje: `${resumen.por_asignar} trabajo(s) urgente(s) aun no tienen encargado.`,
+    });
+  }
+
+  const urgentes_sin_regularizar = [
+    ...ordenes_con_pendientes
+      .filter((orden) => orden.pendientes.includes("URGENTE_SIN_REGULARIZAR"))
+      .map((orden) => ({ tipo: "ORDEN", ...orden })),
+    ...file_service_pendiente
+      .filter((archivo) => archivo.pendientes.includes("URGENTE_SIN_REGULARIZAR"))
+      .map((archivo) => ({ tipo: "FILE_SERVICE", ...archivo })),
+  ];
+  const por_asignar = [
+    ...ordenes_con_pendientes
+      .filter((orden) => orden.pendientes.includes("POR_ASIGNAR"))
+      .map((orden) => ({ tipo: "ORDEN", ...orden })),
+    ...file_service_pendiente
+      .filter((archivo) => archivo.pendientes.includes("POR_ASIGNAR"))
+      .map((archivo) => ({ tipo: "FILE_SERVICE", ...archivo })),
+  ];
 
   return {
     generado_at: new Date().toISOString(),
@@ -1364,6 +1554,8 @@ const crearCumplimientoOperativoData = (ctx) => {
     ordenes_con_pendientes: ordenes_con_pendientes.slice(0, 100),
     file_service_pendiente: file_service_pendiente.slice(0, 100),
     material_pendiente: material_pendiente.slice(0, 100),
+    urgentes_sin_regularizar: urgentes_sin_regularizar.slice(0, 100),
+    por_asignar: por_asignar.slice(0, 100),
     usuarios: Object.values(usuariosPendientes)
       .map((usuario) => ({
         ...usuario,
@@ -1446,6 +1638,7 @@ const prioridadPendiente = (pendiente) => {
 const crearMisPendientesData = (ctx, req) => {
   const identidad = crearIdentidadUsuario(req);
   const rol = identidad.rol;
+  const esJefatura = ["OWNER", "ADMIN", "SUPERVISOR"].includes(rol);
   const fotosPorOrden = new Map();
   const itemsPorOrden = new Map();
   const materialesPorOrden = new Map();
@@ -1461,6 +1654,11 @@ const crearMisPendientesData = (ctx, req) => {
     servicios_sin_cerrar: 0,
     recepciones_emergencia_sin_fotos: 0,
     listas_para_entrega: 0,
+    urgentes_sin_regularizar: 0,
+    ordenes_creadas_rapidas: 0,
+    file_service_urgente: 0,
+    pendientes_antes_de_entrega: 0,
+    por_asignar: 0,
   };
 
   ctx.fotos.forEach((foto) => {
@@ -1529,9 +1727,7 @@ const crearMisPendientesData = (ctx, req) => {
     }
   };
 
-  const ordenesActivas = ctx.ordenes.filter(
-    (orden) => upper(orden.estado) !== "ENTREGADO" && !booleano(orden.archivada)
-  );
+  const ordenesActivas = ctx.ordenes.filter(esOrdenActiva);
 
   ordenesActivas.forEach((orden) => {
     const ordenId = Number(orden.id);
@@ -1561,6 +1757,44 @@ const crearMisPendientesData = (ctx, req) => {
         orden.diagnostico_asignado_a
       ) ||
         ["PARA_DIAGNOSTICO", "RECEPCIONADO"].includes(estado));
+    const urgente = esCreadoEnModoUrgente(orden);
+    const sinRegularizar = urgente && requiereRegularizacion(orden);
+    const porAsignar =
+      urgente && ordenPorAsignar(orden, itemsPorOrden.get(ordenId) || []);
+    const visibleRegularizacion =
+      asignadaAlUsuario || esColaScanner || esJefatura || rol === "RECEPCION";
+
+    if (sinRegularizar && visibleRegularizacion) {
+      agregarPendiente({
+        tipo: "URGENTE_SIN_REGULARIZAR",
+        severidad: "ATENCION",
+        titulo: "Trabajo urgente sin regularizar",
+        descripcion:
+          pendientesRegularizacion(orden).join(", ") ||
+          "Completa los datos pendientes antes de entregar.",
+        ordenId,
+        estado: orden.estado || "SIN_ESTADO",
+        prioridad: "URGENTE",
+        ...datos,
+        accion_url: `/ordenes?ordenId=${ordenId}`,
+        contador: "urgentes_sin_regularizar",
+      });
+    }
+
+    if (porAsignar && (esJefatura || rol === "RECEPCION")) {
+      agregarPendiente({
+        tipo: "URGENTE_POR_ASIGNAR",
+        severidad: "ATENCION",
+        titulo: "Trabajo urgente por asignar",
+        descripcion: "El trabajo fue creado rapido y aun necesita encargado.",
+        ordenId,
+        estado: orden.estado || "SIN_ESTADO",
+        prioridad: "URGENTE",
+        ...datos,
+        accion_url: `/ordenes?ordenId=${ordenId}`,
+        contador: "por_asignar",
+      });
+    }
 
     if (asignadaAlUsuario || esColaScanner) {
       agregarPendiente({
@@ -1638,7 +1872,7 @@ const crearMisPendientesData = (ctx, req) => {
     const ordenId = Number(item.ordenId || item.orden_id);
     if (!ordenId) return;
     const orden = ctx.ordenes.find((actual) => Number(actual.id) === ordenId) || {};
-    if (upper(orden.estado) === "ENTREGADO" || booleano(orden.archivada)) return;
+    if (!esOrdenActiva(orden)) return;
     const datos = datosOrdenOperativa(orden);
     const asignadoItem = coincideIdentidad(identidad, item.responsable_id, item.responsable);
     const asignadoMecanico =
@@ -1711,6 +1945,45 @@ const crearMisPendientesData = (ctx, req) => {
         ["REQUIERE_CORRECCION", "CORRECCION_SOLICITADA", "EN_REVISION"].includes(
           estadoArchivo
         ));
+    const urgente = esCreadoEnModoUrgente(archivo);
+    const sinRegularizar = urgente && requiereRegularizacion(archivo);
+    const porAsignar = urgente && archivoPorAsignar(archivo);
+    const visibleRegularizacion =
+      asignadoArchivo || colaOperador || colaTuner || esJefatura;
+
+    if (sinRegularizar && visibleRegularizacion) {
+      agregarPendiente({
+        tipo: "FILE_SERVICE_URGENTE_SIN_REGULARIZAR",
+        severidad: "ATENCION",
+        titulo: "File Service urgente sin regularizar",
+        descripcion:
+          pendientesRegularizacion(archivo).join(", ") ||
+          "Completa diagnóstico y encargado antes del cierre técnico.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        estado: archivo.estado || "SIN_ESTADO",
+        prioridad: "URGENTE",
+        ...datos,
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}`,
+        contador: "urgentes_sin_regularizar",
+      });
+    }
+
+    if (porAsignar && (esJefatura || ["OPERADOR_ECU", "TUNER"].includes(rol))) {
+      agregarPendiente({
+        tipo: "FILE_SERVICE_URGENTE_POR_ASIGNAR",
+        severidad: "ATENCION",
+        titulo: "File Service urgente por asignar",
+        descripcion: "El original está guardado, pero falta asignar encargado.",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        estado: archivo.estado || "SIN_ESTADO",
+        prioridad: "URGENTE",
+        ...datos,
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}`,
+        contador: "por_asignar",
+      });
+    }
 
     if (asignadoArchivo || colaOperador || colaTuner) {
       agregarPendiente({
@@ -1730,7 +2003,7 @@ const crearMisPendientesData = (ctx, req) => {
 
     if (
       (asignadoArchivo || colaOperador) &&
-      upper(archivo.post_escritura_estado) !== "OK" &&
+      !postEscrituraCumplida(archivo) &&
       (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
         estadoArchivo
       ) ||
@@ -1771,10 +2044,40 @@ const crearMisPendientesData = (ctx, req) => {
     }
   });
 
-  const pendientes = [...pendientesMap.values()]
-    .sort((a, b) => prioridadPendiente(b) - prioridadPendiente(a))
-    .slice(0, 50);
-  resumen.total = pendientes.length;
+  const pendientesCompletos = [...pendientesMap.values()].sort(
+    (a, b) => prioridadPendiente(b) - prioridadPendiente(a)
+  );
+  const pendientes = pendientesCompletos.slice(0, 50);
+  resumen.total = pendientesCompletos.length;
+  const ordenesUrgentes = ctx.ordenes.filter(
+    (orden) => esOrdenActiva(orden) && esCreadoEnModoUrgente(orden)
+  );
+  const archivosUrgentes = ctx.archivos.filter(
+    (archivo) => esArchivoActivo(archivo) && esCreadoEnModoUrgente(archivo)
+  );
+  const ordenesUrgentesSinRegularizar = ordenesUrgentes.filter(
+    requiereRegularizacion
+  );
+  const archivosUrgentesSinRegularizar = archivosUrgentes.filter(
+    requiereRegularizacion
+  );
+
+  resumen.urgentes_sin_regularizar =
+    ordenesUrgentesSinRegularizar.length +
+    archivosUrgentesSinRegularizar.length;
+  resumen.ordenes_creadas_rapidas = ordenesUrgentes.length;
+  resumen.file_service_urgente = archivosUrgentes.length;
+  resumen.pendientes_antes_de_entrega =
+    ordenesUrgentesSinRegularizar.filter((orden) =>
+      booleano(orden.regularizar_antes_de_entrega)
+    ).length +
+    archivosUrgentesSinRegularizar.filter((archivo) =>
+      booleano(archivo.regularizar_antes_de_entrega)
+    ).length;
+  resumen.por_asignar =
+    ordenesUrgentes.filter((orden) =>
+      ordenPorAsignar(orden, itemsPorOrden.get(Number(orden.id)) || [])
+    ).length + archivosUrgentes.filter(archivoPorAsignar).length;
 
   return {
     generado_at: new Date().toISOString(),
@@ -1999,9 +2302,7 @@ const crearTiemposOperativosData = (ctx) => {
     if (archivoECUId) archivosSet.add(Number(archivoECUId));
   };
 
-  const ordenesActivas = ctx.ordenes.filter(
-    (orden) => normalizarEstado(orden.estado) !== "ENTREGADO" && !booleano(orden.archivada)
-  );
+  const ordenesActivas = ctx.ordenes.filter(esOrdenActiva);
 
   ordenesActivas.forEach((orden) => {
     const ordenId = Number(orden.id);
@@ -2144,7 +2445,7 @@ const crearTiemposOperativosData = (ctx) => {
   ctx.items.forEach((item) => {
     const ordenId = Number(item.ordenId || item.orden_id);
     const orden = ctx.ordenes.find((actual) => Number(actual.id) === ordenId);
-    if (!orden || normalizarEstado(orden.estado) === "ENTREGADO" || booleano(orden.archivada)) {
+    if (!orden || !esOrdenActiva(orden)) {
       return;
     }
 
@@ -2181,7 +2482,7 @@ const crearTiemposOperativosData = (ctx) => {
     const responsable = responsableArchivoSLA(archivo);
     const accion = `/archivos-ecu?archivoId=${archivo.id}`;
     const postPendiente =
-      upper(archivo.post_escritura_estado) !== "OK" &&
+      !postEscrituraCumplida(archivo) &&
       (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
         estadoArchivo
       ) ||
@@ -2331,10 +2632,16 @@ const crearCierreDiarioData = (ctx) => {
   const tiempos = crearTiemposOperativosData(ctx);
   const reporte = crearReporteData(ctx, "CIERRE_DIA");
   const pendientesMap = new Map();
+  const itemsPorOrden = new Map();
 
-  const ordenesActivas = ctx.ordenes.filter(
-    (orden) => upper(orden.estado) !== "ENTREGADO" && !booleano(orden.archivada)
-  );
+  ctx.items.forEach((item) => {
+    const ordenId = Number(item.ordenId || item.orden_id);
+    if (!ordenId) return;
+    if (!itemsPorOrden.has(ordenId)) itemsPorOrden.set(ordenId, []);
+    itemsPorOrden.get(ordenId).push(item);
+  });
+
+  const ordenesActivas = ctx.ordenes.filter(esOrdenActiva);
   const archivosActivos = ctx.archivos.filter(esArchivoActivo);
   const ordenesCreadasHoy = ctx.ordenes.filter((orden) => dentroDesde(orden.createdAt, desdeHoy));
   const ordenesEntregadasHoy = ctx.ordenes.filter(
@@ -2351,10 +2658,18 @@ const crearCierreDiarioData = (ctx) => {
       upper(orden.origen_recepcion) === "RECEPCION_EMERGENCIA_OPERADOR" &&
       dentroDesde(orden.createdAt, desdeHoy)
   );
+  const ordenesUrgentes = ordenesActivas.filter(esCreadoEnModoUrgente);
+  const archivosUrgentes = archivosActivos.filter(esCreadoEnModoUrgente);
+  const ordenesUrgentesSinRegularizar = ordenesUrgentes.filter(
+    requiereRegularizacion
+  );
+  const archivosUrgentesSinRegularizar = archivosUrgentes.filter(
+    requiereRegularizacion
+  );
   const fileServiceSinPostEscritura = archivosActivos.filter((archivo) => {
     const estado = upper(archivo.estado);
     return (
-      upper(archivo.post_escritura_estado) !== "OK" &&
+      !postEscrituraCumplida(archivo) &&
       (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(estado) ||
         Boolean(archivo.archivo_modificado))
     );
@@ -2429,6 +2744,39 @@ const crearCierreDiarioData = (ctx) => {
         accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
       }
     );
+  });
+
+  ordenesUrgentesSinRegularizar.forEach((orden) => {
+    agregarPendienteCierreDiario(pendientesMap, {
+      tipo: "URGENTE_SIN_REGULARIZAR",
+      severidad: "ATENCION",
+      titulo: `Orden urgente #${orden.id} sin regularizar`,
+      descripcion:
+        pendientesRegularizacion(orden).join(", ") ||
+        "Completar datos pendientes antes de entregar.",
+      ordenId: orden.id,
+      usuario_responsable:
+        orden.recepcionado_por ||
+        orden.operador_ecu_asignado_a ||
+        orden.mecanico_asignado_a ||
+        "Por asignar",
+      accion_url: `/ordenes?ordenId=${orden.id}`,
+    });
+  });
+
+  archivosUrgentesSinRegularizar.forEach((archivo) => {
+    agregarPendienteCierreDiario(pendientesMap, {
+      tipo: "FILE_SERVICE_URGENTE_SIN_REGULARIZAR",
+      severidad: "ATENCION",
+      titulo: `File Service urgente #${archivo.id} sin regularizar`,
+      descripcion:
+        pendientesRegularizacion(archivo).join(", ") ||
+        "Completar diagnóstico y encargado antes del cierre técnico.",
+      ordenId: archivo.ordenId || null,
+      archivoECUId: archivo.id,
+      usuario_responsable: responsableArchivoSLA(archivo) || "Por asignar",
+      accion_url: `/archivos-ecu?archivoId=${archivo.id}`,
+    });
   });
 
   (cumplimiento.material_pendiente || []).forEach((item) => {
@@ -2568,6 +2916,22 @@ const crearCierreDiarioData = (ctx) => {
     ordenes_sin_items: cumplimiento.resumen?.ordenes_sin_items || 0,
     recepciones_emergencia_hoy: recepcionesEmergenciaHoy.length,
     pendientes_criticos: pendientes_para_cerrar_dia.filter(esCriticoCierreDiario).length,
+    urgentes_sin_regularizar:
+      ordenesUrgentesSinRegularizar.length + archivosUrgentesSinRegularizar.length,
+    ordenes_creadas_rapidas: ordenesUrgentes.length,
+    file_service_urgente: archivosUrgentes.length,
+    pendientes_antes_de_entrega:
+      ordenesUrgentesSinRegularizar.filter((orden) =>
+        booleano(orden.regularizar_antes_de_entrega)
+      ).length +
+      archivosUrgentesSinRegularizar.filter((archivo) =>
+        booleano(archivo.regularizar_antes_de_entrega)
+      ).length,
+    por_asignar:
+      ordenesUrgentes.filter((orden) =>
+        ordenPorAsignar(orden, itemsPorOrden.get(Number(orden.id)) || [])
+      ).length +
+      archivosUrgentes.filter(archivoPorAsignar).length,
   };
 
   return {
@@ -2586,6 +2950,40 @@ const crearCierreDiarioData = (ctx) => {
       ...(tiempos.alertas_tiempo || []).slice(0, 20),
     ].slice(0, 50),
     responsables_con_pendientes: (cumplimiento.usuarios || []).slice(0, 50),
+    urgentes_sin_regularizar: [
+      ...ordenesUrgentesSinRegularizar.map((orden) => ({
+        tipo: "ORDEN",
+        ordenId: orden.id,
+        motivo_urgencia: orden.motivo_urgencia || null,
+        regularizacion_pendientes: pendientesRegularizacion(orden),
+        accion_url: `/ordenes?ordenId=${orden.id}`,
+      })),
+      ...archivosUrgentesSinRegularizar.map((archivo) => ({
+        tipo: "FILE_SERVICE",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        motivo_urgencia: archivo.motivo_urgencia || null,
+        regularizacion_pendientes: pendientesRegularizacion(archivo),
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}`,
+      })),
+    ].slice(0, 100),
+    por_asignar: [
+      ...ordenesUrgentes
+        .filter((orden) =>
+          ordenPorAsignar(orden, itemsPorOrden.get(Number(orden.id)) || [])
+        )
+        .map((orden) => ({
+        tipo: "ORDEN",
+        ordenId: orden.id,
+        accion_url: `/ordenes?ordenId=${orden.id}`,
+        })),
+      ...archivosUrgentes.filter(archivoPorAsignar).map((archivo) => ({
+        tipo: "FILE_SERVICE",
+        ordenId: archivo.ordenId || null,
+        archivoECUId: archivo.id,
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}`,
+      })),
+    ].slice(0, 100),
     solo_lectura: true,
   };
 };
@@ -2750,7 +3148,7 @@ const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {
     );
 
   ctx.ordenes
-    .filter((orden) => normalizarEstado(orden.estado) !== "ENTREGADO" && !booleano(orden.archivada))
+    .filter(esOrdenActiva)
     .forEach((orden) => {
       const ordenId = Number(orden.id);
       const estado = normalizarEstado(orden.estado);
@@ -2808,7 +3206,7 @@ const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {
   ctx.items.forEach((item) => {
     const ordenId = Number(item.ordenId || item.orden_id);
     const orden = ctx.ordenes.find((actual) => Number(actual.id) === ordenId);
-    if (!orden || normalizarEstado(orden.estado) === "ENTREGADO" || booleano(orden.archivada)) {
+    if (!orden || !esOrdenActiva(orden)) {
       return;
     }
 
@@ -2867,7 +3265,7 @@ const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {
     const horasArchivo = horasDesde(archivo.updatedAt || archivo.createdAt, ahora);
     const accion = `/archivos-ecu?archivoId=${archivo.id}`;
     const postPendiente =
-      upper(archivo.post_escritura_estado) !== "OK" &&
+      !postEscrituraCumplida(archivo) &&
       (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE", "POST_ESCRITURA_PENDIENTE"].includes(
         estadoArchivo
       ) ||
@@ -2959,13 +3357,22 @@ const guardiaOperativa = async (req, res) => {
       enfoque: "guardia_operativa_critica_v1",
       solo_lectura: true,
       mensaje: resultado.bloqueado
-        ? "Debes resolver los pendientes criticos antes de recibir nuevos trabajos."
-        : "Usuario sin pendientes criticos bloqueantes.",
+        ? "Este responsable no puede recibir una nueva asignacion hasta resolver sus bloqueos o registrar un override autorizado."
+        : resultado.advertencias_operativas?.length
+          ? "El responsable puede recibir trabajo. Mantiene advertencias operativas que no bloquean."
+          : "Usuario sin bloqueos de asignacion.",
     });
   } catch (error) {
     console.error("ERROR GUARDIA OPERATIVA:", error);
-    return res.status(500).json({
-      error: "No se pudo revisar guardia operativa.",
+    const status = Number(error?.statusCode) || 500;
+    const codigo = error?.codigo || "GUARDIA_OPERATIVA_ERROR";
+
+    return res.status(status).json({
+      error: codigo,
+      message:
+        status === 503
+          ? error.message
+          : "No se pudo revisar guardia operativa.",
       detalle: process.env.NODE_ENV === "production" ? undefined : error.message,
     });
   }

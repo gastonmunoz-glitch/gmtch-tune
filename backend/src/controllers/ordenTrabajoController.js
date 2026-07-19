@@ -17,7 +17,7 @@ const {
 } = require("./notificacionController");
 const {
   verificarGuardiaOperativaUsuario,
-} = require("./automatizacionController");
+} = require("../services/guardiaOperativaService");
 
 console.log("🧾 CONTROLLER_ORDENES_CIERRE_COMERCIAL_V2_CARGADO");
 
@@ -128,12 +128,11 @@ const resolverResponsableDesdeBody = async (
 
   const texto = limpiarTexto(body[campoTexto]);
   if (texto && !obligatorio) {
-    return {
-      id: null,
-      texto,
-      usuario: null,
-      legacy: true,
-    };
+    throw crearErrorHttp(
+      400,
+      "Para asignar un responsable debes enviar su ID de usuario activo.",
+      { codigo: "RESPONSABLE_INVALIDO" }
+    );
   }
 
   if ((tieneCampoId || tieneCampoTexto) && obligatorio) {
@@ -293,12 +292,41 @@ const registrarEventoOrden = async ({
   }
 };
 
-const registrarEventoOrdenDesdeReq = (req, datos) =>
-  registrarEventoOrden({
+const registrarEventoOrdenDesdeReq = async (
+  req,
+  datos,
+  { estricto = false } = {}
+) => {
+  const evento = await registrarEventoOrden({
     ...datos,
     usuario: datos.usuario || usuarioEventoDesdeReq(req),
     usuario_rol: datos.usuario_rol || rolActual(req),
   });
+
+  if (!evento && estricto) {
+    throw new Error(`No se pudo registrar el evento ${datos.tipo_evento || "ORDEN"}.`);
+  }
+
+  return evento;
+};
+
+const registrarEventoOrdenPostPersistenciaSeguro = async (
+  req,
+  datos,
+  advertencias = []
+) => {
+  try {
+    await registrarEventoOrdenDesdeReq(req, datos, { estricto: true });
+    return true;
+  } catch (error) {
+    advertencias.push("AUDITORIA_OPERATIVA_PENDIENTE");
+    console.warn(
+      `Cambio persistido; evento ${datos.tipo_evento || "ORDEN"} pendiente:`,
+      error.message
+    );
+    return false;
+  }
+};
 
 const tieneRol = (req, roles = []) => roles.includes(rolActual(req));
 
@@ -320,6 +348,16 @@ const responderErrorControlado = (res, error) => {
     return res.status(error.statusCode || 400).json({
       error: error.codigo,
       message: error.message,
+    });
+  }
+
+  if (error?.codigo && error?.statusCode) {
+    return res.status(error.statusCode).json({
+      error: error.codigo,
+      message: error.message,
+      advertencias: error.advertencias || undefined,
+      archivos_pendientes: error.archivos_pendientes || undefined,
+      items_pendientes: error.itemsPendientes || undefined,
     });
   }
 
@@ -472,12 +510,22 @@ const obtenerCampoResponsableTecnicoPorServicio = (body = {}) => {
 
 const resolverResponsableTecnicoGenerico = async (body = {}) => {
   const responsableId = limpiarTexto(body.responsable_tecnico_id);
-  if (!responsableId) return null;
+  if (!responsableId) {
+    if (
+      limpiarTexto(body.responsable_tecnico_texto || body.responsable_tecnico)
+    ) {
+      throw crearErrorHttp(
+        400,
+        "Para asignar un responsable debes enviar su ID de usuario activo.",
+        { codigo: "RESPONSABLE_INVALIDO" }
+      );
+    }
+
+    return null;
+  }
 
   const usuario = await buscarUsuarioActivoPorId(responsableId);
-  const snapshot =
-    limpiarTexto(body.responsable_tecnico_texto || body.responsable_tecnico) ||
-    obtenerSnapshotUsuario(usuario);
+  const snapshot = obtenerSnapshotUsuario(usuario);
   const campo = obtenerCampoResponsableTecnicoPorServicio(body);
 
   return {
@@ -621,6 +669,866 @@ const ROLES_MATERIAL_RECUPERADO = [
   "MECANICO",
 ];
 
+const ROLES_JEFATURA_URGENTE = ["OWNER", "ADMIN", "SUPERVISOR"];
+const ROLES_OVERRIDE_COMERCIAL = ["OWNER", "ADMIN"];
+const ADVERTENCIAS_REGULARIZACION_URGENTE = [
+  "KILOMETRAJE_PENDIENTE",
+  "SINTOMAS_PENDIENTES",
+  "MONTO_PENDIENTE",
+  "DETALLES_PENDIENTES",
+  "FOTOS_PENDIENTES",
+  "RESPONSABLE_PENDIENTE",
+  "DIAGNOSTICO_PENDIENTE",
+];
+
+const modoUrgenteSolicitado = (body = {}) =>
+  normalizarBoolean(body.modo_urgente);
+
+const primerTexto = (...valores) =>
+  valores.map(limpiarTexto).find(Boolean) || "";
+
+const obtenerServicioUrgente = (body = {}) =>
+  primerTexto(
+    body.tipo_servicio,
+    body.servicio,
+    body.servicio_solicitado,
+    body.categoria_servicio
+  );
+
+const obtenerSintomasUrgentes = (body = {}) =>
+  primerTexto(
+    body.sintomas,
+    body.sintoma,
+    body.descripcion_sintomas,
+    body.falla_reportada,
+    body.motivo_ingreso
+  );
+
+const obtenerDetallesUrgentes = (body = {}) =>
+  primerTexto(
+    body.detalles,
+    body.detalle_servicio,
+    body.descripcion,
+    body.observaciones
+  );
+
+const construirMotivoIngresoUrgente = (body, servicio) => {
+  const sintomas = obtenerSintomasUrgentes(body);
+  const detalles = obtenerDetallesUrgentes(body);
+
+  return [
+    `Servicio urgente: ${servicio}`,
+    sintomas ? `Sintomas iniciales: ${sintomas}` : "",
+    detalles ? `Detalles iniciales: ${detalles}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
+const preservarServicioEnMotivo = (motivoActual, motivoNuevo) => {
+  const patronLineaServicio =
+    /^(?:servicio urgente|servicio solicitado)\s*:/i;
+  const lineaServicio = limpiarTexto(motivoActual)
+    .split(/\r?\n/)
+    .map(limpiarTexto)
+    .find((linea) => patronLineaServicio.test(linea));
+
+  if (!lineaServicio) return motivoNuevo;
+
+  // El servicio original define controles de cierre (por ejemplo, exigir File
+  // Service). El PATCH puede completar sintomas y detalles, pero no sustituir
+  // este marcador estructural mediante texto libre.
+  const motivoEditable = limpiarTexto(motivoNuevo)
+    .split(/\r?\n/)
+    .filter((linea) => !patronLineaServicio.test(limpiarTexto(linea)))
+    .join("\n")
+    .trim();
+
+  return [lineaServicio, motivoEditable].filter(Boolean).join("\n");
+};
+
+const construirAdvertenciasCreacionUrgente = ({
+  body,
+  montoInicial,
+  tieneResponsableTecnico,
+}) => {
+  const advertencias = [];
+  const kilometraje = Number(body.kilometraje);
+
+  if (!Number.isFinite(kilometraje) || kilometraje <= 0) {
+    advertencias.push("KILOMETRAJE_PENDIENTE");
+  }
+  if (!obtenerSintomasUrgentes(body)) {
+    advertencias.push("SINTOMAS_PENDIENTES");
+  }
+  if (!(montoInicial > 0)) {
+    advertencias.push("MONTO_PENDIENTE");
+  }
+  if (!obtenerDetallesUrgentes(body)) {
+    advertencias.push("DETALLES_PENDIENTES");
+  }
+
+  // La orden aun no existe al procesar este POST, por lo que no puede tener fotos asociadas.
+  advertencias.push("FOTOS_PENDIENTES");
+  advertencias.push("DIAGNOSTICO_PENDIENTE");
+
+  if (!tieneResponsableTecnico) {
+    advertencias.push("RESPONSABLE_PENDIENTE");
+  }
+
+  return ADVERTENCIAS_REGULARIZACION_URGENTE.filter((codigo) =>
+    advertencias.includes(codigo)
+  );
+};
+
+const normalizarClaveServicio = (valor) =>
+  limpiarTexto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[_-]+/g, " ");
+
+const servicioRequiereFileService = (valor) => {
+  const servicio = normalizarClaveServicio(valor);
+  if (!servicio) return false;
+
+  // DPF/FAP tambien puede ser una labor mecanica (limpieza o regeneracion),
+  // que no debe exigir por si sola un archivo ECU.
+  if (
+    /\b(LIMPIEZA|REGENERACION|MANTENCION|MANTENIMIENTO|REVISION|DIAGNOSTICO)\b.*\b(DPF|FAP)\b/.test(
+      servicio
+    )
+  ) {
+    return false;
+  }
+
+  return [
+    /\bFILE\s*SERVICE\b/,
+    /\bSTAGE\s*[123]?\b/,
+    /\bREPROGRAMACION\s+(ECU|TCU)\b/,
+    /\bLECTURA\s+(ECU|TCU)\b/,
+    /\bDTC\s*OFF\b/,
+    /\bCHECKSUM\b/,
+    /\bREADINESS\b/,
+    /\bBACKUP\s+ORIGINAL\b/,
+    /\bRESTAURAR\s+ORIGINAL\b/,
+    /\b(CUSTOM|ECO)\s*TUNE\b/,
+    /\bTORQUE\s*LIMITER\b/,
+    /\b(DPF|FAP)\b/,
+    /\bEGR\b/,
+    /\b(SCR|ADBLUE|DEF)\b/,
+    /\bNOX\b/,
+    /\b(LAMBDA|O2)\b/,
+    /\bTVA\b/,
+    /\bIMMO\b/,
+    /\bV\s*MAX\b/,
+    /\bPOPS?(\s*&\s*BANGS?)?\b/,
+    /\bLAUNCH\s+CONTROL\b/,
+    /\bHARDCUT\b/,
+  ].some((patron) => patron.test(servicio));
+};
+
+const archivoECURequiereModParaCierre = (archivo) => {
+  const estado = limpiarTexto(archivo?.estado).toUpperCase();
+  const servicios = parseJsonSeguro(archivo?.servicios_solicitados, [])
+    .map((servicio) =>
+      limpiarTexto(
+        typeof servicio === "object" && servicio !== null
+          ? servicio.value || servicio.nombre || servicio.label
+          : servicio
+      ).toUpperCase()
+    )
+    .filter(Boolean);
+
+  if (limpiarTexto(archivo?.archivo_modificado)) return true;
+  if (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE"].includes(estado)) return true;
+
+  const valoresServicio = [
+    limpiarTexto(archivo?.tipo_servicio),
+    limpiarTexto(archivo?.servicio_principal),
+    ...servicios,
+  ]
+    .map((valor) => valor.toUpperCase())
+    .filter(Boolean);
+
+  if (!valoresServicio.length) return false;
+
+  const marcadoresSoloRevision = [
+    "READINESS",
+    "CHECKSUM",
+    "BACKUP_ORIGINAL",
+    "RESTAURAR_ORIGINAL",
+    "REVISION",
+    "DIAGNOSTICO",
+    "LECTURA",
+  ];
+  const marcadoresModificacion = [
+    "STAGE",
+    "DPF",
+    "FAP",
+    "EGR",
+    "ADBLUE",
+    "SCR",
+    "DTC OFF",
+    "IMMO",
+    "POPS",
+    "VMAX",
+    "V-MAX",
+    "TORQUE",
+    "TUNING",
+  ];
+
+  if (
+    valoresServicio.some((valor) =>
+      marcadoresModificacion.some((marcador) => valor.includes(marcador))
+    )
+  ) {
+    return true;
+  }
+
+  return valoresServicio.some(
+    (valor) =>
+      !marcadoresSoloRevision.some((marcador) => valor.includes(marcador))
+  );
+};
+
+const validarCierreTecnicoFileServiceOrden = async (
+  ordenId,
+  { transaction, motivoIngresoProyectado } = {}
+) => {
+  const [archivos, orden, items] = await Promise.all([
+    ArchivoECU.findAll({
+      where: { ordenId },
+      attributes: [
+        "id",
+        "estado",
+        "archivado",
+        "archivo_original",
+        "archivo_modificado",
+        "tipo_servicio",
+        "servicio_principal",
+        "servicios_solicitados",
+        "tuner_asignado_a_id",
+        "tuner_asignado_a",
+        "operador_ecu_asignado_a_id",
+        "operador_ecu_asignado_a",
+        "slave_asignado_a_id",
+        "slave_asignado_a",
+        "post_escritura_estado",
+        "post_escritura_dtc",
+        "post_escritura_sin_dtc",
+        "post_escritura_scanner",
+        "post_escritura_observacion",
+        "cierre_tecnico_at",
+        "cierre_tecnico_obligatorio",
+        "observacion_cierre_tecnico",
+        "resultado_tecnico",
+        "correccion_pendiente",
+        "creado_en_modo_urgente",
+        "requiere_regularizacion",
+        "regularizacion_pendientes",
+        "regularizar_antes_de_entrega",
+      ],
+      order: [["id", "ASC"]],
+      transaction,
+      ...(transaction ? { lock: transaction.LOCK.UPDATE } : {}),
+    }),
+    OrdenTrabajo.findByPk(ordenId, {
+      attributes: ["id", "motivo_ingreso"],
+      transaction,
+    }),
+    OrdenServicioItem.findAll({
+      where: { ordenId },
+      attributes: ["tipo_servicio", "categoria", "estado"],
+      transaction,
+    }),
+  ]);
+  const archivosActivos = archivos.filter((archivo) => {
+    const estadoArchivo = limpiarTexto(archivo.estado).toUpperCase();
+    return !normalizarBoolean(archivo.archivado) && estadoArchivo !== "ARCHIVADO";
+  });
+  const itemsActivos = items.filter(
+    (item) => limpiarTexto(item.estado).toUpperCase() !== "ANULADO"
+  );
+  const motivoIngreso = limpiarTexto(
+    motivoIngresoProyectado !== undefined
+      ? motivoIngresoProyectado
+      : orden?.motivo_ingreso
+  );
+  const servicioPersistido =
+    motivoIngreso.match(
+      /^(?:SERVICIO URGENTE|SERVICIO SOLICITADO)\s*:\s*(.+)$/im
+    )?.[1] || "";
+  const requiereFileServicePorMotivo = servicioRequiereFileService(servicioPersistido);
+  const requiereFileServicePorItem = itemsActivos.some((item) => {
+    const categoria = normalizarClaveServicio(item.categoria);
+    const tipoServicio = limpiarTexto(item.tipo_servicio);
+    return (
+      categoria === "FILE SERVICE" || servicioRequiereFileService(tipoServicio)
+    );
+  });
+  const requiereFileService =
+    requiereFileServicePorMotivo || requiereFileServicePorItem;
+  const archivosPendientes = [];
+
+  if (requiereFileService && archivosActivos.length === 0) {
+    archivosPendientes.push({
+      archivo_ecu_id: null,
+      estado: null,
+      faltantes: ["FILE_SERVICE_REQUERIDO"],
+    });
+  }
+
+  for (const archivo of archivosActivos) {
+    const estadoArchivo = limpiarTexto(archivo.estado).toUpperCase();
+    const faltantes = [];
+    const postEstado = limpiarTexto(archivo.post_escritura_estado).toUpperCase();
+    const postNoAplica =
+      postEstado === "NO_APLICA" &&
+      Boolean(limpiarTexto(archivo.post_escritura_observacion));
+    const postOk = postEstado === "OK" || postNoAplica;
+    const tieneServicios = Boolean(
+      limpiarTexto(archivo.tipo_servicio) ||
+        limpiarTexto(archivo.servicio_principal) ||
+        parseJsonSeguro(archivo.servicios_solicitados, []).length
+    );
+    const tieneResponsable = Boolean(
+      limpiarTexto(archivo.tuner_asignado_a_id) ||
+        limpiarTexto(archivo.tuner_asignado_a) ||
+        limpiarTexto(archivo.operador_ecu_asignado_a_id) ||
+        limpiarTexto(archivo.operador_ecu_asignado_a) ||
+        limpiarTexto(archivo.slave_asignado_a_id) ||
+        limpiarTexto(archivo.slave_asignado_a)
+    );
+    const responsablesId = [
+      limpiarTexto(archivo.tuner_asignado_a_id),
+      limpiarTexto(archivo.operador_ecu_asignado_a_id),
+      limpiarTexto(archivo.slave_asignado_a_id),
+    ].filter(Boolean);
+
+    for (const responsableId of new Set(responsablesId)) {
+      await buscarUsuarioActivoPorId(responsableId);
+    }
+
+    const pendientesRegularizacion = parseJsonSeguro(
+      archivo.regularizacion_pendientes,
+      []
+    ).map((pendiente) => limpiarTexto(pendiente).toUpperCase());
+    const responsableJustificado = Boolean(
+      normalizarBoolean(archivo.creado_en_modo_urgente) &&
+        normalizarBoolean(archivo.requiere_regularizacion) &&
+        !normalizarBoolean(archivo.regularizar_antes_de_entrega) &&
+        pendientesRegularizacion.includes("RESPONSABLE_PENDIENTE") &&
+        limpiarTexto(archivo.observacion_cierre_tecnico)
+          .toUpperCase()
+          .includes("OVERRIDE REGULARIZACION URGENTE")
+    );
+
+    if (!limpiarTexto(archivo.archivo_original)) {
+      faltantes.push("ARCHIVO_ORIGINAL");
+    }
+    if (!tieneServicios) {
+      faltantes.push("SERVICIO_FILE_SERVICE");
+    }
+    if (!tieneResponsable && !responsableJustificado) {
+      faltantes.push("RESPONSABLE_FILE_SERVICE");
+    }
+    if (
+      archivoECURequiereModParaCierre(archivo) &&
+      !limpiarTexto(archivo.archivo_modificado)
+    ) {
+      faltantes.push("MOD_REQUERIDO");
+    }
+
+    if (!postOk) {
+      faltantes.push("POST_ESCRITURA_OK_O_NO_APLICA");
+    }
+    if (postEstado === "OK" && !limpiarTexto(archivo.post_escritura_scanner)) {
+      faltantes.push("EVIDENCIA_SCANNER_POST_ESCRITURA");
+    }
+    if (
+      postEstado === "OK" &&
+      !limpiarTexto(archivo.post_escritura_dtc) &&
+      !normalizarBoolean(archivo.post_escritura_sin_dtc)
+    ) {
+      faltantes.push("DTC_POST_ESCRITURA_O_SIN_DTC");
+    }
+    if (
+      !archivo.cierre_tecnico_at ||
+      limpiarTexto(archivo.resultado_tecnico).toUpperCase() !== "OK"
+    ) {
+      faltantes.push("CIERRE_TECNICO_FILE_SERVICE");
+    }
+    if (!["FINALIZADO", "FINALIZADO_TECNICO"].includes(estadoArchivo)) {
+      faltantes.push("ESTADO_FINAL_FILE_SERVICE");
+    }
+    if (normalizarBoolean(archivo.cierre_tecnico_obligatorio)) {
+      faltantes.push("CIERRE_TECNICO_OBLIGATORIO");
+    }
+    if (!limpiarTexto(archivo.observacion_cierre_tecnico)) {
+      faltantes.push("OBSERVACION_CIERRE_TECNICO");
+    }
+    if (normalizarBoolean(archivo.correccion_pendiente)) {
+      faltantes.push("CORRECCION_TECNICA_PENDIENTE");
+    }
+    if (normalizarBoolean(archivo.regularizar_antes_de_entrega)) {
+      faltantes.push("REGULARIZACION_FILE_SERVICE");
+    }
+
+    if (faltantes.length > 0) {
+      archivosPendientes.push({
+        archivo_ecu_id: archivo.id,
+        estado: estadoArchivo || null,
+        faltantes,
+      });
+    }
+  }
+
+  if (archivosPendientes.length > 0) {
+    throw crearErrorHttp(
+      409,
+      "La orden tiene File Service sin prueba final o cierre tecnico completo.",
+      {
+        codigo: "CIERRE_TECNICO_FILE_SERVICE_REQUERIDO",
+        archivos_pendientes: archivosPendientes,
+      }
+    );
+  }
+};
+
+const bloquearArchivosFileServiceOrden = async (ordenId, transaction) => {
+  if (!transaction) return;
+
+  await ArchivoECU.findAll({
+    where: { ordenId },
+    attributes: ["id"],
+    order: [["id", "ASC"]],
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+};
+
+const validarGuardiaResponsableUrgente = async ({
+  req,
+  usuario,
+  modoUrgente,
+}) => {
+  try {
+    await validarGuardiaResponsable(usuario);
+    return null;
+  } catch (error) {
+    if (error?.codigo !== "RESPONSABLE_BLOQUEADO") throw error;
+
+    const overrideSolicitado = normalizarBoolean(req.body.override_guardia);
+    if (!modoUrgente || !overrideSolicitado) throw error;
+
+    if (!tieneRol(req, ROLES_JEFATURA_URGENTE)) {
+      throw crearErrorHttp(
+        403,
+        "Solo jefatura puede autorizar una asignacion urgente a un responsable bloqueado.",
+        { codigo: "OVERRIDE_GUARDIA_NO_AUTORIZADO" }
+      );
+    }
+
+    const motivoOverride = limpiarTexto(req.body.motivo_override);
+    if (!motivoOverride) {
+      throw crearErrorHttp(
+        400,
+        "Debes indicar motivo_override para autorizar la asignacion urgente.",
+        { codigo: "MOTIVO_OVERRIDE_REQUERIDO" }
+      );
+    }
+
+    return {
+      tipo: "OVERRIDE_GUARDIA_URGENTE",
+      motivo: motivoOverride,
+      responsable_id: String(usuario.id),
+      responsable: obtenerSnapshotUsuario(usuario),
+      pendientes_criticos: (error.pendientes_criticos || []).slice(0, 10),
+    };
+  }
+};
+
+const motivoIngresoTieneSintomas = (motivoIngreso) =>
+  limpiarTexto(motivoIngreso)
+    .split(/\r?\n/)
+    .map(limpiarTexto)
+    .filter(Boolean)
+    .some(
+      (linea) =>
+        !/^servicio urgente\s*:/i.test(linea) &&
+        !/^detalles iniciales\s*:/i.test(linea)
+    );
+
+const motivoIngresoTieneDetalles = (motivoIngreso) =>
+  limpiarTexto(motivoIngreso)
+    .split(/\r?\n/)
+    .map(limpiarTexto)
+    .some((linea) => /^detalles iniciales\s*:/i.test(linea));
+
+const ordenTieneResponsableTecnico = (orden = {}, items = []) =>
+  [
+    orden.diagnostico_asignado_a_id,
+    orden.operador_ecu_asignado_a_id,
+    orden.mecanico_asignado_a_id,
+    orden.supervisor_asignado_a_id,
+  ].some((valor) => Boolean(limpiarTexto(valor))) ||
+  items.some((item) => Boolean(limpiarTexto(item.responsable_id)));
+
+const calcularAdvertenciasRegularizacionUrgente = async (
+  orden,
+  datosProyectados = {},
+  { transaction } = {}
+) => {
+  const datos = {
+    ...(typeof orden?.toJSON === "function" ? orden.toJSON() : orden || {}),
+    ...datosProyectados,
+  };
+
+  if (!normalizarBoolean(datos.creado_en_modo_urgente)) return [];
+
+  const [cantidadFotos, diagnostico, items] = await Promise.all([
+    FotoVehiculo.count({ where: { ordenId: datos.id }, transaction }),
+    Diagnostico.findOne({
+      where: { ordenId: datos.id },
+      attributes: ["fallas_detectadas", "observaciones"],
+      order: [["id", "DESC"]],
+      transaction,
+    }),
+    OrdenServicioItem.findAll({
+      where: {
+        ordenId: datos.id,
+        estado: { [Op.ne]: "ANULADO" },
+      },
+      attributes: ["id", "responsable_id"],
+      transaction,
+    }),
+  ]);
+
+  const advertencias = [];
+  const kilometraje = Number(datos.kilometraje);
+  const monto = normalizarDecimal(datos.monto_final ?? datos.monto_total, 0);
+  const diagnosticoConSintomas = Boolean(
+    limpiarTexto(diagnostico?.fallas_detectadas) ||
+      limpiarTexto(diagnostico?.observaciones)
+  );
+
+  if (!Number.isFinite(kilometraje) || kilometraje <= 0) {
+    advertencias.push("KILOMETRAJE_PENDIENTE");
+  }
+  if (!motivoIngresoTieneSintomas(datos.motivo_ingreso) && !diagnosticoConSintomas) {
+    advertencias.push("SINTOMAS_PENDIENTES");
+  }
+  if (!(monto > 0)) advertencias.push("MONTO_PENDIENTE");
+  if (!items.length && !motivoIngresoTieneDetalles(datos.motivo_ingreso)) {
+    advertencias.push("DETALLES_PENDIENTES");
+  }
+  if (!(cantidadFotos > 0)) advertencias.push("FOTOS_PENDIENTES");
+  if (!diagnostico) advertencias.push("DIAGNOSTICO_PENDIENTE");
+  if (!ordenTieneResponsableTecnico(datos, items)) {
+    advertencias.push("RESPONSABLE_PENDIENTE");
+  }
+
+  return ADVERTENCIAS_REGULARIZACION_URGENTE.filter((codigo) =>
+    advertencias.includes(codigo)
+  );
+};
+
+const construirEntradaAuditoriaOverrideOrden = ({
+  req,
+  tipo,
+  motivo,
+  metadata = {},
+}) => ({
+    tipo,
+    texto: motivo,
+    creado_por: usuarioActual(req),
+    fecha: new Date().toISOString(),
+    ...metadata,
+  });
+
+const anexarAuditoriasOverrideAlPayload = ({ orden, payload, auditorias = [] }) => {
+  if (!auditorias.length) return;
+
+  const bitacoraActual = parseJsonSeguro(
+    orden.getDataValue("bitacora_operativa"),
+    []
+  );
+  payload.bitacora_operativa = [
+    ...bitacoraActual,
+    ...auditorias.map(construirEntradaAuditoriaOverrideOrden),
+  ];
+};
+
+const registrarAuditoriaOverrideOrden = async ({
+  req,
+  orden,
+  tipo,
+  motivo,
+  metadata = {},
+  bitacoraYaPersistida = false,
+}) => {
+  if (!bitacoraYaPersistida) {
+    await orden.reload();
+
+    const bitacoraActual = parseJsonSeguro(
+      orden.getDataValue("bitacora_operativa"),
+      []
+    );
+
+    await orden.update({
+      bitacora_operativa: [
+        ...bitacoraActual,
+        construirEntradaAuditoriaOverrideOrden({ req, tipo, motivo, metadata }),
+      ],
+    });
+  }
+
+  try {
+    await registrarEventoOrdenDesdeReq(
+      req,
+      {
+        ordenId: orden.id,
+        tipo_evento: tipo,
+        categoria: "AUDITORIA",
+        titulo: "Override urgente autorizado",
+        descripcion: motivo,
+        origen: "MODO_URGENTE_V1",
+        metadata,
+      },
+      { estricto: true }
+    );
+    return true;
+  } catch (error) {
+    if (!bitacoraYaPersistida) throw error;
+    console.warn(`Override ${tipo} persistido; evento secundario pendiente:`, error.message);
+    return false;
+  }
+};
+
+const sincronizarRegularizacionUrgente = async (
+  ordenId,
+  req,
+  { overrideAutorizado = false } = {}
+) => {
+  const orden = await OrdenTrabajo.findByPk(ordenId);
+  if (!orden || !normalizarBoolean(orden.creado_en_modo_urgente)) {
+    return { orden, advertencias: [] };
+  }
+
+  const advertencias = await calcularAdvertenciasRegularizacionUrgente(orden);
+  const estabaPendiente =
+    normalizarBoolean(orden.requiere_regularizacion) ||
+    parseJsonSeguro(orden.regularizacion_pendientes, []).length > 0;
+  const requiereRegularizacion = advertencias.length > 0;
+  const advertenciasOperativas = [];
+  const payload = {
+    requiere_regularizacion: requiereRegularizacion,
+    regularizacion_pendientes: advertencias,
+    regularizar_antes_de_entrega:
+      requiereRegularizacion && overrideAutorizado !== true,
+  };
+
+  if (requiereRegularizacion) {
+    payload.regularizado_por = null;
+    payload.regularizado_at = null;
+  }
+
+  if (!requiereRegularizacion && estabaPendiente) {
+    payload.regularizado_por = usuarioActual(req);
+    payload.regularizado_at = new Date();
+  }
+
+  await orden.update(payload);
+
+  if (!requiereRegularizacion && estabaPendiente) {
+    await registrarEventoOrdenPostPersistenciaSeguro(req, {
+      ordenId: orden.id,
+      tipo_evento: "ORDEN_URGENTE_REGULARIZADA",
+      categoria: "OPERACION",
+      titulo: "Orden urgente regularizada",
+      descripcion: "Se completaron los pendientes de la recepcion rapida.",
+      origen: "MODO_URGENTE_V1",
+    }, advertenciasOperativas);
+  }
+
+  return {
+    orden: await OrdenTrabajo.findByPk(orden.id),
+    advertencias,
+    advertenciasOperativas,
+  };
+};
+
+const recargarOrdenPostPersistenciaSeguro = async (
+  orden,
+  advertenciasOperativas
+) => {
+  try {
+    return (await OrdenTrabajo.findByPk(orden.id)) || orden;
+  } catch (error) {
+    advertenciasOperativas.push("RECARGA_ORDEN_PENDIENTE");
+    console.warn(
+      `Orden #${orden.id} persistida, pero fallo su recarga:`,
+      error.message
+    );
+    return orden;
+  }
+};
+
+const sincronizarRegularizacionPostPersistenciaSeguro = async (
+  ordenId,
+  req,
+  opciones,
+  advertenciasOperativas,
+  ordenFallback = null
+) => {
+  try {
+    return await sincronizarRegularizacionUrgente(ordenId, req, opciones);
+  } catch (error) {
+    advertenciasOperativas.push("SINCRONIZACION_REGULARIZACION_PENDIENTE");
+    console.warn(
+      `Orden #${ordenId} persistida, pero fallo la sincronizacion de regularizacion:`,
+      error.message
+    );
+
+    let orden = ordenFallback;
+    try {
+      orden = await OrdenTrabajo.findByPk(ordenId);
+    } catch (errorRecarga) {
+      advertenciasOperativas.push("RECARGA_ORDEN_PENDIENTE");
+      console.warn(
+        `No se pudo recargar Orden #${ordenId} tras persistir:`,
+        errorRecarga.message
+      );
+    }
+    return {
+      orden,
+      advertencias: parseJsonSeguro(orden?.regularizacion_pendientes, []),
+      advertenciasOperativas: ["SINCRONIZACION_REGULARIZACION_PENDIENTE"],
+    };
+  }
+};
+
+const validarRegularizacionUrgenteParaCierre = async ({
+  req,
+  orden,
+  datosProyectados = {},
+  transaction,
+}) => {
+  if (!normalizarBoolean(orden.creado_en_modo_urgente)) return null;
+
+  const advertencias = await calcularAdvertenciasRegularizacionUrgente(
+    orden,
+    datosProyectados,
+    { transaction }
+  );
+  if (!advertencias.length) return null;
+
+  if (!normalizarBoolean(req.body.override_regularizacion)) {
+    throw crearErrorHttp(
+      409,
+      "Debes regularizar los datos pendientes antes de cerrar o entregar esta orden urgente.",
+      {
+        codigo: "REGULARIZACION_PENDIENTE",
+        advertencias,
+      }
+    );
+  }
+
+  if (!tieneRol(req, ROLES_JEFATURA_URGENTE)) {
+    throw crearErrorHttp(
+      403,
+      "Solo jefatura puede justificar el cierre con regularizacion pendiente.",
+      { codigo: "OVERRIDE_REGULARIZACION_NO_AUTORIZADO" }
+    );
+  }
+
+  const motivoOverride = limpiarTexto(req.body.motivo_override);
+  if (!motivoOverride) {
+    throw crearErrorHttp(
+      400,
+      "Debes indicar motivo_override para justificar los pendientes.",
+      { codigo: "MOTIVO_OVERRIDE_REQUERIDO" }
+    );
+  }
+
+  return {
+    tipo: "OVERRIDE_REGULARIZACION_URGENTE",
+    motivo: motivoOverride,
+    advertencias,
+  };
+};
+
+const validarEntregaOrden = async ({
+  req,
+  orden,
+  datosProyectados = {},
+  pagoSeConfirmara = false,
+  transaction,
+}) => {
+  const estadoActual = limpiarTexto(orden.estado).toUpperCase();
+
+  if (estadoActual !== "LISTO_PARA_ENTREGA") {
+    throw crearErrorHttp(
+      409,
+      "La orden debe estar en Listo para entregar y tener un cierre tecnico vigente.",
+      { codigo: "CIERRE_TECNICO_REQUERIDO" }
+    );
+  }
+
+  await validarItemsServicioListosOrden(orden.id, { transaction });
+  await validarCierreTecnicoFileServiceOrden(orden.id, { transaction });
+  await validarMaterialObligatorioOrden(orden.id, { transaction });
+
+  const overrideRegularizacion = await validarRegularizacionUrgenteParaCierre({
+    req,
+    orden,
+    datosProyectados,
+    transaction,
+  });
+  const estadoPago = limpiarTexto(
+    datosProyectados.estado_pago ?? orden.estado_pago
+  ).toUpperCase();
+  const montoPagado = normalizarDecimal(
+    datosProyectados.monto_pagado ?? orden.monto_pagado,
+    0
+  );
+  const pagoConfirmado = pagoSeConfirmara || (estadoPago === "PAGADO" && montoPagado > 0);
+  let overrideComercial = null;
+
+  if (!pagoConfirmado) {
+    if (!normalizarBoolean(req.body.override_comercial)) {
+      throw crearErrorHttp(409, "No puedes entregar una orden sin pago confirmado.", {
+        codigo: "PAGO_REQUERIDO",
+      });
+    }
+
+    if (!tieneRol(req, ROLES_OVERRIDE_COMERCIAL)) {
+      throw crearErrorHttp(
+        403,
+        "Solo OWNER o ADMIN puede autorizar una entrega sin pago.",
+        { codigo: "OVERRIDE_COMERCIAL_NO_AUTORIZADO" }
+      );
+    }
+
+    const motivoOverride = limpiarTexto(req.body.motivo_override);
+    if (!motivoOverride) {
+      throw crearErrorHttp(
+        400,
+        "Debes indicar motivo_override para entregar sin pago.",
+        { codigo: "MOTIVO_OVERRIDE_REQUERIDO" }
+      );
+    }
+
+    overrideComercial = {
+      tipo: "OVERRIDE_COMERCIAL_ENTREGA",
+      motivo: motivoOverride,
+    };
+  }
+
+  return { overrideRegularizacion, overrideComercial };
+};
+
 const CAMPOS_COMERCIALES_SENSIBLES = [
   "estado_pago",
   "medio_pago",
@@ -662,7 +1570,7 @@ const intentoCobroEntregaEnCreacion = (body = {}) => {
   const montoPagadoSolicitado = normalizarNumero(body.monto_pagado, 0);
 
   return (
-    estadoSolicitado === "ENTREGADO" ||
+    ["LISTO_PARA_ENTREGA", "ENTREGADO"].includes(estadoSolicitado) ||
     (estadoPagoSolicitado && estadoPagoSolicitado !== "PENDIENTE") ||
     (medioPagoSolicitado && medioPagoSolicitado !== "PENDIENTE") ||
     montoPagadoSolicitado > 0 ||
@@ -1151,7 +2059,10 @@ const materialCumpleRegistro = (material) => {
   return peso > 0 || Boolean(excepcion);
 };
 
-const validarMaterialObligatorioOrden = async (ordenId) => {
+const validarMaterialObligatorioOrden = async (
+  ordenId,
+  { transaction } = {}
+) => {
   const items = await OrdenServicioItem.findAll({
     where: {
       ordenId,
@@ -1159,12 +2070,14 @@ const validarMaterialObligatorioOrden = async (ordenId) => {
       material_recuperado_obligatorio: true,
     },
     order: [["id", "ASC"]],
+    transaction,
   });
 
   if (!items.length) return;
 
   const materiales = await MaterialRecuperado.findAll({
     where: { ordenId },
+    transaction,
   });
 
   const pendientes = items.filter((item) => {
@@ -1186,6 +2099,7 @@ const validarMaterialObligatorioOrden = async (ordenId) => {
       "Esta orden tiene material recuperado pendiente. Registra peso o motivo de excepcion antes de cerrar tecnico."
     );
     error.statusCode = 400;
+    error.codigo = "MATERIAL_RECUPERADO_PENDIENTE";
     error.itemsPendientes = pendientes.map((item) => ({
       id: item.id,
       tipo_servicio: item.tipo_servicio,
@@ -1194,19 +2108,136 @@ const validarMaterialObligatorioOrden = async (ordenId) => {
   }
 };
 
-const recalcularMontoOrdenPorItems = async (ordenId) => {
+const validarItemsServicioListosOrden = async (
+  ordenId,
+  { transaction } = {}
+) => {
+  const items = await OrdenServicioItem.findAll({
+    where: { ordenId },
+    attributes: ["id", "tipo_servicio", "estado"],
+    order: [["id", "ASC"]],
+    transaction,
+  });
+  const itemsPendientes = items
+    .filter((item) => {
+      const estado = limpiarTexto(item.estado).toUpperCase();
+      return estado !== "ANULADO" && estado !== "LISTO";
+    })
+    .map((item) => ({
+      id: item.id,
+      tipo_servicio: item.tipo_servicio,
+      estado: limpiarTexto(item.estado).toUpperCase() || "PENDIENTE",
+    }));
+
+  if (itemsPendientes.length > 0) {
+    throw crearErrorHttp(
+      409,
+      "Hay servicios pendientes. Marca cada servicio activo como LISTO antes del cierre tecnico.",
+      {
+        codigo: "ITEMS_SERVICIO_PENDIENTES",
+        itemsPendientes,
+      }
+    );
+  }
+};
+
+const invalidarCierreTecnicoPorCambioServicio = async (
+  orden,
+  { transaction } = {}
+) => {
+  const estadoAnterior = limpiarTexto(orden.estado).toUpperCase();
+  const teniaCierreVigente =
+    estadoAnterior === "LISTO_PARA_ENTREGA" ||
+    Boolean(orden.tecnico_finalizado_at) ||
+    Boolean(limpiarTexto(orden.tecnico_finalizado_por));
+
+  if (!teniaCierreVigente) return null;
+
+  const estadoNuevo =
+    estadoAnterior === "LISTO_PARA_ENTREGA"
+      ? "EN_PROGRAMACION"
+      : estadoAnterior || "EN_PROGRAMACION";
+
+  await orden.update(
+    {
+      estado: estadoNuevo,
+      tecnico_finalizado_at: null,
+      tecnico_finalizado_por: null,
+    },
+    { transaction }
+  );
+
+  return {
+    estado_anterior: estadoAnterior,
+    estado_nuevo: estadoNuevo,
+  };
+};
+
+// El cierre de un ArchivoECU puede completar su etapa tecnica, pero la orden
+// solo pasa a lista para entrega cuando TODOS los controles de orden cumplen.
+// No admite override implicito: jefatura debe justificarlo en el endpoint de
+// estado de la orden, donde queda la auditoria correspondiente.
+const validarOrdenListaParaEntregaDesdeFileService = async ({
+  ordenId,
+  transaction,
+}) => {
+  const orden = await OrdenTrabajo.findByPk(ordenId, {
+    transaction,
+    ...(transaction ? { lock: transaction.LOCK.UPDATE } : {}),
+  });
+
+  if (!orden) {
+    throw crearErrorHttp(404, "Orden asociada no encontrada.", {
+      codigo: "ORDEN_NO_ENCONTRADA",
+    });
+  }
+
+  if (normalizarBoolean(orden.creado_en_modo_urgente)) {
+    const advertencias = await calcularAdvertenciasRegularizacionUrgente(
+      orden,
+      {},
+      { transaction }
+    );
+
+    if (advertencias.length > 0) {
+      throw crearErrorHttp(
+        409,
+        "La etapa File Service termino, pero la orden urgente aun debe regularizar datos antes de quedar lista para entrega.",
+        {
+          codigo: "REGULARIZACION_PENDIENTE",
+          advertencias,
+        }
+      );
+    }
+  }
+
+  await validarItemsServicioListosOrden(ordenId, { transaction });
+  await validarCierreTecnicoFileServiceOrden(ordenId, { transaction });
+  await validarMaterialObligatorioOrden(ordenId, { transaction });
+
+  return orden;
+};
+
+const recalcularMontoOrdenPorItems = async (
+  ordenId,
+  { transaction = null } = {}
+) => {
   const itemsActivos = await OrdenServicioItem.findAll({
     where: {
       ordenId,
       estado: { [Op.ne]: "ANULADO" },
     },
+    transaction,
   });
 
   const total = itemsActivos.reduce(
     (acc, item) => acc + normalizarDecimal(item.subtotal, 0),
     0
   );
-  const orden = await OrdenTrabajo.findByPk(ordenId);
+  const orden = await OrdenTrabajo.findByPk(ordenId, {
+    transaction,
+    ...(transaction ? { lock: transaction.LOCK.UPDATE } : {}),
+  });
 
   if (!orden) return null;
 
@@ -1214,13 +2245,16 @@ const recalcularMontoOrdenPorItems = async (ordenId) => {
   const montoOriginal =
     orden.monto_original ?? (montoActual > 0 ? montoActual : total);
 
-  await orden.update({
-    monto_original: montoOriginal,
-    monto_total: total,
-    monto_final: total,
-  });
+  await orden.update(
+    {
+      monto_original: montoOriginal,
+      monto_total: total,
+      monto_final: total,
+    },
+    { transaction }
+  );
 
-  return await OrdenTrabajo.findByPk(ordenId);
+  return await OrdenTrabajo.findByPk(ordenId, { transaction });
 };
 
 const mapearOrdenRow = async (row, incluirDetalle = true) => {
@@ -1229,6 +2263,18 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
     vehiculoId: row.vehiculoId,
 
     prioridad: row.prioridad,
+    creado_en_modo_urgente: row.creado_en_modo_urgente,
+    motivo_urgencia: row.motivo_urgencia,
+    requiere_regularizacion: row.requiere_regularizacion,
+    regularizacion_pendientes: parseJsonSeguro(
+      row.regularizacion_pendientes,
+      []
+    ),
+    regularizar_antes_de_entrega: row.regularizar_antes_de_entrega,
+    urgente_creado_por: row.urgente_creado_por,
+    urgente_creado_at: row.urgente_creado_at,
+    regularizado_por: row.regularizado_por,
+    regularizado_at: row.regularizado_at,
     estado: row.estado,
     estado_pago: row.estado_pago,
     medio_pago: row.medio_pago,
@@ -1505,16 +2551,38 @@ const crearOrden = async (req, res) => {
   try {
     await prepararColumnas();
 
+    const modoUrgente = modoUrgenteSolicitado(req.body);
+
     if (!tieneRol(req, ROLES_CREAR_ORDEN)) {
       return enviarErrorPermiso(res);
     }
 
     const esRecepcionEmergenciaOperador = rolActual(req) === "OPERADOR_ECU";
 
-    if (esRecepcionEmergenciaOperador && intentoCobroEntregaEnCreacion(req.body)) {
-      return res.status(403).json({
-        error:
-          "Recepcion de emergencia no permite crear ordenes cobradas, pagadas o entregadas.",
+    const servicioUrgente = modoUrgente ? obtenerServicioUrgente(req.body) : "";
+    const motivoUrgencia = modoUrgente
+      ? limpiarTexto(req.body.motivo_urgencia)
+      : "";
+
+    if (modoUrgente && !servicioUrgente) {
+      return res.status(400).json({
+        error: "SERVICIO_REQUERIDO",
+        message: "Debes indicar el servicio para crear una orden urgente.",
+      });
+    }
+
+    if (modoUrgente && !motivoUrgencia) {
+      return res.status(400).json({
+        error: "MOTIVO_URGENCIA_REQUERIDO",
+        message: "Debes indicar motivo_urgencia para usar el modo urgente.",
+      });
+    }
+
+    if (intentoCobroEntregaEnCreacion(req.body)) {
+      return res.status(409).json({
+        error: "CIERRE_COMERCIAL_REQUIERE_FLUJO_DEDICADO",
+        message:
+          "Una orden nueva no puede nacer lista, pagada o entregada. Completa el trabajo y usa los flujos dedicados de cierre, pago y entrega.",
       });
     }
 
@@ -1534,11 +2602,14 @@ const crearOrden = async (req, res) => {
       });
     }
 
-    const prioridadExplicita = limpiarTexto(req.body.prioridad);
+    const prioridadExplicita = modoUrgente
+      ? "URGENTE"
+      : limpiarTexto(req.body.prioridad);
     const prioridadFinal =
       prioridadExplicita || (await obtenerPrioridadSugeridaPorVehiculo(vehiculoId));
     const montoInicial = normalizarDecimal(req.body.monto_total, 0);
     const responsablesCreacion = {};
+    const overridesGuardia = [];
     const responsableTecnicoGenerico = await resolverResponsableTecnicoGenerico(
       req.body
     );
@@ -1553,7 +2624,12 @@ const crearOrden = async (req, res) => {
         obligatorio: false,
       });
       if (resuelto?.usuario) {
-        await validarGuardiaResponsable(resuelto.usuario);
+        const overrideGuardia = await validarGuardiaResponsableUrgente({
+          req,
+          usuario: resuelto.usuario,
+          modoUrgente,
+        });
+        if (overrideGuardia) overridesGuardia.push(overrideGuardia);
       }
       aplicarResponsableResuelto(responsablesCreacion, campoId, campoTexto, resuelto);
     }
@@ -1566,7 +2642,12 @@ const crearOrden = async (req, res) => {
     ].some((campo) => limpiarTexto(responsablesCreacion[campo]));
 
     if (!tieneResponsableTecnico && responsableTecnicoGenerico) {
-      await validarGuardiaResponsable(responsableTecnicoGenerico.usuario);
+      const overrideGuardia = await validarGuardiaResponsableUrgente({
+        req,
+        usuario: responsableTecnicoGenerico.usuario,
+        modoUrgente,
+      });
+      if (overrideGuardia) overridesGuardia.push(overrideGuardia);
       responsablesCreacion[responsableTecnicoGenerico.campoId] =
         responsableTecnicoGenerico.id;
       responsablesCreacion[responsableTecnicoGenerico.campoTexto] =
@@ -1574,32 +2655,87 @@ const crearOrden = async (req, res) => {
       tieneResponsableTecnico = true;
     }
 
-    if (!tieneResponsableTecnico) {
+    if (
+      !tieneResponsableTecnico &&
+      (!modoUrgente || !tieneRol(req, ROLES_JEFATURA_URGENTE))
+    ) {
       throw crearErrorHttp(
         400,
-        "Debes seleccionar un responsable técnico para crear la orden.",
+        modoUrgente
+          ? "Solo jefatura puede crear una orden urgente por asignar. Selecciona un responsable tecnico."
+          : "Debes seleccionar un responsable técnico para crear la orden.",
         { codigo: "RESPONSABLE_REQUERIDO" }
       );
     }
 
+    const advertencias = modoUrgente
+      ? construirAdvertenciasCreacionUrgente({
+          body: req.body,
+          montoInicial,
+          tieneResponsableTecnico,
+        })
+      : [];
+    const requiereRegularizacion = modoUrgente && advertencias.length > 0;
+    const ahoraUrgente = modoUrgente ? new Date() : null;
+    const recepcionadoPor = usuarioActual(req);
+    const recepcionadoPorId = usuarioActualId(req) || null;
+    const origenRecepcion = modoUrgente
+      ? "MODO_URGENTE_V1"
+      : esRecepcionEmergenciaOperador
+        ? "RECEPCION_EMERGENCIA_OPERADOR"
+        : limpiarTexto(req.body.origen_recepcion);
+    const auditoriaUrgente = modoUrgente
+      ? [
+          {
+            tipo: "ORDEN_CREADA_MODO_URGENTE",
+            texto: motivoUrgencia,
+            servicio: servicioUrgente,
+            creado_por: usuarioActual(req),
+            fecha: ahoraUrgente.toISOString(),
+            advertencias,
+          },
+          ...overridesGuardia.map((override) => ({
+            ...override,
+            creado_por: usuarioActual(req),
+            fecha: ahoraUrgente.toISOString(),
+          })),
+        ]
+      : [];
+
     const nuevaOrden = await OrdenTrabajo.create({
       vehiculoId,
       prioridad: prioridadFinal,
-      estado: limpiarTexto(req.body.estado) || "RECEPCIONADO",
-      estado_pago: esRecepcionEmergenciaOperador
+      estado: modoUrgente
+        ? "RECEPCIONADO"
+        : limpiarTexto(req.body.estado) || "RECEPCIONADO",
+      estado_pago: esRecepcionEmergenciaOperador || modoUrgente
         ? "PENDIENTE"
         : limpiarTexto(req.body.estado_pago) || "PENDIENTE",
-      medio_pago: esRecepcionEmergenciaOperador
+      medio_pago: esRecepcionEmergenciaOperador || modoUrgente
         ? "PENDIENTE"
         : limpiarTexto(req.body.medio_pago) || "PENDIENTE",
-      monto_pagado: esRecepcionEmergenciaOperador
+      monto_pagado: esRecepcionEmergenciaOperador || modoUrgente
         ? 0
         : normalizarNumero(req.body.monto_pagado, 0),
       kilometraje: req.body.kilometraje ? Number(req.body.kilometraje) : null,
-      motivo_ingreso: limpiarTexto(req.body.motivo_ingreso),
+      motivo_ingreso: modoUrgente
+        ? construirMotivoIngresoUrgente(req.body, servicioUrgente)
+        : limpiarTexto(req.body.motivo_ingreso),
       monto_total: montoInicial,
       monto_original: montoInicial,
       monto_final: montoInicial,
+      creado_en_modo_urgente: modoUrgente,
+      motivo_urgencia: modoUrgente ? motivoUrgencia : null,
+      requiere_regularizacion: requiereRegularizacion,
+      regularizacion_pendientes: advertencias,
+      regularizar_antes_de_entrega: requiereRegularizacion,
+      urgente_creado_por: modoUrgente ? usuarioActual(req) : null,
+      urgente_creado_at: ahoraUrgente,
+      recepcionado_por: recepcionadoPor,
+      recepcionado_por_id: recepcionadoPorId,
+      origen_recepcion: origenRecepcion || null,
+      ...responsablesCreacion,
+      bitacora_operativa: auditoriaUrgente,
       excluir_estadisticas: normalizarBoolean(req.body.excluir_estadisticas),
       intervencion_fisica_tipo: normalizarTipoIntervencionFisica(
         req.body.intervencion_fisica_tipo
@@ -1609,38 +2745,20 @@ const crearOrden = async (req, res) => {
       ),
     });
 
-    const recepcionadoPor = usuarioActual(req);
-    const recepcionadoPorId = usuarioActualId(req) || null;
-    const origenRecepcion = esRecepcionEmergenciaOperador
-      ? "RECEPCION_EMERGENCIA_OPERADOR"
-      : limpiarTexto(req.body.origen_recepcion);
-    const asignacionesResponsables = Object.keys(responsablesCreacion).map(
-      (campo) => `"${campo}" = :${campo}`
-    );
-
-    await sequelize.query(
-      `
-      UPDATE "ordenes_trabajo"
-      SET
-        "recepcionado_por" = :recepcionadoPor,
-        "recepcionado_por_id" = :recepcionadoPorId,
-        ${asignacionesResponsables.length ? `${asignacionesResponsables.join(",\n        ")},` : ""}
-        "origen_recepcion" = NULLIF(:origenRecepcion, ''),
-        "updatedAt" = NOW()
-      WHERE "id" = :id;
-      `,
-      {
-        replacements: {
-          id: nuevaOrden.id,
-          recepcionadoPor,
-          recepcionadoPorId,
-          origenRecepcion,
-          ...responsablesCreacion,
-        },
+    const advertenciasOperativas = [];
+    const registrarEventoCreacionSeguro = async (evento) => {
+      try {
+        await registrarEventoOrdenDesdeReq(req, evento, { estricto: true });
+      } catch (errorEvento) {
+        advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+        console.warn(
+          `Orden #${nuevaOrden.id} creada, pero fallo un evento de auditoria:`,
+          errorEvento.message
+        );
       }
-    );
+    };
 
-    await registrarEventoOrdenDesdeReq(req, {
+    await registrarEventoCreacionSeguro({
       ordenId: nuevaOrden.id,
       tipo_evento: "ORDEN_CREADA",
       categoria: "OPERACION",
@@ -1651,11 +2769,44 @@ const crearOrden = async (req, res) => {
       metadata: {
         prioridad: prioridadFinal,
         recepcion_emergencia: esRecepcionEmergenciaOperador,
+        modo_urgente: modoUrgente,
       },
     });
 
+    if (modoUrgente) {
+      await registrarEventoCreacionSeguro({
+        ordenId: nuevaOrden.id,
+        tipo_evento: "ORDEN_CREADA_MODO_URGENTE",
+        categoria: "OPERACION",
+        titulo: "Orden creada en modo urgente",
+        descripcion: motivoUrgencia,
+        estado_nuevo: nuevaOrden.estado,
+        origen: "MODO_URGENTE_V1",
+        metadata: {
+          servicio: servicioUrgente,
+          requiere_regularizacion: requiereRegularizacion,
+          cantidad_advertencias: advertencias.length,
+        },
+      });
+
+      for (const override of overridesGuardia) {
+        await registrarEventoCreacionSeguro({
+          ordenId: nuevaOrden.id,
+          tipo_evento: override.tipo,
+          categoria: "AUDITORIA",
+          titulo: "Override de guardia autorizado",
+          descripcion: override.motivo,
+          origen: "MODO_URGENTE_V1",
+          metadata: {
+            responsable_id: override.responsable_id,
+            responsable: override.responsable,
+          },
+        });
+      }
+    }
+
     if (origenRecepcion === "RECEPCION_EMERGENCIA_OPERADOR") {
-      await registrarEventoOrdenDesdeReq(req, {
+      await registrarEventoCreacionSeguro({
         ordenId: nuevaOrden.id,
         tipo_evento: "RECEPCION_EMERGENCIA",
         categoria: "OPERACION",
@@ -1676,6 +2827,13 @@ const crearOrden = async (req, res) => {
         origen_recepcion: origenRecepcion || null,
       },
       id: nuevaOrden.id,
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
+      ...(modoUrgente
+        ? {
+            requiere_regularizacion: requiereRegularizacion,
+            advertencias,
+          }
+        : {}),
     });
   } catch (error) {
     console.error("ERROR CREANDO ORDEN:", error);
@@ -1690,6 +2848,8 @@ const crearOrden = async (req, res) => {
 };
 
 const actualizarOrden = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
@@ -1707,7 +2867,23 @@ const actualizarOrden = async (req, res) => {
       });
     }
 
-    const estadoAnteriorOrden = limpiarTexto(orden.estado);
+    if (limpiarTexto(orden.estado).toUpperCase() === "ENTREGADO") {
+      throw crearErrorHttp(
+        409,
+        "La orden ya fue entregada. Usa un flujo explícito de reapertura autorizado para modificarla.",
+        { codigo: "ORDEN_YA_ENTREGADA" }
+      );
+    }
+
+    if (limpiarTexto(req.body.estado).toUpperCase() === "ENTREGADO") {
+      throw crearErrorHttp(
+        409,
+        "Para entregar una orden usa el endpoint dedicado /api/ordenes/:id/cobrar-entregar.",
+        { codigo: "ENTREGA_REQUIERE_ENDPOINT_DEDICADO" }
+      );
+    }
+
+    let estadoAnteriorOrden = limpiarTexto(orden.estado);
     const camposComerciales = camposComercialesPatchRecibidos(req.body);
 
     if (camposComerciales.length > 0 && !tieneRol(req, ROLES_PATCH_COMERCIAL)) {
@@ -1744,6 +2920,28 @@ const actualizarOrden = async (req, res) => {
         payload[campo] = limpiarTexto(req.body[campo]);
       }
     });
+
+    if (Object.prototype.hasOwnProperty.call(payload, "estado")) {
+      const estadoNormalizado = limpiarTexto(payload.estado).toUpperCase();
+      if (["ENTREGADO", "LISTO_PARA_ENTREGA"].includes(estadoNormalizado)) {
+        payload.estado = estadoNormalizado;
+      }
+
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, "estado_pago")) {
+      const estadoPagoNormalizado = limpiarTexto(payload.estado_pago).toUpperCase();
+      if (estadoPagoNormalizado === "PAGADO") {
+        payload.estado_pago = estadoPagoNormalizado;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, "motivo_ingreso")) {
+      payload.motivo_ingreso = preservarServicioEnMotivo(
+        orden.motivo_ingreso,
+        payload.motivo_ingreso
+      );
+    }
 
     const camposFeedback = [
       "feedback_operario",
@@ -1803,6 +3001,7 @@ const actualizarOrden = async (req, res) => {
 
     const responsablesPayload = {};
     const responsablesResueltos = {};
+    const overridesGuardiaPatch = [];
 
     for (const config of RESPONSABLES_ORDEN_CONFIG) {
       const tieneCampoTexto = Object.prototype.hasOwnProperty.call(payload, config.campoTexto);
@@ -1813,6 +3012,19 @@ const actualizarOrden = async (req, res) => {
       }
 
       if (tieneCampoTexto || tieneCampoId) {
+        if (tieneCampoTexto && !tieneCampoId) {
+          const textoSolicitado = limpiarTexto(req.body[config.campoTexto]);
+          const textoActual = limpiarTexto(orden[config.campoTexto]);
+
+          if (textoSolicitado === textoActual) continue;
+
+          throw crearErrorHttp(
+            400,
+            "Para cambiar un responsable debes enviar su ID de usuario activo.",
+            { codigo: "RESPONSABLE_INVALIDO" }
+          );
+        }
+
         const resuelto = await resolverResponsableDesdeBody(
           req.body,
           config.campoId,
@@ -1870,7 +3082,12 @@ const actualizarOrden = async (req, res) => {
       const anteriorId = limpiarTexto(responsablesActuales[config.campoId]);
       if (anteriorId && anteriorId === resuelto.id) continue;
 
-      await validarGuardiaResponsable(resuelto.usuario);
+      const overrideGuardia = await validarGuardiaResponsableUrgente({
+        req,
+        usuario: resuelto.usuario,
+        modoUrgente: normalizarBoolean(orden.creado_en_modo_urgente),
+      });
+      if (overrideGuardia) overridesGuardiaPatch.push(overrideGuardia);
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "kilometraje")) {
@@ -1921,31 +3138,137 @@ const actualizarOrden = async (req, res) => {
       }
     }
 
-    if (payload.estado === "ENTREGADO") {
-      payload.entregado_at = new Date();
-      payload.entregado_por = usuarioActual(req);
-      payload.entregado_por_id = usuarioActualId(req) || null;
+    transaction = await sequelize.transaction();
 
-      if (!payload.observacion_cierre) {
-        payload.observacion_cierre = `Orden entregada por ${usuarioActual(req)}`;
+    if (payload.estado === "LISTO_PARA_ENTREGA") {
+      await bloquearArchivosFileServiceOrden(orden.id, transaction);
+    }
+
+    await orden.reload({ transaction, lock: transaction.LOCK.UPDATE });
+
+    if (
+      orden.archivada ||
+      limpiarTexto(orden.estado).toUpperCase() === "ENTREGADO"
+    ) {
+      await transaction.rollback();
+      throw crearErrorHttp(
+        409,
+        "La orden ya no esta activa para ser modificada.",
+        { codigo: "ORDEN_YA_ENTREGADA" }
+      );
+    }
+
+    estadoAnteriorOrden = limpiarTexto(orden.estado);
+    let overrideRegularizacionCierre = null;
+
+    if (Object.prototype.hasOwnProperty.call(payload, "motivo_ingreso")) {
+      payload.motivo_ingreso = preservarServicioEnMotivo(
+        orden.motivo_ingreso,
+        payload.motivo_ingreso
+      );
+
+      const patronServicioEstructural =
+        /^(?:servicio urgente|servicio solicitado)\s*:/im;
+      const introduceServicioEstructural =
+        !patronServicioEstructural.test(limpiarTexto(orden.motivo_ingreso)) &&
+        patronServicioEstructural.test(limpiarTexto(payload.motivo_ingreso));
+      const teniaCierreTecnico =
+        limpiarTexto(estadoAnteriorOrden).toUpperCase() ===
+          "LISTO_PARA_ENTREGA" ||
+        Boolean(orden.tecnico_finalizado_at) ||
+        Boolean(limpiarTexto(orden.tecnico_finalizado_por));
+      const revalidaComoListoEnEstePatch =
+        limpiarTexto(payload.estado).toUpperCase() === "LISTO_PARA_ENTREGA";
+
+      if (
+        introduceServicioEstructural &&
+        teniaCierreTecnico &&
+        !revalidaComoListoEnEstePatch
+      ) {
+        if (
+          limpiarTexto(estadoAnteriorOrden).toUpperCase() ===
+          "LISTO_PARA_ENTREGA"
+        ) {
+          payload.estado = "EN_PROGRAMACION";
+        }
+        payload.tecnico_finalizado_at = null;
+        payload.tecnico_finalizado_por = null;
       }
     }
 
+    if (
+      limpiarTexto(estadoAnteriorOrden).toUpperCase() === "LISTO_PARA_ENTREGA" &&
+      Object.prototype.hasOwnProperty.call(payload, "estado") &&
+      limpiarTexto(payload.estado).toUpperCase() !== "LISTO_PARA_ENTREGA"
+    ) {
+      payload.tecnico_finalizado_at = null;
+      payload.tecnico_finalizado_por = null;
+    }
+
+    const datosProyectados = {
+      ...payload,
+      ...responsablesPayload,
+    };
+
     if (payload.estado === "LISTO_PARA_ENTREGA") {
-      await validarMaterialObligatorioOrden(orden.id);
+      overrideRegularizacionCierre =
+        await validarRegularizacionUrgenteParaCierre({
+          req,
+          orden,
+          datosProyectados,
+          transaction,
+        });
+      await validarItemsServicioListosOrden(orden.id, { transaction });
+      await validarCierreTecnicoFileServiceOrden(orden.id, {
+        transaction,
+        motivoIngresoProyectado: datosProyectados.motivo_ingreso,
+      });
+      await validarMaterialObligatorioOrden(orden.id, { transaction });
       payload.tecnico_finalizado_at = orden.tecnico_finalizado_at || new Date();
       payload.tecnico_finalizado_por =
         orden.tecnico_finalizado_por || usuarioActual(req);
     }
 
-    await orden.update(payload);
+    const auditoriasOverridePatch = [
+      ...overridesGuardiaPatch.map((override) => ({
+        req,
+        tipo: override.tipo,
+        motivo: override.motivo,
+        metadata: {
+          responsable_id: override.responsable_id,
+          responsable: override.responsable,
+          pendientes_criticos: override.pendientes_criticos,
+        },
+      })),
+      ...(overrideRegularizacionCierre
+        ? [
+            {
+              req,
+              ...overrideRegularizacionCierre,
+              metadata: {
+                advertencias: overrideRegularizacionCierre.advertencias,
+                destino: "LISTO_PARA_ENTREGA",
+              },
+            },
+          ]
+        : []),
+    ];
+    anexarAuditoriasOverrideAlPayload({
+      orden,
+      payload,
+      auditorias: auditoriasOverridePatch,
+    });
+    Object.assign(payload, responsablesPayload);
+    await orden.update(payload, { transaction });
+    await transaction.commit();
+    const advertenciasOperativas = [];
 
     if (
       Object.prototype.hasOwnProperty.call(payload, "estado") &&
       limpiarTexto(payload.estado) &&
       limpiarTexto(payload.estado) !== estadoAnteriorOrden
     ) {
-      await registrarEventoOrdenDesdeReq(req, {
+      await registrarEventoOrdenPostPersistenciaSeguro(req, {
         ordenId: orden.id,
         tipo_evento: "ESTADO_CAMBIADO",
         categoria: "OPERACION",
@@ -1954,11 +3277,11 @@ const actualizarOrden = async (req, res) => {
         estado_anterior: estadoAnteriorOrden,
         estado_nuevo: payload.estado,
         origen: "PATCH_ORDEN",
-      });
+      }, advertenciasOperativas);
     }
 
     if (actualizaFeedback) {
-      await registrarEventoOrdenDesdeReq(req, {
+      await registrarEventoOrdenPostPersistenciaSeguro(req, {
         ordenId: orden.id,
         tipo_evento: "FEEDBACK_REGISTRADO",
         categoria: "OPERACION",
@@ -1968,29 +3291,18 @@ const actualizarOrden = async (req, res) => {
         metadata: {
           requiere_seguimiento: payload.requiere_seguimiento === true,
         },
-      });
+      }, advertenciasOperativas);
     }
 
-    if (Object.keys(responsablesPayload).length > 0) {
-      const asignaciones = Object.keys(responsablesPayload).map(
-        (campo) => `"${campo}" = :${campo}`
-      );
-
-      await sequelize.query(
-        `
-        UPDATE "ordenes_trabajo"
-        SET
-          ${asignaciones.join(",\n          ")},
-          "updatedAt" = NOW()
-        WHERE "id" = :id;
-        `,
-        {
-          replacements: {
-            id: orden.id,
-            ...responsablesPayload,
-          },
-        }
-      );
+    for (const auditoria of auditoriasOverridePatch) {
+      const eventoRegistrado = await registrarAuditoriaOverrideOrden({
+        ...auditoria,
+        orden,
+        bitacoraYaPersistida: true,
+      });
+      if (!eventoRegistrado) {
+        advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      }
     }
 
     if (Object.keys(responsablesPayload).length > 0) {
@@ -2004,7 +3316,7 @@ const actualizarOrden = async (req, res) => {
 
       for (const [campo, nuevoResponsable] of responsablesCambiados) {
         const meta = NOTIFICACIONES_RESPONSABLES[campo];
-        await registrarEventoOrdenDesdeReq(req, {
+        await registrarEventoOrdenPostPersistenciaSeguro(req, {
           ordenId: orden.id,
           tipo_evento: "RESPONSABLE_ASIGNADO",
           categoria: "OPERACION",
@@ -2017,7 +3329,7 @@ const actualizarOrden = async (req, res) => {
             responsable_anterior: limpiarTexto(responsablesActuales[campo]),
             responsable_nuevo: limpiarTexto(nuevoResponsable),
           },
-        });
+        }, advertenciasOperativas);
       }
     }
 
@@ -2053,11 +3365,40 @@ const actualizarOrden = async (req, res) => {
       }
     }
 
+    const esOrdenUrgente = normalizarBoolean(orden.creado_en_modo_urgente);
+    const regularizacion = esOrdenUrgente
+      ? await sincronizarRegularizacionPostPersistenciaSeguro(
+          orden.id,
+          req,
+          { overrideAutorizado: Boolean(overrideRegularizacionCierre) },
+          advertenciasOperativas,
+          orden
+        )
+      : {
+          orden: await recargarOrdenPostPersistenciaSeguro(
+            orden,
+            advertenciasOperativas
+          ),
+          advertencias: [],
+        };
+    advertenciasOperativas.push(...(regularizacion.advertenciasOperativas || []));
+
     res.json({
       mensaje: "Orden actualizada correctamente",
-      orden,
+      orden: regularizacion.orden,
+      ...(esOrdenUrgente
+        ? {
+            requiere_regularizacion: regularizacion.advertencias.length > 0,
+            advertencias: regularizacion.advertencias,
+          }
+        : {}),
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR ACTUALIZANDO ORDEN:", error);
     const controlado = responderErrorControlado(res, error);
     if (controlado) return;
@@ -2190,32 +3531,13 @@ const obtenerItemsOrden = async (req, res) => {
 };
 
 const crearItemOrden = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
     if (!tieneRol(req, ROLES_GESTION_ITEMS)) {
       return enviarErrorPermiso(res);
-    }
-
-    const orden = await OrdenTrabajo.findByPk(req.params.id);
-
-    if (!orden) {
-      return res.status(404).json({
-        error: "Orden no encontrada",
-      });
-    }
-
-    if (orden.archivada) {
-      return res.status(400).json({
-        error: "No puedes agregar items a una orden archivada",
-      });
-    }
-
-    if (orden.estado_pago === "PAGADO" || orden.estado === "ENTREGADO") {
-      return res.status(400).json({
-        error:
-          "La orden ya esta pagada o entregada. Usa ajuste comercial para corregir montos.",
-      });
     }
 
     const tipoServicio = limpiarTexto(req.body.tipo_servicio);
@@ -2233,8 +3555,6 @@ const crearItemOrden = async (req, res) => {
       { obligatorio: true }
     );
 
-    await validarGuardiaResponsable(responsableResuelto.usuario);
-
     const cantidad = Math.max(normalizarDecimal(req.body.cantidad, 1), 0);
     const precioUnitario = Math.max(
       normalizarDecimal(req.body.precio_unitario, 0),
@@ -2242,51 +3562,169 @@ const crearItemOrden = async (req, res) => {
     );
     const subtotal = calcularSubtotalItem(cantidad, precioUnitario);
 
-    const item = await OrdenServicioItem.create({
-      ordenId: orden.id,
-      tipo_servicio: tipoServicio,
-      categoria: normalizarCategoriaItem(req.body.categoria),
-      descripcion: limpiarTexto(req.body.descripcion),
-      cantidad,
-      precio_unitario: precioUnitario,
-      subtotal,
-      responsable: responsableResuelto.texto,
-      responsable_id: responsableResuelto.id,
-      estado: normalizarEstadoItem(req.body.estado),
-      requiere_material_recuperado: normalizarBoolean(
-        req.body.requiere_material_recuperado
-      ),
-      material_recuperado_obligatorio: normalizarBoolean(
-        req.body.material_recuperado_obligatorio
-      ),
-      observaciones: limpiarTexto(req.body.observaciones),
+    transaction = await sequelize.transaction();
+    const orden = await OrdenTrabajo.findByPk(req.params.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
-    const ordenActualizada = await recalcularMontoOrdenPorItems(orden.id);
+    if (!orden) {
+      throw crearErrorHttp(404, "Orden no encontrada.", {
+        codigo: "ORDEN_NO_ENCONTRADA",
+      });
+    }
 
-    await registrarEventoOrdenDesdeReq(req, {
-      ordenId: orden.id,
-      tipo_evento: "ITEM_SERVICIO_AGREGADO",
-      categoria: "SERVICIO",
-      titulo: "Item de servicio agregado",
-      descripcion: "Se agrego un servicio a la orden.",
-      origen: "ITEM_SERVICIO",
-      metadata: {
-        itemId: item.id,
-        tipo_servicio: item.tipo_servicio,
-        categoria: item.categoria,
-        requiere_material_recuperado: item.requiere_material_recuperado === true,
-        material_recuperado_obligatorio:
-          item.material_recuperado_obligatorio === true,
+    if (orden.archivada) {
+      throw crearErrorHttp(
+        409,
+        "No puedes agregar servicios a una orden archivada.",
+        { codigo: "ORDEN_ARCHIVADA" }
+      );
+    }
+
+    if (
+      limpiarTexto(orden.estado_pago).toUpperCase() === "PAGADO" ||
+      limpiarTexto(orden.estado).toUpperCase() === "ENTREGADO"
+    ) {
+      throw crearErrorHttp(
+        409,
+        "La orden ya esta pagada o entregada. Usa ajuste comercial para corregir montos.",
+        { codigo: "ORDEN_COMERCIAL_CERRADA" }
+      );
+    }
+
+    const overrideGuardiaItem = await validarGuardiaResponsableUrgente({
+      req,
+      usuario: responsableResuelto.usuario,
+      modoUrgente: normalizarBoolean(orden.creado_en_modo_urgente),
+    });
+
+    const item = await OrdenServicioItem.create(
+      {
+        ordenId: orden.id,
+        tipo_servicio: tipoServicio,
+        categoria: normalizarCategoriaItem(req.body.categoria),
+        descripcion: limpiarTexto(req.body.descripcion),
+        cantidad,
+        precio_unitario: precioUnitario,
+        subtotal,
+        responsable: responsableResuelto.texto,
+        responsable_id: responsableResuelto.id,
+        estado: normalizarEstadoItem(req.body.estado),
+        requiere_material_recuperado: normalizarBoolean(
+          req.body.requiere_material_recuperado
+        ),
+        material_recuperado_obligatorio: normalizarBoolean(
+          req.body.material_recuperado_obligatorio
+        ),
+        observaciones: limpiarTexto(req.body.observaciones),
       },
+      { transaction }
+    );
+
+    if (overrideGuardiaItem) {
+      const payloadAuditoria = {};
+      anexarAuditoriasOverrideAlPayload({
+        orden,
+        payload: payloadAuditoria,
+        auditorias: [
+          {
+            req,
+            ...overrideGuardiaItem,
+            metadata: {
+              itemId: item.id,
+              responsable_id: overrideGuardiaItem.responsable_id,
+              responsable: overrideGuardiaItem.responsable,
+              pendientes_criticos: overrideGuardiaItem.pendientes_criticos,
+            },
+          },
+        ],
+      });
+      await orden.update(payloadAuditoria, { transaction });
+    }
+
+    const cierreTecnicoInvalidado =
+      await invalidarCierreTecnicoPorCambioServicio(orden, { transaction });
+
+    const ordenActualizada = await recalcularMontoOrdenPorItems(orden.id, {
+      transaction,
     });
+
+    await transaction.commit();
+    transaction = null;
+
+    const advertenciasOperativas = [];
+    if (overrideGuardiaItem) {
+      const eventoRegistrado = await registrarAuditoriaOverrideOrden({
+        req,
+        orden,
+        ...overrideGuardiaItem,
+        metadata: {
+          itemId: item.id,
+          responsable_id: overrideGuardiaItem.responsable_id,
+          responsable: overrideGuardiaItem.responsable,
+          pendientes_criticos: overrideGuardiaItem.pendientes_criticos,
+        },
+        bitacoraYaPersistida: true,
+      });
+      if (!eventoRegistrado) {
+        advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      }
+    }
+
+    if (cierreTecnicoInvalidado) {
+      advertenciasOperativas.push("CIERRE_TECNICO_REABIERTO");
+      await registrarEventoOrdenPostPersistenciaSeguro(
+        req,
+        {
+          ordenId: orden.id,
+          tipo_evento: "CIERRE_TECNICO_REABIERTO",
+          categoria: "OPERACION",
+          titulo: "Cierre tecnico reabierto",
+          descripcion:
+            "Se agrego un servicio despues del cierre tecnico; la orden debe validarse nuevamente.",
+          estado_anterior: cierreTecnicoInvalidado.estado_anterior,
+          estado_nuevo: cierreTecnicoInvalidado.estado_nuevo,
+          origen: "ITEM_SERVICIO",
+          metadata: { itemId: item.id },
+        },
+        advertenciasOperativas
+      );
+    }
+
+    await registrarEventoOrdenPostPersistenciaSeguro(
+      req,
+      {
+        ordenId: orden.id,
+        tipo_evento: "ITEM_SERVICIO_AGREGADO",
+        categoria: "SERVICIO",
+        titulo: "Item de servicio agregado",
+        descripcion: "Se agrego un servicio a la orden.",
+        origen: "ITEM_SERVICIO",
+        metadata: {
+          itemId: item.id,
+          tipo_servicio: item.tipo_servicio,
+          categoria: item.categoria,
+          requiere_material_recuperado:
+            item.requiere_material_recuperado === true,
+          material_recuperado_obligatorio:
+            item.material_recuperado_obligatorio === true,
+        },
+      },
+      advertenciasOperativas
+    );
 
     res.status(201).json({
       mensaje: "Item de servicio agregado correctamente",
       item,
       orden: ordenActualizada,
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR CREANDO ITEM DE ORDEN:", error);
     const controlado = responderErrorControlado(res, error);
     if (controlado) return;
@@ -2298,6 +3736,8 @@ const crearItemOrden = async (req, res) => {
 };
 
 const actualizarItemOrden = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
@@ -2305,12 +3745,32 @@ const actualizarItemOrden = async (req, res) => {
       return enviarErrorPermiso(res);
     }
 
-    const orden = await OrdenTrabajo.findByPk(req.params.id);
+    transaction = await sequelize.transaction();
+    const orden = await OrdenTrabajo.findByPk(req.params.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
 
     if (!orden) {
-      return res.status(404).json({
-        error: "Orden no encontrada",
+      throw crearErrorHttp(404, "Orden no encontrada.", {
+        codigo: "ORDEN_NO_ENCONTRADA",
       });
+    }
+
+    if (orden.archivada) {
+      throw crearErrorHttp(
+        409,
+        "No puedes modificar servicios de una orden archivada.",
+        { codigo: "ORDEN_ARCHIVADA" }
+      );
+    }
+
+    if (limpiarTexto(orden.estado).toUpperCase() === "ENTREGADO") {
+      throw crearErrorHttp(
+        409,
+        "La orden ya fue entregada y sus servicios no se pueden modificar.",
+        { codigo: "ORDEN_YA_ENTREGADA" }
+      );
     }
 
     const item = await OrdenServicioItem.findOne({
@@ -2318,11 +3778,13 @@ const actualizarItemOrden = async (req, res) => {
         id: req.params.itemId,
         ordenId: orden.id,
       },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     if (!item) {
-      return res.status(404).json({
-        error: "Item de servicio no encontrado",
+      throw crearErrorHttp(404, "Item de servicio no encontrado.", {
+        codigo: "ITEM_SERVICIO_NO_ENCONTRADO",
       });
     }
 
@@ -2333,15 +3795,17 @@ const actualizarItemOrden = async (req, res) => {
 
     if (
       alteraMonto &&
-      (orden.estado_pago === "PAGADO" || orden.estado === "ENTREGADO")
+      limpiarTexto(orden.estado_pago).toUpperCase() === "PAGADO"
     ) {
-      return res.status(400).json({
-        error:
-          "La orden ya esta pagada o entregada. Usa ajuste comercial para corregir montos.",
-      });
+      throw crearErrorHttp(
+        409,
+        "La orden ya esta pagada. Usa ajuste comercial para corregir montos.",
+        { codigo: "ORDEN_PAGADA" }
+      );
     }
 
     const payload = {};
+    let overrideGuardiaItem = null;
 
     ["tipo_servicio", "descripcion", "observaciones"].forEach(
       (campo) => {
@@ -2370,7 +3834,11 @@ const actualizarItemOrden = async (req, res) => {
           responsableResuelto.usuario &&
           limpiarTexto(item.responsable_id) !== responsableResuelto.id
         ) {
-          await validarGuardiaResponsable(responsableResuelto.usuario);
+          overrideGuardiaItem = await validarGuardiaResponsableUrgente({
+            req,
+            usuario: responsableResuelto.usuario,
+            modoUrgente: normalizarBoolean(orden.creado_en_modo_urgente),
+          });
         }
         aplicarResponsableResuelto(
           payload,
@@ -2438,32 +3906,109 @@ const actualizarItemOrden = async (req, res) => {
       payload.subtotal = calcularSubtotalItem(cantidadFinal, precioFinal);
     }
 
-    await item.update(payload);
+    await item.update(payload, { transaction });
+
+    if (overrideGuardiaItem) {
+      const payloadAuditoria = {};
+      anexarAuditoriasOverrideAlPayload({
+        orden,
+        payload: payloadAuditoria,
+        auditorias: [
+          {
+            req,
+            ...overrideGuardiaItem,
+            metadata: {
+              itemId: item.id,
+              responsable_id: overrideGuardiaItem.responsable_id,
+              responsable: overrideGuardiaItem.responsable,
+              pendientes_criticos: overrideGuardiaItem.pendientes_criticos,
+            },
+          },
+        ],
+      });
+      await orden.update(payloadAuditoria, { transaction });
+    }
+
+    const cierreTecnicoInvalidado =
+      Object.keys(payload).length > 0
+        ? await invalidarCierreTecnicoPorCambioServicio(orden, { transaction })
+        : null;
 
     const ordenActualizada = alteraMonto
-      ? await recalcularMontoOrdenPorItems(orden.id)
+      ? await recalcularMontoOrdenPorItems(orden.id, { transaction })
       : orden;
 
-    await registrarEventoOrdenDesdeReq(req, {
-      ordenId: orden.id,
-      tipo_evento: "ITEM_SERVICIO_ACTUALIZADO",
-      categoria: "SERVICIO",
-      titulo: "Item de servicio actualizado",
-      descripcion: "Se actualizo o modifico un servicio de la orden.",
-      origen: "ITEM_SERVICIO",
-      metadata: {
-        itemId: item.id,
-        tipo_servicio: item.tipo_servicio,
-        estado: item.estado,
+    await transaction.commit();
+    transaction = null;
+
+    const advertenciasOperativas = [];
+    if (overrideGuardiaItem) {
+      const eventoRegistrado = await registrarAuditoriaOverrideOrden({
+        req,
+        orden,
+        ...overrideGuardiaItem,
+        metadata: {
+          itemId: item.id,
+          responsable_id: overrideGuardiaItem.responsable_id,
+          responsable: overrideGuardiaItem.responsable,
+          pendientes_criticos: overrideGuardiaItem.pendientes_criticos,
+        },
+        bitacoraYaPersistida: true,
+      });
+      if (!eventoRegistrado) {
+        advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      }
+    }
+
+    if (cierreTecnicoInvalidado) {
+      advertenciasOperativas.push("CIERRE_TECNICO_REABIERTO");
+      await registrarEventoOrdenPostPersistenciaSeguro(
+        req,
+        {
+          ordenId: orden.id,
+          tipo_evento: "CIERRE_TECNICO_REABIERTO",
+          categoria: "OPERACION",
+          titulo: "Cierre tecnico reabierto",
+          descripcion:
+            "Se modifico un servicio despues del cierre tecnico; la orden debe validarse nuevamente.",
+          estado_anterior: cierreTecnicoInvalidado.estado_anterior,
+          estado_nuevo: cierreTecnicoInvalidado.estado_nuevo,
+          origen: "ITEM_SERVICIO",
+          metadata: { itemId: item.id },
+        },
+        advertenciasOperativas
+      );
+    }
+
+    await registrarEventoOrdenPostPersistenciaSeguro(
+      req,
+      {
+        ordenId: orden.id,
+        tipo_evento: "ITEM_SERVICIO_ACTUALIZADO",
+        categoria: "SERVICIO",
+        titulo: "Item de servicio actualizado",
+        descripcion: "Se actualizo o modifico un servicio de la orden.",
+        origen: "ITEM_SERVICIO",
+        metadata: {
+          itemId: item.id,
+          tipo_servicio: item.tipo_servicio,
+          estado: item.estado,
+        },
       },
-    });
+      advertenciasOperativas
+    );
 
     res.json({
       mensaje: "Item de servicio actualizado correctamente",
       item,
       orden: ordenActualizada,
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR ACTUALIZANDO ITEM DE ORDEN:", error);
     const controlado = responderErrorControlado(res, error);
     if (controlado) return;
@@ -2475,6 +4020,8 @@ const actualizarItemOrden = async (req, res) => {
 };
 
 const eliminarItemOrden = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
@@ -2482,18 +4029,27 @@ const eliminarItemOrden = async (req, res) => {
       return enviarErrorPermiso(res);
     }
 
-    const orden = await OrdenTrabajo.findByPk(req.params.id);
+    transaction = await sequelize.transaction();
+    const orden = await OrdenTrabajo.findByPk(req.params.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
 
     if (!orden) {
-      return res.status(404).json({
-        error: "Orden no encontrada",
+      throw crearErrorHttp(404, "Orden no encontrada.", {
+        codigo: "ORDEN_NO_ENCONTRADA",
       });
     }
 
-    if (orden.estado_pago === "PAGADO" || orden.estado === "ENTREGADO") {
-      return res.status(400).json({
-        error: "No puedes eliminar items de una orden pagada o entregada",
-      });
+    if (
+      limpiarTexto(orden.estado_pago).toUpperCase() === "PAGADO" ||
+      limpiarTexto(orden.estado).toUpperCase() === "ENTREGADO"
+    ) {
+      throw crearErrorHttp(
+        409,
+        "No puedes anular servicios de una orden pagada o entregada.",
+        { codigo: "ORDEN_COMERCIAL_CERRADA" }
+      );
     }
 
     const item = await OrdenServicioItem.findOne({
@@ -2501,11 +4057,13 @@ const eliminarItemOrden = async (req, res) => {
         id: req.params.itemId,
         ordenId: orden.id,
       },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     if (!item) {
-      return res.status(404).json({
-        error: "Item de servicio no encontrado",
+      throw crearErrorHttp(404, "Item de servicio no encontrado.", {
+        codigo: "ITEM_SERVICIO_NO_ENCONTRADO",
       });
     }
 
@@ -2516,35 +4074,78 @@ const eliminarItemOrden = async (req, res) => {
       .filter(Boolean)
       .join("\n");
 
-    await item.update({
-      estado: "ANULADO",
-      subtotal: 0,
-      observaciones,
-    });
-
-    const ordenActualizada = await recalcularMontoOrdenPorItems(orden.id);
-
-    await registrarEventoOrdenDesdeReq(req, {
-      ordenId: orden.id,
-      tipo_evento: "ITEM_SERVICIO_ACTUALIZADO",
-      categoria: "SERVICIO",
-      titulo: "Item de servicio actualizado",
-      descripcion: "Se actualizo o anulo un servicio de la orden.",
-      origen: "ITEM_SERVICIO",
-      metadata: {
-        itemId: item.id,
-        tipo_servicio: item.tipo_servicio,
-        estado: item.estado,
+    await item.update(
+      {
+        estado: "ANULADO",
+        subtotal: 0,
+        observaciones,
       },
+      { transaction }
+    );
+    const cierreTecnicoInvalidado =
+      await invalidarCierreTecnicoPorCambioServicio(orden, { transaction });
+
+    const ordenActualizada = await recalcularMontoOrdenPorItems(orden.id, {
+      transaction,
     });
+
+    await transaction.commit();
+    transaction = null;
+
+    const advertenciasOperativas = [];
+    if (cierreTecnicoInvalidado) {
+      advertenciasOperativas.push("CIERRE_TECNICO_REABIERTO");
+      await registrarEventoOrdenPostPersistenciaSeguro(
+        req,
+        {
+          ordenId: orden.id,
+          tipo_evento: "CIERRE_TECNICO_REABIERTO",
+          categoria: "OPERACION",
+          titulo: "Cierre tecnico reabierto",
+          descripcion:
+            "Se anulo un servicio despues del cierre tecnico; la orden debe validarse nuevamente.",
+          estado_anterior: cierreTecnicoInvalidado.estado_anterior,
+          estado_nuevo: cierreTecnicoInvalidado.estado_nuevo,
+          origen: "ITEM_SERVICIO",
+          metadata: { itemId: item.id },
+        },
+        advertenciasOperativas
+      );
+    }
+
+    await registrarEventoOrdenPostPersistenciaSeguro(
+      req,
+      {
+        ordenId: orden.id,
+        tipo_evento: "ITEM_SERVICIO_ACTUALIZADO",
+        categoria: "SERVICIO",
+        titulo: "Item de servicio actualizado",
+        descripcion: "Se actualizo o anulo un servicio de la orden.",
+        origen: "ITEM_SERVICIO",
+        metadata: {
+          itemId: item.id,
+          tipo_servicio: item.tipo_servicio,
+          estado: item.estado,
+        },
+      },
+      advertenciasOperativas
+    );
 
     res.json({
       mensaje: "Item de servicio anulado correctamente",
       item,
       orden: ordenActualizada,
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR ANULANDO ITEM DE ORDEN:", error);
+
+    const controlado = responderErrorControlado(res, error);
+    if (controlado) return;
 
     res.status(500).json({
       error: error.message,
@@ -3010,10 +4611,12 @@ const agregarBitacoraOrden = async (req, res) => {
 };
 
 const actualizarEstado = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
-    const orden = await OrdenTrabajo.findByPk(req.params.id);
+    let orden = await OrdenTrabajo.findByPk(req.params.id);
 
     if (!orden) {
       return res.status(404).json({
@@ -3021,7 +4624,19 @@ const actualizarEstado = async (req, res) => {
       });
     }
 
-    const estado = limpiarTexto(req.body.estado);
+    if (orden.archivada) {
+      return res.status(400).json({
+        error: "No puedes modificar una orden archivada",
+      });
+    }
+
+    const estadoSolicitado = limpiarTexto(req.body.estado);
+    const estadoNormalizado = estadoSolicitado.toUpperCase();
+    const estado = ["ENTREGADO", "LISTO_PARA_ENTREGA"].includes(
+      estadoNormalizado
+    )
+      ? estadoNormalizado
+      : estadoSolicitado;
 
     if (!estado) {
       return res.status(400).json({
@@ -3029,34 +4644,139 @@ const actualizarEstado = async (req, res) => {
       });
     }
 
-    const estadoAnteriorOrden = limpiarTexto(orden.estado);
-
     if (estado === "ENTREGADO" && !tieneRol(req, ROLES_PATCH_COMERCIAL)) {
       return res.status(403).json({
         error: "No tienes permisos para entregar ordenes por cambio de estado.",
       });
     }
 
+    transaction = await sequelize.transaction();
+
+    if (["LISTO_PARA_ENTREGA", "ENTREGADO"].includes(estado)) {
+      await bloquearArchivosFileServiceOrden(orden.id, transaction);
+    }
+
+    orden = await OrdenTrabajo.findByPk(orden.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!orden || orden.archivada) {
+      await transaction.rollback();
+      return res.status(409).json({
+        error: "ORDEN_NO_ACTIVA",
+        message: "La orden ya no esta activa para cambiar de estado.",
+      });
+    }
+
+    if (limpiarTexto(orden.estado).toUpperCase() === "ENTREGADO") {
+      await transaction.rollback();
+      return res.status(409).json({
+        error: "ORDEN_YA_ENTREGADA",
+        message:
+          "La orden ya fue entregada. Usa un flujo explícito de reapertura autorizado.",
+      });
+    }
+
+    const estadoAnteriorOrden = limpiarTexto(orden.estado);
+
     const payload = {
       estado,
     };
 
+    if (
+      limpiarTexto(estadoAnteriorOrden).toUpperCase() === "LISTO_PARA_ENTREGA" &&
+      limpiarTexto(estado).toUpperCase() !== "LISTO_PARA_ENTREGA"
+    ) {
+      payload.tecnico_finalizado_at = null;
+      payload.tecnico_finalizado_por = null;
+    }
+
+    let overrideRegularizacionCierre = null;
+    let overridesEntrega = {
+      overrideRegularizacion: null,
+      overrideComercial: null,
+    };
+
     if (estado === "LISTO_PARA_ENTREGA") {
-      await validarMaterialObligatorioOrden(orden.id);
-      payload.tecnico_finalizado_at = new Date();
-      payload.tecnico_finalizado_por = usuarioActual(req);
+      overrideRegularizacionCierre =
+        await validarRegularizacionUrgenteParaCierre({
+          req,
+          orden,
+          transaction,
+        });
+      await validarItemsServicioListosOrden(orden.id, { transaction });
+      await validarCierreTecnicoFileServiceOrden(orden.id, { transaction });
+      await validarMaterialObligatorioOrden(orden.id, { transaction });
+      payload.tecnico_finalizado_at = orden.tecnico_finalizado_at || new Date();
+      payload.tecnico_finalizado_por =
+        orden.tecnico_finalizado_por || usuarioActual(req);
     }
 
     if (estado === "ENTREGADO") {
+      overridesEntrega = await validarEntregaOrden({ req, orden, transaction });
       payload.entregado_at = new Date();
       payload.entregado_por = usuarioActual(req);
       payload.entregado_por_id = usuarioActualId(req) || null;
+      payload.observacion_cierre =
+        limpiarTexto(req.body.observacion_cierre) ||
+        limpiarTexto(orden.observacion_cierre) ||
+        `Orden entregada por ${usuarioActual(req)}`;
     }
 
-    await orden.update(payload);
+    const auditoriasOverrideEstado = [
+      ...(overrideRegularizacionCierre
+        ? [
+            {
+              req,
+              ...overrideRegularizacionCierre,
+              metadata: {
+                advertencias: overrideRegularizacionCierre.advertencias,
+                destino: "LISTO_PARA_ENTREGA",
+              },
+            },
+          ]
+        : []),
+      ...(overridesEntrega.overrideRegularizacion
+        ? [
+            {
+              req,
+              ...overridesEntrega.overrideRegularizacion,
+              metadata: {
+                advertencias: overridesEntrega.overrideRegularizacion.advertencias,
+                destino: "ENTREGADO",
+              },
+            },
+          ]
+        : []),
+      ...(overridesEntrega.overrideComercial
+        ? [
+            {
+              req,
+              ...overridesEntrega.overrideComercial,
+              metadata: {
+                destino: "ENTREGADO",
+                estado_pago: limpiarTexto(orden.estado_pago),
+              },
+            },
+          ]
+        : []),
+    ];
+    anexarAuditoriasOverrideAlPayload({
+      orden,
+      payload,
+      auditorias: auditoriasOverrideEstado,
+    });
+    await orden.update(payload, transaction ? { transaction } : undefined);
+
+    if (transaction) {
+      await transaction.commit();
+    }
+
+    const advertenciasOperativas = [];
 
     if (estadoAnteriorOrden !== estado) {
-      await registrarEventoOrdenDesdeReq(req, {
+      await registrarEventoOrdenPostPersistenciaSeguro(req, {
         ordenId: orden.id,
         tipo_evento: "ESTADO_CAMBIADO",
         categoria: "OPERACION",
@@ -3065,15 +4785,63 @@ const actualizarEstado = async (req, res) => {
         estado_anterior: estadoAnteriorOrden,
         estado_nuevo: estado,
         origen: "PATCH_ESTADO",
-      });
+      }, advertenciasOperativas);
     }
+
+    for (const auditoria of auditoriasOverrideEstado) {
+      const eventoRegistrado = await registrarAuditoriaOverrideOrden({
+        ...auditoria,
+        orden,
+        bitacoraYaPersistida: true,
+      });
+      if (!eventoRegistrado) {
+        advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      }
+    }
+
+    const esOrdenUrgente = normalizarBoolean(orden.creado_en_modo_urgente);
+    const regularizacion = esOrdenUrgente
+      ? await sincronizarRegularizacionPostPersistenciaSeguro(
+          orden.id,
+          req,
+          {
+            overrideAutorizado: Boolean(
+              overrideRegularizacionCierre ||
+                overridesEntrega.overrideRegularizacion
+            ),
+          },
+          advertenciasOperativas,
+          orden
+        )
+      : {
+          orden: await recargarOrdenPostPersistenciaSeguro(
+            orden,
+            advertenciasOperativas
+          ),
+          advertencias: [],
+        };
+    advertenciasOperativas.push(...(regularizacion.advertenciasOperativas || []));
 
     res.json({
       mensaje: "Estado actualizado correctamente",
-      orden,
+      orden: regularizacion.orden,
+      ...(esOrdenUrgente
+        ? {
+            requiere_regularizacion: regularizacion.advertencias.length > 0,
+            advertencias: regularizacion.advertencias,
+          }
+        : {}),
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR ACTUALIZANDO ESTADO:", error);
+
+    const controlado = responderErrorControlado(res, error);
+    if (controlado) return;
 
     res.status(error.statusCode || 500).json({
       error: error.message,
@@ -3152,6 +4920,8 @@ const registrarPago = async (req, res) => {
 };
 
 const cobrarYEntregar = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
@@ -3159,11 +4929,46 @@ const cobrarYEntregar = async (req, res) => {
       return enviarErrorPermiso(res);
     }
 
-    const orden = await OrdenTrabajo.findByPk(req.params.id);
+    transaction = await sequelize.transaction();
+    await bloquearArchivosFileServiceOrden(req.params.id, transaction);
+    const orden = await OrdenTrabajo.findByPk(req.params.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
 
     if (!orden) {
+      await transaction.rollback();
       return res.status(404).json({
         error: "Orden no encontrada",
+      });
+    }
+
+    if (orden.archivada) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: "No puedes cobrar ni entregar una orden archivada",
+      });
+    }
+
+    if (limpiarTexto(orden.estado).toUpperCase() === "ENTREGADO") {
+      const pagoYaConfirmado =
+        limpiarTexto(orden.estado_pago).toUpperCase() === "PAGADO" &&
+        normalizarDecimal(orden.monto_pagado, 0) > 0;
+      await transaction.rollback();
+
+      if (pagoYaConfirmado) {
+        return res.json({
+          mensaje: "La orden ya estaba cobrada y entregada.",
+          orden,
+          idempotente: true,
+          advertencias_operativas: [],
+        });
+      }
+
+      return res.status(409).json({
+        error: "ORDEN_YA_ENTREGADA",
+        message:
+          "La orden ya fue entregada. Registra el pago pendiente con el flujo de pago autorizado.",
       });
     }
 
@@ -3174,6 +4979,7 @@ const cobrarYEntregar = async (req, res) => {
     );
 
     if (montoPagado <= 0) {
+      await transaction.rollback();
       return res.status(400).json({
         error: "El monto pagado debe ser mayor a 0",
       });
@@ -3181,8 +4987,14 @@ const cobrarYEntregar = async (req, res) => {
 
     const estadoAnteriorOrden = limpiarTexto(orden.estado);
     const estadoPagoAnterior = limpiarTexto(orden.estado_pago);
+    const overridesEntrega = await validarEntregaOrden({
+      req,
+      orden,
+      pagoSeConfirmara: true,
+      transaction,
+    });
 
-    await orden.update({
+    const payloadEntrega = {
       estado: "ENTREGADO",
       estado_pago: "PAGADO",
       medio_pago: medioPago,
@@ -3199,9 +5011,30 @@ const cobrarYEntregar = async (req, res) => {
       observacion_cierre:
         limpiarTexto(req.body.observacion_cierre) ||
         `Orden cerrada comercialmente por ${usuarioActual(req)}`,
+    };
+    const auditoriasOverrideEntrega = overridesEntrega.overrideRegularizacion
+      ? [
+          {
+            req,
+            ...overridesEntrega.overrideRegularizacion,
+            metadata: {
+              advertencias: overridesEntrega.overrideRegularizacion.advertencias,
+              destino: "ENTREGADO",
+              pago_confirmado_en_operacion: true,
+            },
+          },
+        ]
+      : [];
+    anexarAuditoriasOverrideAlPayload({
+      orden,
+      payload: payloadEntrega,
+      auditorias: auditoriasOverrideEntrega,
     });
+    await orden.update(payloadEntrega, { transaction });
+    await transaction.commit();
+    const advertenciasOperativas = [];
 
-    await registrarEventoOrdenDesdeReq(req, {
+    await registrarEventoOrdenPostPersistenciaSeguro(req, {
       ordenId: orden.id,
       tipo_evento: "PAGO_CONFIRMADO",
       categoria: "COMERCIAL",
@@ -3213,9 +5046,9 @@ const cobrarYEntregar = async (req, res) => {
       metadata: {
         medio_pago: medioPago,
       },
-    });
+    }, advertenciasOperativas);
 
-    await registrarEventoOrdenDesdeReq(req, {
+    await registrarEventoOrdenPostPersistenciaSeguro(req, {
       ordenId: orden.id,
       tipo_evento: "ENTREGA_CONFIRMADA",
       categoria: "COMERCIAL",
@@ -3224,16 +5057,61 @@ const cobrarYEntregar = async (req, res) => {
       estado_anterior: estadoAnteriorOrden,
       estado_nuevo: "ENTREGADO",
       origen: "COBRAR_ENTREGAR",
-    });
+    }, advertenciasOperativas);
+
+    for (const auditoria of auditoriasOverrideEntrega) {
+      const eventoRegistrado = await registrarAuditoriaOverrideOrden({
+        ...auditoria,
+        orden,
+        bitacoraYaPersistida: true,
+      });
+      if (!eventoRegistrado) {
+        advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      }
+    }
+
+    const esOrdenUrgente = normalizarBoolean(orden.creado_en_modo_urgente);
+    const regularizacion = esOrdenUrgente
+      ? await sincronizarRegularizacionPostPersistenciaSeguro(
+          orden.id,
+          req,
+          {
+            overrideAutorizado: Boolean(overridesEntrega.overrideRegularizacion),
+          },
+          advertenciasOperativas,
+          orden
+        )
+      : {
+          orden: await recargarOrdenPostPersistenciaSeguro(
+            orden,
+            advertenciasOperativas
+          ),
+          advertencias: [],
+        };
+    advertenciasOperativas.push(...(regularizacion.advertenciasOperativas || []));
 
     res.json({
       mensaje: "Orden cobrada y entregada correctamente",
-      orden,
+      orden: regularizacion.orden,
+      ...(esOrdenUrgente
+        ? {
+            requiere_regularizacion: regularizacion.advertencias.length > 0,
+            advertencias: regularizacion.advertencias,
+          }
+        : {}),
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR COBRANDO Y ENTREGANDO:", error);
 
-    res.status(500).json({
+    const controlado = responderErrorControlado(res, error);
+    if (controlado) return;
+
+    res.status(error.statusCode || 500).json({
       error: error.message,
     });
   }
@@ -3258,4 +5136,5 @@ module.exports = {
   actualizarEstado,
   registrarPago,
   cobrarYEntregar,
+  validarOrdenListaParaEntregaDesdeFileService,
 };

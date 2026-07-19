@@ -2280,6 +2280,11 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
       porResponsable: {},
     },
     correccionesTecnicasPendientes: 0,
+    metricasUrgentes: {
+      urgentesSinRegularizar: 0,
+      colaPorAsignar: 0,
+      pendientesAntesEntrega: 0,
+    },
     atencionInmediata: [],
     semaforoOperativo: {
       estado: "Operacion normal",
@@ -2691,6 +2696,125 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         (!clienteId || !clientesExcluidosIds.has(String(clienteId)))
       );
     });
+
+    const ordenActivaV1 = (orden) =>
+      !esVerdadero(orden?.archivada) &&
+      !["ENTREGADO", "ANULADO", "CANCELADO"].includes(
+        String(orden?.estado || "").toUpperCase()
+      );
+    const ordenUrgenteV1 = (orden) => {
+      const origen = String(orden?.origen_recepcion || "").toUpperCase();
+      return (
+        esVerdadero(orden?.creado_en_modo_urgente) ||
+        esVerdadero(orden?.modo_urgente) ||
+        origen === "MODO_URGENTE_V1"
+      );
+    };
+    const ordenTieneEncargadoV1 = (orden) =>
+      [
+        orden?.responsable_tecnico_id,
+        orden?.diagnostico_asignado_a_id,
+        orden?.operador_ecu_asignado_a_id,
+        orden?.mecanico_asignado_a_id,
+        orden?.supervisor_asignado_a_id,
+        ...(Array.isArray(orden?.OrdenServicioItems)
+          ? orden.OrdenServicioItems.filter(
+              (item) => String(item?.estado || "").toUpperCase() !== "ANULADO"
+            ).map((item) => item?.responsable_id)
+          : []),
+      ].some(
+        (valor) =>
+          valor !== null && valor !== undefined && String(valor).trim() !== ""
+      );
+    const ordenUrgenteTieneDatosPendientesV1 = (orden) => {
+      const motivo = String(orden?.motivo_ingreso || "").trim();
+      const kilometraje = orden?.kilometraje;
+      const monto = orden?.monto_total;
+      const pendientesBackend =
+        orden?.regularizacion_pendientes ?? orden?.datos_pendientes;
+      const tienePendientesBackend = Array.isArray(pendientesBackend)
+        ? pendientesBackend.length > 0
+        : Boolean(String(pendientesBackend || "").trim());
+      const fotos = Array.isArray(orden?.FotoVehiculos)
+        ? orden.FotoVehiculos
+        : Array.isArray(orden?.FotosVehiculo)
+        ? orden.FotosVehiculo
+        : null;
+
+      return (
+        esVerdadero(orden?.requiere_regularizacion) ||
+        esVerdadero(orden?.regularizar_antes_de_entrega) ||
+        esVerdadero(orden?.regularizacion_pendiente) ||
+        tienePendientesBackend ||
+        kilometraje === null ||
+        kilometraje === undefined ||
+        String(kilometraje).trim() === "" ||
+        monto === null ||
+        monto === undefined ||
+        String(monto).trim() === "" ||
+        Number(monto) <= 0 ||
+        !motivo ||
+        motivo.toLowerCase().includes("pendiente de regularizar") ||
+        (fotos !== null && fotos.length === 0)
+      );
+    };
+    const ordenesActivasV1 = ordenesReales.filter(ordenActivaV1);
+    const ordenesUrgentesActivasV1 = ordenesActivasV1.filter(ordenUrgenteV1);
+    const archivosUrgentesActivosV1 = archivos.filter((archivo) => {
+      const estado = String(archivo?.estado || "").toUpperCase();
+      const activo =
+        !archivo?.archivado &&
+        !["FINALIZADO_TECNICO", "FINALIZADO", "ARCHIVADO"].includes(estado);
+      return (
+        activo &&
+        (esVerdadero(archivo?.creado_en_modo_urgente) ||
+          esVerdadero(archivo?.modo_urgente))
+      );
+    });
+    const archivoUrgenteTieneDatosPendientesV1 = (archivo) => {
+      const pendientes = archivo?.regularizacion_pendientes;
+      return (
+        esVerdadero(archivo?.requiere_regularizacion) ||
+        esVerdadero(archivo?.regularizar_antes_de_entrega) ||
+        (Array.isArray(pendientes)
+          ? pendientes.length > 0
+          : Boolean(String(pendientes || "").trim()))
+      );
+    };
+    const archivoTieneEncargadoV1 = (archivo) =>
+      [
+        archivo?.tuner_asignado_a_id,
+        archivo?.operador_ecu_asignado_a_id,
+        archivo?.slave_asignado_a_id,
+      ].some(
+        (valor) =>
+          valor !== null && valor !== undefined && String(valor).trim() !== ""
+      );
+    const metricasUrgentes = {
+      urgentesSinRegularizar:
+        ordenesUrgentesActivasV1.filter(ordenUrgenteTieneDatosPendientesV1)
+          .length +
+        archivosUrgentesActivosV1.filter(archivoUrgenteTieneDatosPendientesV1)
+          .length,
+      colaPorAsignar:
+        ordenesUrgentesActivasV1.filter(
+          (orden) => !ordenTieneEncargadoV1(orden)
+        ).length +
+        archivosUrgentesActivosV1.filter(
+          (archivo) => !archivoTieneEncargadoV1(archivo)
+        ).length,
+      pendientesAntesEntrega:
+        ordenesUrgentesActivasV1.filter(
+          (orden) =>
+            ordenUrgenteTieneDatosPendientesV1(orden) &&
+            esVerdadero(orden?.regularizar_antes_de_entrega)
+        ).length +
+        archivosUrgentesActivosV1.filter(
+          (archivo) =>
+            archivoUrgenteTieneDatosPendientesV1(archivo) &&
+            esVerdadero(archivo?.regularizar_antes_de_entrega)
+        ).length,
+    };
 
     const comercial = ordenesReales.reduce(
       (acc, orden) => {
@@ -3344,6 +3468,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
         porResponsable: processGuardPorResponsable,
       },
       correccionesTecnicasPendientes,
+      metricasUrgentes,
       atencionInmediata,
       semaforoOperativo,
       colaTrabajo,
@@ -3946,6 +4071,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           title="Tus tareas de hoy"
           data={misPendientes.data}
           error={misPendientes.error}
+          metricasUrgentes={stats.metricasUrgentes}
         />
       )}
 
@@ -3996,6 +4122,7 @@ function Dashboard({ usuario, actualizarNotificaciones }) {
           title={esSupervisor ? "Pendientes y responsables" : "Tus tareas de hoy"}
           data={misPendientes.data}
           error={misPendientes.error}
+          metricasUrgentes={stats.metricasUrgentes}
         />
       )}
 
@@ -4780,8 +4907,55 @@ const textoAccionSimple = (url = "") => {
   return "Revisar";
 };
 
-const MisPendientesSection = ({ title = "Tus tareas de hoy", data, error }) => {
+const MisPendientesSection = ({
+  title = "Tus tareas de hoy",
+  data,
+  error,
+  metricasUrgentes,
+}) => {
   const resumen = data?.resumen || {};
+  const metricasRespuesta =
+    data?.metricas_urgentes || data?.metricasUrgentes || data?.resumen_urgente || {};
+  const primeraMetricaDisponible = (...valores) =>
+    valores.find((valor) => valor !== undefined && valor !== null);
+  const tarjetasUrgentes = [
+    [
+      "Urgentes sin regularizar",
+      primeraMetricaDisponible(
+        metricasRespuesta.urgentes_sin_regularizar,
+        metricasRespuesta.urgentesSinRegularizar,
+        resumen.urgentes_sin_regularizar,
+        metricasUrgentes?.urgentesSinRegularizar,
+        0
+      ),
+      "border-red-500 bg-red-950/70 text-red-100",
+    ],
+    [
+      "Cola por asignar",
+      primeraMetricaDisponible(
+        metricasRespuesta.cola_por_asignar,
+        metricasRespuesta.colaPorAsignar,
+        resumen.por_asignar,
+        resumen.cola_por_asignar,
+        metricasUrgentes?.colaPorAsignar,
+        0
+      ),
+      "border-amber-400 bg-amber-950/60 text-amber-100",
+    ],
+    [
+      "Pendientes antes de entregar",
+      primeraMetricaDisponible(
+        metricasRespuesta.pendientes_antes_de_entrega,
+        metricasRespuesta.pendientes_antes_entrega,
+        metricasRespuesta.pendientesAntesEntrega,
+        resumen.pendientes_antes_de_entrega,
+        resumen.pendientes_antes_entrega,
+        metricasUrgentes?.pendientesAntesEntrega,
+        0
+      ),
+      "border-yellow-300 bg-yellow-950/50 text-yellow-100",
+    ],
+  ];
   const pendientes = Array.isArray(data?.pendientes) ? data.pendientes.slice(0, 6) : [];
   const hayCriticos = pendientes.some(
     (pendiente) => String(pendiente.severidad || "").toUpperCase() === "CRITICO"
@@ -4826,9 +5000,20 @@ const MisPendientesSection = ({ title = "Tus tareas de hoy", data, error }) => {
 
       {hayCriticos && (
         <div className="mt-4 rounded-xl border-2 border-red-500 bg-red-100 p-3 text-xs font-black uppercase text-red-900">
-          Necesitas resolver las tareas urgentes antes de recibir nuevos trabajos.
+          Prioriza estas tareas urgentes y define quién tiene la pelota.
         </div>
       )}
+
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+        {tarjetasUrgentes.map(([label, valor, clase]) => (
+          <div key={label} className={`rounded-2xl border-2 p-4 ${clase}`}>
+            <p className="text-[10px] font-black uppercase opacity-80">{label}</p>
+            <p className="mt-1 text-3xl font-black">
+              {numeroDashboard(valor)}
+            </p>
+          </div>
+        ))}
+      </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {tarjetas.map(([label, valor]) => (

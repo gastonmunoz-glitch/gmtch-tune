@@ -235,6 +235,41 @@ const normalizarLista = (valor) => {
   return [];
 };
 
+const normalizarAdvertenciasRespuesta = (data) => {
+  const valores = [
+    data?.advertencias,
+    data?.advertencias_operativas,
+    data?.warnings,
+    data?.advertencia,
+    data?.warning,
+  ];
+
+  const etiquetas = {
+    KILOMETRAJE_PENDIENTE: "Falta kilometraje",
+    SINTOMAS_PENDIENTES: "Faltan síntomas del cliente",
+    MONTO_PENDIENTE: "Falta monto",
+    DETALLES_PENDIENTES: "Faltan detalles del trabajo",
+    FOTOS_PENDIENTES: "Faltan fotos de ingreso",
+    RESPONSABLE_PENDIENTE: "Falta asignar encargado",
+    DIAGNOSTICO_PENDIENTE: "Falta diagnóstico",
+    AUDITORIA_OPERATIVA_PENDIENTE:
+      "Trabajo guardado; quedó pendiente registrar parte de la auditoría",
+    NOTIFICACION_INTERNA_PENDIENTE:
+      "Trabajo guardado; quedó pendiente una notificación interna",
+  };
+
+  return valores
+    .flatMap((valor) => (Array.isArray(valor) ? valor : valor ? [valor] : []))
+    .map((valor) => {
+      const texto =
+        typeof valor === "string"
+          ? valor
+          : valor?.message || valor?.mensaje || valor?.detalle || "";
+      return etiquetas[String(texto).trim().toUpperCase()] || texto;
+    })
+    .filter(Boolean);
+};
+
 const resumenDtcSnapshot = (dtcs = []) =>
   normalizarLista(dtcs)
     .map((item) => item?.codigo || item)
@@ -335,31 +370,23 @@ const usuarioPuedeCerrarLegacy = () =>
 const requiereModParaCierre = (archivo) => {
   const estado = String(archivo?.estado || "").toUpperCase();
   const servicios = normalizarLista(archivo?.servicios_solicitados)
-    .map((servicio) => String(servicio?.value || servicio || "").toUpperCase())
-    .join(" ");
-  const servicioTexto = [
+    .map((servicio) => String(servicio?.value || servicio || "").toUpperCase());
+  const valoresServicio = [
     archivo?.tipo_servicio,
     archivo?.servicio_principal,
-    servicios,
+    ...servicios,
   ]
     .map((valor) => String(valor || "").toUpperCase())
-    .join(" ");
+    .filter(Boolean);
 
   if (archivo?.archivo_modificado) return true;
-  if (
-    [
-      "MODIFICADO_LISTO",
-      "NOTIFICADO_SLAVE",
-      "POST_ESCRITURA_PENDIENTE",
-      "POST_ESCRITURA_OK",
-    ].includes(estado)
-  ) {
+  if (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE"].includes(estado)) {
     return true;
   }
 
-  if (!servicioTexto.trim()) return false;
+  if (!valoresServicio.length) return false;
 
-  return ![
+  const marcadoresSoloRevision = [
     "READINESS",
     "CHECKSUM",
     "BACKUP_ORIGINAL",
@@ -367,7 +394,35 @@ const requiereModParaCierre = (archivo) => {
     "REVISION",
     "DIAGNOSTICO",
     "LECTURA",
-  ].some((marcador) => servicioTexto.includes(marcador));
+  ];
+  const marcadoresModificacion = [
+    "STAGE",
+    "DPF",
+    "FAP",
+    "EGR",
+    "ADBLUE",
+    "SCR",
+    "DTC OFF",
+    "IMMO",
+    "POPS",
+    "VMAX",
+    "V-MAX",
+    "TORQUE",
+    "TUNING",
+  ];
+
+  if (
+    valoresServicio.some((valor) =>
+      marcadoresModificacion.some((marcador) => valor.includes(marcador))
+    )
+  ) {
+    return true;
+  }
+
+  return valoresServicio.some(
+    (valor) =>
+      !marcadoresSoloRevision.some((marcador) => valor.includes(marcador))
+  );
 };
 
 const checklistCierreTecnico = (archivo, cierreForm = {}, opciones = {}) => {
@@ -376,11 +431,13 @@ const checklistCierreTecnico = (archivo, cierreForm = {}, opciones = {}) => {
     postEstado === "NO_APLICA" && limpiar(archivo?.post_escritura_observacion);
   const responsableIdOk = Boolean(
     limpiar(archivo?.tuner_asignado_a_id) ||
-      limpiar(archivo?.operador_ecu_asignado_a_id)
+      limpiar(archivo?.operador_ecu_asignado_a_id) ||
+      limpiar(archivo?.slave_asignado_a_id)
   );
   const responsableTextoOk = Boolean(
     limpiar(archivo?.tuner_asignado_a) ||
-      limpiar(archivo?.operador_ecu_asignado_a)
+      limpiar(archivo?.operador_ecu_asignado_a) ||
+      limpiar(archivo?.slave_asignado_a)
   );
   const cierreLegacyAutorizado =
     opciones.permitirLegacySinResponsable === true &&
@@ -422,7 +479,9 @@ const checklistCierreTecnico = (archivo, cierreForm = {}, opciones = {}) => {
     {
       key: "dtc",
       label: "DTC final revisado",
-      ok: Boolean(limpiar(archivo?.post_escritura_dtc) || archivo?.post_escritura_sin_dtc),
+      ok:
+        Boolean(postNoAplica) ||
+        Boolean(limpiar(archivo?.post_escritura_dtc) || archivo?.post_escritura_sin_dtc),
     },
     {
       key: "observacion",
@@ -488,6 +547,10 @@ const obtenerClienteVehiculo = (archivo) => {
 };
 
 export default function ArchivosECUPage() {
+  const rolUsuario = String(localStorage.getItem("rol") || "").toUpperCase();
+  const puedeUrgentePorAsignar = ["OWNER", "ADMIN", "SUPERVISOR"].includes(
+    rolUsuario
+  );
   const [searchParams] = useSearchParams();
   const archivoIdQuery = searchParams.get("archivoId");
   const ordenIdQuery = searchParams.get("ordenId");
@@ -501,6 +564,7 @@ export default function ArchivosECUPage() {
 
   const [mensaje, setMensaje] = useState("");
   const [error, setError] = useState("");
+  const [advertencia, setAdvertencia] = useState("");
   const [bloqueoDiagnostico, setBloqueoDiagnostico] = useState(null);
   const [contextoSolicitud, setContextoSolicitud] = useState(null);
   const [cargandoContexto, setCargandoContexto] = useState(false);
@@ -508,6 +572,7 @@ export default function ArchivosECUPage() {
   const [filtro, setFiltro] = useState("PENDIENTES");
   const [busqueda, setBusqueda] = useState("");
   const [archivoSeleccionadoId, setArchivoSeleccionadoId] = useState("");
+  const [modoUrgenteNuevo, setModoUrgenteNuevo] = useState(false);
 
   const [nuevo, setNuevo] = useState({
     ordenId: "",
@@ -517,6 +582,7 @@ export default function ArchivosECUPage() {
     servicios_preset: "",
     servicio_principal: "",
     observacion_servicios: "",
+    motivo_urgencia: "",
     diagnosticoId: "",
     dtc_snapshot: [],
     dtc_resumen: "",
@@ -536,6 +602,8 @@ export default function ArchivosECUPage() {
     operador_ecu_asignado_a: "",
     slave_asignado_a_id: "",
     slave_asignado_a: "",
+    override_guardia: false,
+    motivo_override: "",
     archivo: null,
   });
 
@@ -786,6 +854,8 @@ export default function ArchivosECUPage() {
       ...prev,
       [responsable.campoId]: usuario?.id || "",
       [responsable.campo]: usuario ? snapshotUsuario(usuario) : "",
+      override_guardia: false,
+      motivo_override: "",
     }));
   };
 
@@ -797,6 +867,14 @@ export default function ArchivosECUPage() {
 
     if (data?.bloqueo === "DIAGNOSTICO_OBLIGATORIO") {
       setBloqueoDiagnostico(data);
+      if (modoUrgenteNuevo) {
+        setError("");
+        setAdvertencia(
+          data.message ||
+            "No se pudo guardar la urgencia. El diagnóstico quedó señalado como pendiente; revisa los faltantes e intenta nuevamente."
+        );
+        return;
+      }
       setError(
         data.message ||
           "Falta diagnóstico antes de crear el trabajo de archivos ECU. Completa ese paso para continuar."
@@ -851,6 +929,7 @@ export default function ArchivosECUPage() {
   const limpiarMensajes = () => {
     setMensaje("");
     setError("");
+    setAdvertencia("");
     setBloqueoDiagnostico(null);
   };
 
@@ -951,6 +1030,11 @@ export default function ArchivosECUPage() {
       return;
     }
 
+    if (modoUrgenteNuevo && !limpiar(nuevo.motivo_urgencia)) {
+      setError("Falta indicar el motivo de la urgencia antes de enviar.");
+      return;
+    }
+
     if (
       serviciosSeleccionados.some((servicio) =>
         ["CUSTOM", "OTRO"].includes(String(servicio).toUpperCase())
@@ -961,8 +1045,34 @@ export default function ArchivosECUPage() {
       return;
     }
 
-    if (!nuevo.tuner_asignado_a_id && !nuevo.operador_ecu_asignado_a_id) {
-      setError("Debes asignar Tuner/Master u Operador ECU activo.");
+    const tieneTunerUOperador = Boolean(
+      nuevo.tuner_asignado_a_id || nuevo.operador_ecu_asignado_a_id
+    );
+    const tieneResponsableUrgente = Boolean(
+      tieneTunerUOperador || nuevo.slave_asignado_a_id
+    );
+
+    if (
+      (!modoUrgenteNuevo && !tieneTunerUOperador) ||
+      (modoUrgenteNuevo &&
+        !tieneResponsableUrgente &&
+        !puedeUrgentePorAsignar)
+    ) {
+      setError(
+        modoUrgenteNuevo
+          ? "Debes asignar un encargado activo o pedir a jefatura dejarlo por asignar."
+          : "Debes asignar Tuner/Master u Operador ECU activo."
+      );
+      return;
+    }
+
+    if (
+      modoUrgenteNuevo &&
+      puedeUrgentePorAsignar &&
+      nuevo.override_guardia &&
+      !limpiar(nuevo.motivo_override)
+    ) {
+      setError("Debes justificar el override de guardia.");
       return;
     }
 
@@ -973,6 +1083,13 @@ export default function ArchivosECUPage() {
 
     try {
       setGuardando(true);
+
+      const diagnosticoPendiente = !nuevo.diagnosticoId;
+      if (modoUrgenteNuevo && diagnosticoPendiente) {
+        setAdvertencia(
+          "Diagnóstico pendiente. Se intentará guardar como urgente y deberá regularizarse antes de la prueba final."
+        );
+      }
 
       const fd = new FormData();
 
@@ -992,16 +1109,26 @@ export default function ArchivosECUPage() {
       fd.set("tipo_servicio", tipoServicio);
       fd.set("servicio_principal", tipoServicio);
       fd.set("dtc_resumen", nuevo.dtc_resumen || resumenDtcSnapshot(nuevo.dtc_snapshot));
+      fd.set("modo_urgente", String(modoUrgenteNuevo));
+      fd.set("motivo_urgencia", modoUrgenteNuevo ? nuevo.motivo_urgencia : "");
 
       fd.append("archivo", nuevo.archivo);
 
-      await api.post("/archivos-ecu", fd, {
+      const res = await api.post("/archivos-ecu", fd, {
         headers: {
           "Content-Type": "multipart/form-data",
         },
       });
 
       setMensaje("Archivo original guardado. El trabajo de archivos ECU fue creado.");
+      const advertenciasBackend = normalizarAdvertenciasRespuesta(res.data);
+      if (advertenciasBackend.length > 0) {
+        setAdvertencia(advertenciasBackend.join(" · "));
+      } else if (modoUrgenteNuevo && diagnosticoPendiente) {
+        setAdvertencia(
+          "Trabajo urgente creado con diagnóstico pendiente. Regularízalo antes de registrar la prueba final."
+        );
+      }
 
       setNuevo({
         ordenId: "",
@@ -1011,6 +1138,7 @@ export default function ArchivosECUPage() {
         servicios_preset: "",
         servicio_principal: "",
         observacion_servicios: "",
+        motivo_urgencia: "",
         diagnosticoId: "",
         dtc_snapshot: [],
         dtc_resumen: "",
@@ -1030,8 +1158,11 @@ export default function ArchivosECUPage() {
         operador_ecu_asignado_a: "",
         slave_asignado_a_id: "",
         slave_asignado_a: "",
+        override_guardia: false,
+        motivo_override: "",
         archivo: null,
       });
+      setModoUrgenteNuevo(false);
 
       e.target.reset();
 
@@ -1172,15 +1303,77 @@ export default function ArchivosECUPage() {
     }
   };
 
-  const asignarResponsableFileService = async (archivoId, responsable, usuarioId) => {
+  const asignarResponsableFileService = async (archivo, responsable, usuarioId) => {
     limpiarMensajes();
     const usuario = buscarUsuarioPorId(usuarioId);
+    let extraInicial = {};
+
+    if (!usuario && archivo.creado_en_modo_urgente === true) {
+      const conservaOtroEncargado = RESPONSABLES_FILE_SERVICE.some(
+        (item) =>
+          item.campoId !== responsable.campoId &&
+          Boolean(limpiar(archivo[item.campoId]))
+      );
+
+      if (!conservaOtroEncargado) {
+        if (!puedeUrgentePorAsignar) {
+          setError("Solo jefatura puede dejar una urgencia por asignar.");
+          return;
+        }
+
+        const motivo = limpiar(
+          window.prompt(
+            "Motivo obligatorio para dejar este File Service urgente por asignar:"
+          )
+        );
+        if (!motivo) {
+          setError("No se quitó el encargado: debes indicar un motivo.");
+          return;
+        }
+        extraInicial = { motivo_override: motivo };
+      }
+    }
 
     try {
-      await api.patch(`/archivos-ecu/${archivoId}`, {
-        [responsable.campoId]: usuario?.id || "",
-        [responsable.campo]: usuario ? snapshotUsuario(usuario) : "",
-      });
+      const ejecutarAsignacion = (extra = {}) =>
+        api.patch(`/archivos-ecu/${archivo.id}`, {
+          [responsable.campoId]: usuario?.id || "",
+          [responsable.campo]: usuario ? snapshotUsuario(usuario) : "",
+          ...extra,
+        });
+
+      try {
+        await ejecutarAsignacion(extraInicial);
+      } catch (errorInicial) {
+        const data = errorInicial.response?.data || {};
+        const codigo = String(data.error || data.codigo || "").toUpperCase();
+        if (
+          codigo !== "RESPONSABLE_BLOQUEADO" ||
+          archivo.creado_en_modo_urgente !== true ||
+          !puedeUrgentePorAsignar ||
+          !usuario
+        ) {
+          throw errorInicial;
+        }
+
+        const confirmar = window.confirm(
+          `${data.message || "Este encargado tiene pendientes críticos."}\n\n¿Asignarlo de todas formas a esta urgencia?`
+        );
+        if (!confirmar) return;
+
+        const motivo = limpiar(
+          window.prompt("Escribe el motivo obligatorio para dejar trazabilidad:")
+        );
+        if (!motivo) {
+          setError("No se aplicó el override: debes escribir un motivo.");
+          return;
+        }
+
+        await ejecutarAsignacion({
+          override_guardia: true,
+          motivo_override: motivo,
+        });
+      }
 
       setMensaje("Encargado actualizado correctamente.");
       await cargarDatos();
@@ -1366,7 +1559,11 @@ export default function ArchivosECUPage() {
       return;
     }
 
-    if (!form.post_escritura_sin_dtc && !limpiar(form.post_escritura_dtc)) {
+    if (
+      form.post_escritura_estado !== "NO_APLICA" &&
+      !form.post_escritura_sin_dtc &&
+      !limpiar(form.post_escritura_dtc)
+    ) {
       setError(
         "Ingresa los códigos de falla finales o marca que no hay códigos."
       );
@@ -1432,6 +1629,8 @@ export default function ArchivosECUPage() {
     const form = {
       resultado_tecnico: "OK",
       observacion_cierre_tecnico: "",
+      override_regularizacion: false,
+      motivo_override: "",
       ...(cierreTecnicoForms[archivo.id] || {}),
     };
 
@@ -1457,9 +1656,21 @@ export default function ArchivosECUPage() {
       return;
     }
 
+    if (
+      form.override_regularizacion &&
+      (!puedeUrgentePorAsignar || !limpiar(form.motivo_override))
+    ) {
+      setError(
+        puedeUrgentePorAsignar
+          ? "Debes justificar el override de regularización."
+          : "Tu rol no puede autorizar un cierre con regularización pendiente."
+      );
+      return;
+    }
+
     const confirmar = window.confirm(
       form.resultado_tecnico === "OK"
-        ? "¿Confirmas cierre técnico OK? La orden quedará lista para entrega comercial, pero no se marcará pagada ni entregada."
+        ? "¿Confirmas cierre técnico OK? La orden solo quedará lista si además cumple regularización, material y los demás controles."
         : "¿Confirmas registrar resultado técnico no OK? El proceso seguirá pendiente hasta resolver."
     );
 
@@ -1514,6 +1725,8 @@ export default function ArchivosECUPage() {
     const cierreForm = {
       resultado_tecnico: "OK",
       observacion_cierre_tecnico: archivo.observacion_cierre_tecnico || "",
+      override_regularizacion: false,
+      motivo_override: "",
       ...(cierreTecnicoForms[archivo.id] || {}),
     };
     const faltantes = checklistCierreTecnico(archivo, cierreForm, {
@@ -1529,6 +1742,14 @@ export default function ArchivosECUPage() {
       return;
     }
 
+    if (
+      cierreForm.override_regularizacion &&
+      (!puedeUrgentePorAsignar || !limpiar(cierreForm.motivo_override))
+    ) {
+      setError("Debes tener rol de jefatura y justificar el override.");
+      return;
+    }
+
     const confirmar = window.confirm(
       "¿Confirmas que el trabajo técnico está terminado? Esto no confirma pago ni entrega."
     );
@@ -1540,6 +1761,8 @@ export default function ArchivosECUPage() {
         estado: "FINALIZADO_TECNICO",
         correccion_pendiente: false,
         observacion_cierre_tecnico: cierreForm.observacion_cierre_tecnico,
+        override_regularizacion: cierreForm.override_regularizacion === true,
+        motivo_override: cierreForm.motivo_override || undefined,
       });
 
       setMensaje("Trabajo técnico terminado. Quedó listo para el siguiente paso.");
@@ -1628,6 +1851,22 @@ export default function ArchivosECUPage() {
           </div>
         )}
 
+        {advertencia && (
+          <div className="rounded-2xl border border-amber-400/50 bg-amber-500/10 p-4 text-amber-100 space-y-3">
+            <p className="font-semibold">{advertencia}</p>
+            {modoUrgenteNuevo && bloqueoDiagnostico?.faltantes?.length > 0 && (
+              <div>
+                <p className="text-sm font-bold">Pendiente de regularizar:</p>
+                <ul className="mt-1 list-disc list-inside text-sm">
+                  {bloqueoDiagnostico.faltantes.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-500/10 border border-red-500/30 text-red-200 p-4 rounded-2xl space-y-3">
             <p className="font-semibold">{error}</p>
@@ -1658,6 +1897,45 @@ export default function ArchivosECUPage() {
           <h2 className="text-xl font-semibold mb-4">Nuevo trabajo de archivos ECU</h2>
 
           <form onSubmit={crearArchivo} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div
+              className={`md:col-span-3 rounded-2xl border p-4 ${
+                modoUrgenteNuevo
+                  ? "border-red-400 bg-red-500/10"
+                  : "border-slate-700 bg-slate-950/60"
+              }`}
+            >
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={modoUrgenteNuevo}
+                  onChange={(e) => {
+                    const activo = e.target.checked;
+                    setModoUrgenteNuevo(activo);
+                    setAdvertencia("");
+                    setNuevo((prev) => ({
+                      ...prev,
+                      override_guardia: activo ? prev.override_guardia : false,
+                      motivo_override: activo ? prev.motivo_override : "",
+                      prioridad: activo
+                        ? "URGENTE"
+                        : prev.prioridad === "URGENTE"
+                        ? "MEDIA"
+                        : prev.prioridad,
+                    }));
+                  }}
+                  className="mt-1 h-4 w-4 accent-red-600"
+                />
+                <span>
+                  <span className="block text-sm font-black uppercase text-white">
+                    Trabajo urgente
+                  </span>
+                  <span className="mt-1 block text-xs font-semibold text-slate-300">
+                    Exige archivo original, servicio y motivo. Si falta diagnóstico, quedará señalado para regularizar.
+                  </span>
+                </span>
+              </label>
+            </div>
+
             <div className="md:col-span-3">
               <label className="text-xs text-slate-400 ml-1">Orden de trabajo</label>
               <select
@@ -1709,9 +1987,16 @@ export default function ArchivosECUPage() {
                     )}
                   </div>
                 ) : (
-                  <p className="text-xs font-bold uppercase text-yellow-100">
-                    No hay diagnostico registrado para importar DTC.
-                  </p>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase text-yellow-100">
+                      No hay diagnostico registrado para importar DTC.
+                    </p>
+                    {modoUrgenteNuevo && (
+                      <p className="rounded-xl border border-amber-400/50 bg-amber-500/10 p-3 text-xs font-black uppercase text-amber-100">
+                        Diagnóstico pendiente · regularizar antes de la prueba final.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -1719,7 +2004,8 @@ export default function ArchivosECUPage() {
             <div>
               <label className="text-xs text-slate-400 ml-1">Prioridad</label>
               <select
-                value={nuevo.prioridad}
+                value={modoUrgenteNuevo ? "URGENTE" : nuevo.prioridad}
+                disabled={modoUrgenteNuevo}
                 onChange={(e) =>
                   setNuevo((prev) => ({ ...prev, prioridad: e.target.value }))
                 }
@@ -1739,7 +2025,11 @@ export default function ArchivosECUPage() {
                     ¿Quién tiene la tarea?
                   </p>
                   <p className="text-[11px] text-slate-500">
-                    Debe existir Tuner/Master u Operador ECU asignado antes de enviar.
+                    {modoUrgenteNuevo
+                      ? puedeUrgentePorAsignar
+                        ? "Puedes elegir Tuner/Master, Operador ECU o Slave, o dejarlo por asignar con motivo."
+                        : "Elige Tuner/Master, Operador ECU o Slave activo antes de enviar."
+                      : "Debe existir Tuner/Master u Operador ECU asignado antes de enviar."}
                   </p>
                 </div>
               </div>
@@ -1774,6 +2064,54 @@ export default function ArchivosECUPage() {
                   );
                 })}
               </div>
+
+              {modoUrgenteNuevo &&
+                puedeUrgentePorAsignar &&
+                !nuevo.tuner_asignado_a_id &&
+                !nuevo.operador_ecu_asignado_a_id &&
+                !nuevo.slave_asignado_a_id && (
+                  <p className="mt-3 rounded-xl border border-amber-400/50 bg-amber-500/10 p-3 text-xs font-black uppercase text-amber-100">
+                    Por asignar · jefatura debe definir encargado antes del cierre técnico o la entrega.
+                  </p>
+                )}
+
+              {modoUrgenteNuevo &&
+                puedeUrgentePorAsignar &&
+                (nuevo.tuner_asignado_a_id ||
+                  nuevo.operador_ecu_asignado_a_id ||
+                  nuevo.slave_asignado_a_id) && (
+                  <div className="mt-3 rounded-xl border border-red-400/50 bg-red-500/10 p-3">
+                    <label className="flex items-start gap-2 text-xs font-black uppercase text-red-100">
+                      <input
+                        type="checkbox"
+                        checked={nuevo.override_guardia === true}
+                        onChange={(e) =>
+                          setNuevo((prev) => ({
+                            ...prev,
+                            override_guardia: e.target.checked,
+                            motivo_override: e.target.checked
+                              ? prev.motivo_override
+                              : "",
+                          }))
+                        }
+                      />
+                      Autorizar asignación aunque el encargado tenga bloqueos críticos
+                    </label>
+                    {nuevo.override_guardia && (
+                      <textarea
+                        value={nuevo.motivo_override || ""}
+                        onChange={(e) =>
+                          setNuevo((prev) => ({
+                            ...prev,
+                            motivo_override: e.target.value,
+                          }))
+                        }
+                        placeholder="Motivo obligatorio del override"
+                        className="mt-3 w-full rounded-xl border border-red-400 bg-slate-950 p-3 text-sm text-white"
+                      />
+                    )}
+                  </div>
+                )}
             </div>
 
             <div className="md:col-span-3 space-y-4">
@@ -1842,6 +2180,25 @@ export default function ArchivosECUPage() {
                   ))}
                 </div>
               </div>
+
+              {modoUrgenteNuevo && (
+                <div className="rounded-2xl border border-red-400/50 bg-red-500/10 p-4">
+                  <label className="text-xs font-black uppercase text-red-100">
+                    Motivo de la urgencia *
+                  </label>
+                  <input
+                    value={nuevo.motivo_urgencia}
+                    onChange={(e) =>
+                      setNuevo((prev) => ({
+                        ...prev,
+                        motivo_urgencia: e.target.value,
+                      }))
+                    }
+                    placeholder="Explica por qué debe atenderse de inmediato"
+                    className="mt-2 w-full rounded-xl border border-red-400 bg-slate-950 p-3 outline-none focus:border-red-300"
+                  />
+                </div>
+              )}
 
               {normalizarLista(nuevo.servicios_solicitados).some((servicio) =>
                 ["CUSTOM", "OTRO"].includes(String(servicio).toUpperCase())
@@ -1972,7 +2329,7 @@ export default function ArchivosECUPage() {
 
             <div className="md:col-span-3">
               <label className="text-xs text-slate-400 ml-1">
-                Archivo original
+                Archivo original *
               </label>
               <input
                 type="file"
@@ -2030,8 +2387,9 @@ export default function ArchivosECUPage() {
               </button>
 
               <p className="text-xs text-slate-500 mt-3">
-                Antes de crear el trabajo debe existir un diagnóstico con scanner y
-                códigos de falla, o indicar que no hay códigos.
+                {modoUrgenteNuevo
+                  ? "Urgente: archivo, servicio y motivo son obligatorios. El diagnóstico pendiente se mostrará para regularizar."
+                  : "Antes de crear el trabajo debe existir un diagnóstico con scanner y códigos de falla, o indicar que no hay códigos."}
               </p>
             </div>
           </form>
@@ -2230,6 +2588,8 @@ export default function ArchivosECUPage() {
                 resultado_tecnico: archivo.resultado_tecnico || "OK",
                 observacion_cierre_tecnico:
                   archivo.observacion_cierre_tecnico || "",
+                override_regularizacion: false,
+                motivo_override: "",
                 ...(cierreTecnicoForms[archivo.id] || {}),
               };
 
@@ -2243,11 +2603,13 @@ export default function ArchivosECUPage() {
               const puedeFinalizar = faltantesCierreOk.length === 0;
               const legacySinResponsableId =
                 !limpiar(archivo.tuner_asignado_a_id) &&
-                !limpiar(archivo.operador_ecu_asignado_a_id);
+                !limpiar(archivo.operador_ecu_asignado_a_id) &&
+                !limpiar(archivo.slave_asignado_a_id);
               const legacySinResponsable =
                 legacySinResponsableId &&
                 !limpiar(archivo.tuner_asignado_a) &&
-                !limpiar(archivo.operador_ecu_asignado_a);
+                !limpiar(archivo.operador_ecu_asignado_a) &&
+                !limpiar(archivo.slave_asignado_a);
               const responsablePrincipal = obtenerResponsablePrincipal(archivo);
               const proximaAccion = obtenerProximaAccion(archivo);
               const serviciosArchivo = normalizarLista(archivo.servicios_solicitados);
@@ -2277,6 +2639,14 @@ export default function ArchivosECUPage() {
                   : null,
                 activoMas24h ? "Activo mas de 24h" : null,
               ].filter(Boolean);
+              const pendientesUrgentes = normalizarAdvertenciasRespuesta({
+                advertencias: normalizarLista(archivo.regularizacion_pendientes),
+              });
+              const muestraRegularizacionUrgente =
+                archivo.creado_en_modo_urgente === true &&
+                (archivo.requiere_regularizacion === true ||
+                  archivo.regularizar_antes_de_entrega === true ||
+                  pendientesUrgentes.length > 0);
 
               return (
                 <article
@@ -2303,6 +2673,22 @@ export default function ArchivosECUPage() {
                       </a>
                     ))}
                   </div>
+
+                  {muestraRegularizacionUrgente && (
+                    <div className="rounded-2xl border border-amber-400/50 bg-amber-500/10 p-4 text-amber-100">
+                      <p className="text-xs font-black uppercase">
+                        File Service urgente · faltan datos
+                      </p>
+                      <p className="mt-1 text-sm font-semibold">
+                        {pendientesUrgentes.length > 0
+                          ? pendientesUrgentes.join(" · ")
+                          : "Debes regularizar este trabajo antes del cierre técnico o la entrega."}
+                      </p>
+                      <p className="mt-1 text-xs text-amber-200">
+                        No bloquea el trabajo ahora, pero debe quedar resuelto o justificado al cerrar.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                     <div>
@@ -2539,7 +2925,7 @@ export default function ArchivosECUPage() {
                               value={valorActualId}
                               onChange={(e) =>
                                 asignarResponsableFileService(
-                                  archivo.id,
+                                  archivo,
                                   responsable,
                                   e.target.value
                                 )
@@ -3373,6 +3759,55 @@ export default function ArchivosECUPage() {
                           autorizado y quedara registrado en bitacora.
                         </p>
                       )}
+
+                      {archivo.creado_en_modo_urgente &&
+                        (archivo.requiere_regularizacion ||
+                          archivo.regularizar_antes_de_entrega ||
+                          normalizarLista(archivo.regularizacion_pendientes).length > 0) && (
+                          <div className="mt-3 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3">
+                            <p className="text-xs font-black uppercase text-amber-100">
+                              Este trabajo urgente aún tiene datos por regularizar.
+                            </p>
+                            {puedeUrgentePorAsignar ? (
+                              <>
+                                <label className="mt-3 flex items-start gap-2 text-xs font-bold text-amber-100">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      cierreForm.override_regularizacion === true
+                                    }
+                                    onChange={(e) =>
+                                      actualizarCierreTecnicoForm(
+                                        archivo.id,
+                                        "override_regularizacion",
+                                        e.target.checked
+                                      )
+                                    }
+                                  />
+                                  Autorizar cierre técnico con justificación
+                                </label>
+                                {cierreForm.override_regularizacion && (
+                                  <textarea
+                                    value={cierreForm.motivo_override || ""}
+                                    onChange={(e) =>
+                                      actualizarCierreTecnicoForm(
+                                        archivo.id,
+                                        "motivo_override",
+                                        e.target.value
+                                      )
+                                    }
+                                    placeholder="Motivo obligatorio del override"
+                                    className="mt-3 w-full rounded-xl border border-amber-400 bg-slate-950 p-3 text-sm text-white"
+                                  />
+                                )}
+                              </>
+                            ) : (
+                              <p className="mt-2 text-xs font-semibold text-amber-100">
+                                Regulariza los datos o solicita autorización a jefatura.
+                              </p>
+                            )}
+                          </div>
+                        )}
 
                       <button
                         type="button"

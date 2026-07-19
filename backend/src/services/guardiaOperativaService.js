@@ -37,7 +37,26 @@ const horasDesde = (valor, base = new Date()) => {
 
 const redondearHoras = (valor) => Number(numero(valor).toFixed(1));
 
+// Solo estos pendientes impiden asignar trabajo NUEVO al mismo responsable.
+// El resto sigue visible como advertencia operativa para no detener registros,
+// regularizaciones ni trabajos asignados a otra persona.
+const TIPOS_BLOQUEO_ASIGNACION = new Set([
+  "USUARIO_NO_ASIGNABLE",
+  "PROGRAMACION_ATRASADA",
+  "CORRECCION_FILE_SERVICE_ATRASADA",
+  "POST_ESCRITURA_ATRASADA",
+  "PROCESS_GUARD_CRITICO",
+]);
+
 const quoteIdent = (valor) => `"${String(valor).replace(/"/g, '""')}"`;
+
+const crearErrorGuardiaNoDisponible = (message, causa) => {
+  const error = new Error(message);
+  error.statusCode = 503;
+  error.codigo = "GUARDIA_NO_DISPONIBLE";
+  error.cause = causa;
+  return error;
+};
 
 const tablaExiste = async (tableName) => {
   try {
@@ -59,21 +78,49 @@ const tablaExiste = async (tableName) => {
     return Boolean(rows?.[0]?.existe);
   } catch (error) {
     console.warn(`[guardia] No se pudo verificar tabla ${tableName}:`, error.message);
-    return false;
+    throw crearErrorGuardiaNoDisponible(
+      "No se pudo verificar la guardia operativa. Intenta nuevamente.",
+      error
+    );
   }
 };
 
-const leerTabla = async (tableName, limit = 1200) => {
+const leerTabla = async (tableName, tamanoPagina = 1200) => {
   if (!(await tablaExiste(tableName))) return [];
 
   try {
-    return await sequelize.query(`SELECT * FROM ${quoteIdent(tableName)} LIMIT :limit`, {
-      replacements: { limit },
-      type: QueryTypes.SELECT,
-    });
+    const filas = [];
+    let offset = 0;
+
+    // El limite anterior podia dejar fuera pendientes reales y autorizar una
+    // asignacion incorrecta. Se pagina de forma determinista hasta EOF.
+    while (true) {
+      const pagina = await sequelize.query(
+        `
+        SELECT *
+        FROM ${quoteIdent(tableName)}
+        ORDER BY "id" ASC
+        LIMIT :limit
+        OFFSET :offset
+        `,
+        {
+          replacements: { limit: tamanoPagina, offset },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      filas.push(...pagina);
+      if (pagina.length < tamanoPagina) break;
+      offset += pagina.length;
+    }
+
+    return filas;
   } catch (error) {
     console.warn(`[guardia] No se pudo leer tabla ${tableName}:`, error.message);
-    return [];
+    throw crearErrorGuardiaNoDisponible(
+      "No se pudo evaluar la guardia operativa. Intenta nuevamente.",
+      error
+    );
   }
 };
 
@@ -144,6 +191,8 @@ const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {
       bloqueado: false,
       usuarioId: null,
       pendientes_criticos: [],
+      bloqueos_asignacion: [],
+      advertencias_operativas: [],
     };
   }
 
@@ -152,22 +201,24 @@ const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {
   });
 
   if (!usuario || usuario.activo === false) {
+    const bloqueoUsuario = {
+      tipo: "USUARIO_NO_ASIGNABLE",
+      titulo: "Usuario no asignable",
+      descripcion: "El usuario no existe o esta inactivo.",
+      ordenId: null,
+      archivoECUId: null,
+      itemId: null,
+      horas: 0,
+      accion_url: "/usuarios",
+    };
+
     return {
       bloqueado: true,
       usuarioId: id,
       usuario: null,
-      pendientes_criticos: [
-        {
-          tipo: "USUARIO_NO_ASIGNABLE",
-          titulo: "Usuario no asignable",
-          descripcion: "El usuario no existe o esta inactivo.",
-          ordenId: null,
-          archivoECUId: null,
-          itemId: null,
-          horas: 0,
-          accion_url: "/usuarios",
-        },
-      ],
+      pendientes_criticos: [bloqueoUsuario],
+      bloqueos_asignacion: [bloqueoUsuario],
+      advertencias_operativas: [],
     };
   }
 
@@ -441,12 +492,18 @@ const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {
     }
   });
 
-  const pendientes_criticos = [...pendientesMap.values()].sort(
+  const pendientes_operativos = [...pendientesMap.values()].sort(
     (a, b) => numero(b.horas) - numero(a.horas)
+  );
+  const bloqueos_asignacion = pendientes_operativos.filter((pendiente) =>
+    TIPOS_BLOQUEO_ASIGNACION.has(pendiente.tipo)
+  );
+  const advertencias_operativas = pendientes_operativos.filter(
+    (pendiente) => !TIPOS_BLOQUEO_ASIGNACION.has(pendiente.tipo)
   );
 
   return {
-    bloqueado: pendientes_criticos.length > 0,
+    bloqueado: bloqueos_asignacion.length > 0,
     usuarioId: id,
     usuario: {
       id: usuario.id,
@@ -454,7 +511,11 @@ const verificarGuardiaOperativaUsuario = async ({ usuarioId, rol, contexto } = {
       username: usuario.username,
       rol: usuario.rol,
     },
-    pendientes_criticos,
+    // Alias conservado para callers/UI existentes.
+    pendientes_criticos: bloqueos_asignacion,
+    bloqueos_asignacion,
+    advertencias_operativas,
+    pendientes_operativos,
   };
 };
 

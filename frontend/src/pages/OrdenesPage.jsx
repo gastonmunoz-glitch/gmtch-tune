@@ -25,6 +25,7 @@ const PRIORIDAD_PESO = {
 
 const FILTROS_ORDENES = [
   { value: "ACTIVAS", label: "ACTIVAS" },
+  { value: "URGENTES", label: "URGENTES" },
   { value: "LISTO_ENTREGA", label: "LISTO ENTREGA" },
   { value: "PAGO_PENDIENTE", label: "PAGO PENDIENTE" },
   { value: "ENTREGADAS", label: "ENTREGADAS" },
@@ -347,6 +348,60 @@ const obtenerEncargadoOrden = (orden) => {
   );
 };
 
+const esOrdenUrgenteV1 = (orden) => {
+  const origen = String(orden?.origen_recepcion || "").toUpperCase();
+
+  return (
+    orden?.creado_en_modo_urgente === true ||
+    orden?.modo_urgente === true ||
+    origen === "MODO_URGENTE_V1"
+  );
+};
+
+const esOrdenUrgenteOperativa = (orden) =>
+  esOrdenUrgenteV1(orden) ||
+  String(orden?.prioridad || "").toUpperCase() === "URGENTE" ||
+  String(orden?.origen_recepcion || "").toUpperCase() ===
+    "RECEPCION_EMERGENCIA_OPERADOR";
+
+const ordenTieneResponsable = (orden) =>
+  [
+    orden?.responsable_tecnico_id,
+    orden?.diagnostico_asignado_a_id,
+    orden?.operador_ecu_asignado_a_id,
+    orden?.mecanico_asignado_a_id,
+    orden?.supervisor_asignado_a_id,
+    ...(Array.isArray(orden?.OrdenServicioItems)
+      ? orden.OrdenServicioItems.filter(
+          (item) => String(item?.estado || "").toUpperCase() !== "ANULADO"
+        ).map((item) => item?.responsable_id)
+      : []),
+  ].some((valor) => valor !== null && valor !== undefined && String(valor).trim());
+
+const obtenerDatosUrgentesFaltantes = (orden, fotos = []) => {
+  if (!esOrdenUrgenteV1(orden)) return [];
+
+  const pendientesBackend = Array.isArray(orden?.regularizacion_pendientes)
+    ? orden.regularizacion_pendientes
+    : Array.isArray(orden?.datos_pendientes)
+    ? orden.datos_pendientes
+    : [];
+  const motivo = String(orden?.motivo_ingreso || "").trim();
+  const kilometraje = Number(orden?.kilometraje || 0);
+  const monto = Number(orden?.monto_total || 0);
+
+  return [
+    ...pendientesBackend,
+    kilometraje <= 0 ? "Kilometraje" : null,
+    !motivo ? "Motivo" : null,
+    motivo.toLowerCase().includes("pendiente de regularizar")
+      ? "Síntomas"
+      : null,
+    monto <= 0 ? "Monto" : null,
+    fotos.length === 0 ? "Fotos" : null,
+  ].filter((valor, indice, lista) => Boolean(valor) && lista.indexOf(valor) === indice);
+};
+
 const textoAccionOrdenSimple = (estado) => {
   const valor = String(estado || "").toUpperCase();
   if (["RECEPCIONADO", "PARA_DIAGNOSTICO"].includes(valor)) {
@@ -366,6 +421,29 @@ const puedeCobrarFrontend = () => {
   const username = String(localStorage.getItem("username") || "").toLowerCase();
 
   return rol === "OWNER" || rol === "ADMIN" || username === "camila" || username === "gaston";
+};
+
+const puedeAutorizarUrgenteFrontend = () =>
+  ["OWNER", "ADMIN", "SUPERVISOR"].includes(
+    String(localStorage.getItem("rol") || "").toUpperCase()
+  );
+
+const codigoErrorApi = (err) =>
+  String(err.response?.data?.error || err.response?.data?.codigo || "").toUpperCase();
+
+const solicitarMotivoOverride = (mensaje, accion) => {
+  if (!window.confirm(`${mensaje}\n\n${accion}`)) return null;
+
+  const motivo = String(
+    window.prompt("Escribe el motivo obligatorio para dejar trazabilidad:") || ""
+  ).trim();
+
+  if (!motivo) {
+    window.alert("No se aplicó el override: debes escribir un motivo.");
+    return null;
+  }
+
+  return motivo;
 };
 
 const textoQR = (orden) => {
@@ -596,13 +674,28 @@ function OrdenesPage() {
   };
 
   const ordenesFiltradas = useMemo(() => {
-    const activas = ordenes.filter((o) => o.estado !== "ENTREGADO");
-    const entregadas = ordenes.filter((o) => o.estado === "ENTREGADO");
+    const estadosTerminales = new Set([
+      "ENTREGADO",
+      "ANULADO",
+      "CANCELADO",
+      "ARCHIVADO",
+    ]);
+    const esActiva = (orden) =>
+      orden?.archivada !== true &&
+      !estadosTerminales.has(String(orden?.estado || "").toUpperCase());
+    const activas = ordenes.filter(esActiva);
+    const entregadas = ordenes.filter(
+      (o) => String(o?.estado || "").toUpperCase() === "ENTREGADO"
+    );
 
     if (filtro === "LISTO_ENTREGA") {
       return activas
         .filter((o) => o.estado === "LISTO_PARA_ENTREGA")
         .sort(ordenarActivas);
+    }
+
+    if (filtro === "URGENTES") {
+      return activas.filter(esOrdenUrgenteOperativa).sort(ordenarActivas);
     }
 
     if (filtro === "PAGO_PENDIENTE") {
@@ -616,9 +709,10 @@ function OrdenesPage() {
     }
 
     if (filtro === "TODAS") {
+      const cerradas = ordenes.filter((orden) => !esActiva(orden));
       return [
         ...activas.sort(ordenarActivas),
-        ...entregadas.sort(ordenarEntregadas),
+        ...cerradas.sort(ordenarEntregadas),
       ];
     }
 
@@ -732,14 +826,42 @@ function OrdenesPage() {
     }
 
     try {
-      await api.patch(`/ordenes/${orden.id}`, {
-        estado,
-      });
+      const ejecutarCambio = (extra = {}) =>
+        api.patch(`/ordenes/${orden.id}`, { estado, ...extra });
+
+      try {
+        await ejecutarCambio();
+      } catch (errorInicial) {
+        const data = errorInicial.response?.data || {};
+        if (
+          estado !== "LISTO_PARA_ENTREGA" ||
+          codigoErrorApi(errorInicial) !== "REGULARIZACION_PENDIENTE" ||
+          !esOrdenUrgenteV1(orden) ||
+          !puedeAutorizarUrgenteFrontend()
+        ) {
+          throw errorInicial;
+        }
+
+        const motivo = solicitarMotivoOverride(
+          data.message || "Esta orden urgente todavía tiene datos pendientes.",
+          "¿Autorizar igualmente el cierre técnico con justificación?"
+        );
+        if (!motivo) return;
+
+        await ejecutarCambio({
+          override_regularizacion: true,
+          motivo_override: motivo,
+        });
+      }
 
       await recargar();
     } catch (err) {
       console.error("ERROR CAMBIANDO ESTADO:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudo cambiar el estado.");
+      alert(
+        err.response?.data?.message ||
+          err.response?.data?.error ||
+          "No se pudo cambiar el estado."
+      );
     }
   };
 
@@ -1000,10 +1122,36 @@ function OrdenesPage() {
     }
 
     try {
-      await api.patch(`/ordenes/${orden.id}`, {
-        [etapa.campoId]: usuario.id,
-        [etapa.campo]: snapshotUsuario(usuario),
-      });
+      const ejecutarAsignacion = (extra = {}) =>
+        api.patch(`/ordenes/${orden.id}`, {
+          [etapa.campoId]: usuario.id,
+          [etapa.campo]: snapshotUsuario(usuario),
+          ...extra,
+        });
+
+      try {
+        await ejecutarAsignacion();
+      } catch (errorInicial) {
+        const data = errorInicial.response?.data || {};
+        if (
+          codigoErrorApi(errorInicial) !== "RESPONSABLE_BLOQUEADO" ||
+          !esOrdenUrgenteV1(orden) ||
+          !puedeAutorizarUrgenteFrontend()
+        ) {
+          throw errorInicial;
+        }
+
+        const motivo = solicitarMotivoOverride(
+          data.message || "Este encargado tiene pendientes críticos.",
+          "¿Asignarlo de todas formas a esta urgencia?"
+        );
+        if (!motivo) return;
+
+        await ejecutarAsignacion({
+          override_guardia: true,
+          motivo_override: motivo,
+        });
+      }
 
       await recargar();
     } catch (err) {
@@ -1084,13 +1232,39 @@ function OrdenesPage() {
     }
 
     try {
-      await api.post(`/ordenes/${orden.id}/items`, {
+      const payloadItem = {
         ...item,
         responsable_id: responsable.id,
         responsable: snapshotUsuario(responsable),
         cantidad: Number(item.cantidad || 1),
         precio_unitario: Number(item.precio_unitario || 0),
-      });
+      };
+      const ejecutarCreacion = (extra = {}) =>
+        api.post(`/ordenes/${orden.id}/items`, { ...payloadItem, ...extra });
+
+      try {
+        await ejecutarCreacion();
+      } catch (errorInicial) {
+        if (
+          codigoErrorApi(errorInicial) !== "RESPONSABLE_BLOQUEADO" ||
+          !esOrdenUrgenteV1(orden) ||
+          !puedeAutorizarUrgenteFrontend()
+        ) {
+          throw errorInicial;
+        }
+
+        const motivo = solicitarMotivoOverride(
+          errorInicial.response?.data?.message ||
+            "Este encargado tiene urgencias crÃ­ticas pendientes.",
+          "Elige otro encargado o justifica por quÃ© debe recibir este servicio urgente."
+        );
+        if (!motivo) return;
+
+        await ejecutarCreacion({
+          override_guardia: true,
+          motivo_override: motivo,
+        });
+      }
 
       setItemOrdenes((prev) => {
         const siguiente = { ...prev };
@@ -1115,13 +1289,42 @@ function OrdenesPage() {
     }
 
     try {
-      await api.patch(`/ordenes/${orden.id}/items/${item.id}`, {
+      const payloadItem = {
         ...edicion,
         responsable_id: responsable.id,
         responsable: snapshotUsuario(responsable),
         cantidad: Number(edicion.cantidad || 0),
         precio_unitario: Number(edicion.precio_unitario || 0),
-      });
+      };
+      const ejecutarActualizacion = (extra = {}) =>
+        api.patch(`/ordenes/${orden.id}/items/${item.id}`, {
+          ...payloadItem,
+          ...extra,
+        });
+
+      try {
+        await ejecutarActualizacion();
+      } catch (errorInicial) {
+        if (
+          codigoErrorApi(errorInicial) !== "RESPONSABLE_BLOQUEADO" ||
+          !esOrdenUrgenteV1(orden) ||
+          !puedeAutorizarUrgenteFrontend()
+        ) {
+          throw errorInicial;
+        }
+
+        const motivo = solicitarMotivoOverride(
+          errorInicial.response?.data?.message ||
+            "Este encargado tiene urgencias crÃ­ticas pendientes.",
+          "Elige otro encargado o justifica por quÃ© debe recibir este servicio urgente."
+        );
+        if (!motivo) return;
+
+        await ejecutarActualizacion({
+          override_guardia: true,
+          motivo_override: motivo,
+        });
+      }
 
       setItemEdiciones((prev) => {
         const siguiente = { ...prev };
@@ -1274,19 +1477,49 @@ function OrdenesPage() {
     if (!confirmar) return;
 
     try {
-      await api.post(`/ordenes/${orden.id}/cobrar-entregar`, {
-        medio_pago: medioPago,
-        monto_pagado: montoPagado,
-        observacion_pago: `Pago confirmado por ${usuario}`,
-        observacion_cierre: `Orden entregada por ${usuario}`,
-      });
+      const ejecutarEntrega = (extra = {}) =>
+        api.post(`/ordenes/${orden.id}/cobrar-entregar`, {
+          medio_pago: medioPago,
+          monto_pagado: montoPagado,
+          observacion_pago: `Pago confirmado por ${usuario}`,
+          observacion_cierre: `Orden entregada por ${usuario}`,
+          ...extra,
+        });
+
+      try {
+        await ejecutarEntrega();
+      } catch (errorInicial) {
+        const data = errorInicial.response?.data || {};
+        if (
+          codigoErrorApi(errorInicial) !== "REGULARIZACION_PENDIENTE" ||
+          !esOrdenUrgenteV1(orden) ||
+          !puedeAutorizarUrgenteFrontend()
+        ) {
+          throw errorInicial;
+        }
+
+        const motivo = solicitarMotivoOverride(
+          data.message || "Esta orden urgente todavía tiene datos pendientes.",
+          "¿Autorizar igualmente la entrega con justificación?"
+        );
+        if (!motivo) return;
+
+        await ejecutarEntrega({
+          override_regularizacion: true,
+          motivo_override: motivo,
+        });
+      }
 
       await recargar();
 
       alert("Pago confirmado y orden entregada.");
     } catch (err) {
       console.error("ERROR COBRANDO Y ENTREGANDO:", err.response?.data || err.message);
-      alert(err.response?.data?.error || "No se pudo confirmar el pago y entregar.");
+      alert(
+        err.response?.data?.message ||
+          err.response?.data?.error ||
+          "No se pudo confirmar el pago y entregar."
+      );
     }
   };
 
@@ -1555,12 +1788,34 @@ function OrdenesPage() {
             const diferenciaPago = Number(o.monto_pagado || 0) - montoFinal;
             const pagoConfirmado = o.estado_pago === "PAGADO";
             const encargadoPrincipal = obtenerEncargadoOrden(o);
+            const esUrgente = esOrdenUrgenteOperativa(o);
+            const esModoUrgente = esOrdenUrgenteV1(o);
+            const datosUrgentesFaltantes = obtenerDatosUrgentesFaltantes(
+              o,
+              fotosOrden
+            );
+            const porAsignar = !ordenTieneResponsable(o);
+            const requiereRegularizacion =
+              esModoUrgente &&
+              (o.requiere_regularizacion === true ||
+                o.regularizar_antes_de_entrega === true ||
+                datosUrgentesFaltantes.length > 0 ||
+                porAsignar);
             const alertasResumen = [
+              esUrgente
+                ? { label: "Urgente", clase: "border-red-900 bg-red-700 text-white" }
+                : null,
+              datosUrgentesFaltantes.length > 0
+                ? { label: "Faltan datos", clase: "border-amber-700 bg-amber-100 text-amber-950" }
+                : null,
+              porAsignar
+                ? { label: "Por asignar", clase: "border-red-700 bg-red-50 text-red-900" }
+                : null,
+              requiereRegularizacion
+                ? { label: "Regularizar antes de entregar", clase: "border-amber-700 bg-amber-300 text-black" }
+                : null,
               procesoGuardCritico
                 ? { label: "Trabajo crítico", clase: "border-red-800 bg-red-700 text-white" }
-                : null,
-              encargadoPrincipal === "Sin encargado"
-                ? { label: "Sin encargado", clase: "border-red-700 bg-red-50 text-red-900" }
                 : null,
               estadoOrden === "LISTO_PARA_ENTREGA"
                 ? { label: "Listo para entregar", clase: "border-emerald-700 bg-emerald-50 text-emerald-900" }
@@ -1579,7 +1834,7 @@ function OrdenesPage() {
                 : null,
             ]
               .filter(Boolean)
-              .slice(0, 4);
+              .slice(0, 7);
             const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
               textoQR(o)
             )}`;
@@ -1589,7 +1844,7 @@ function OrdenesPage() {
                 id={`orden-${o.id}`}
                 key={o.id}
                 className={`scroll-mt-24 bg-white border-4 border-black shadow-[10px_10px_0px_0px_rgba(0,0,0,0.15)] overflow-hidden ${
-                  o.prioridad === "URGENTE" ? "ring-4 ring-red-600" : ""
+                  esUrgente ? "ring-4 ring-red-600" : ""
                 }`}
               >
                 <details>
@@ -1626,6 +1881,11 @@ function OrdenesPage() {
                         <p className="mt-1 text-sm font-bold text-slate-700">
                           Encargado: {encargadoPrincipal}
                         </p>
+                        {requiereRegularizacion && (
+                          <p className="mt-3 border-2 border-amber-600 bg-amber-50 p-3 text-xs font-black uppercase text-amber-950">
+                            No bloquea el trabajo, pero debes regularizar antes de entregar.
+                          </p>
+                        )}
                       </div>
 
                       <span className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-xs font-black uppercase text-white">

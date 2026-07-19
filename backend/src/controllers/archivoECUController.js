@@ -1,6 +1,11 @@
 const { QueryTypes } = require("sequelize");
+const fs = require("fs");
+const path = require("path");
 const sequelize = require("../config/database");
 const { ArchivoECU, OrdenTrabajo, OrdenEventoOperativo, Usuario } = require("../models");
+const {
+  validarOrdenListaParaEntregaDesdeFileService,
+} = require("./ordenTrabajoController");
 const {
   crearNotificacionesInternas,
 } = require("./notificacionController");
@@ -18,6 +23,44 @@ const limpiarTexto = (valor) => {
 };
 
 const normalizarTexto = limpiarTexto;
+
+const valorBooleano = (valor) =>
+  valor === true ||
+  String(valor).toLowerCase() === "true" ||
+  String(valor) === "1";
+
+const ROLES_JEFATURA_URGENTE = new Set(["OWNER", "ADMIN", "SUPERVISOR"]);
+
+const esJefaturaUrgente = (req) => ROLES_JEFATURA_URGENTE.has(rolActual(req));
+
+const uploadsEcuDir = path.resolve(__dirname, "..", "uploads", "ecu");
+
+const eliminarArchivoLocal = async (file) => {
+  const ruta = limpiarTexto(file?.path);
+  if (!ruta || /^https?:\/\//i.test(ruta)) return;
+
+  const rutaResuelta = path.resolve(ruta);
+  if (
+    rutaResuelta !== uploadsEcuDir &&
+    !rutaResuelta.startsWith(`${uploadsEcuDir}${path.sep}`)
+  ) {
+    console.warn("Se omitio limpieza de archivo fuera de uploads ECU:", rutaResuelta);
+    return;
+  }
+
+  try {
+    await fs.promises.unlink(rutaResuelta);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      console.warn("No se pudo limpiar archivo ECU huerfano:", error.message);
+    }
+  }
+};
+
+const responderDescartandoArchivo = async (req, res, statusCode, payload) => {
+  await eliminarArchivoLocal(req.file);
+  return res.status(statusCode).json(payload);
+};
 
 const usuarioActualId = (req) => limpiarTexto(req.usuario?.id || req.user?.id);
 const rolActual = (req) => limpiarTexto(req.usuario?.rol || req.user?.rol).toUpperCase();
@@ -79,6 +122,14 @@ const validarGuardiaResponsable = async (usuario, opciones = {}) => {
   });
 
   if (resultado.bloqueado) {
+    if (opciones.permitirOverride === true) {
+      return {
+        ...resultado,
+        override_aplicado: true,
+        motivo_override: limpiarTexto(opciones.motivoOverride),
+      };
+    }
+
     throw crearErrorHttp(
       409,
       "No puedes asignar mas trabajo a este responsable porque tiene pendientes criticos sin resolver.",
@@ -105,13 +156,18 @@ const resolverResponsableArchivoDesdeBody = async (
 
   if (usuarioId) {
     const usuario = await buscarUsuarioActivoPorId(usuarioId);
+    let guardia = null;
     if (opciones.validarGuardia !== false) {
-      await validarGuardiaResponsable(usuario);
+      guardia = await validarGuardiaResponsable(usuario, {
+        permitirOverride: opciones.permitirOverrideGuardia === true,
+        motivoOverride: opciones.motivoOverride,
+      });
     }
     return {
       id: String(usuario.id),
       texto: obtenerSnapshotUsuarioInterno(usuario),
       usuario,
+      guardia,
       legacy: false,
     };
   }
@@ -124,12 +180,11 @@ const resolverResponsableArchivoDesdeBody = async (
 
   const texto = limpiarTexto(body[campoTexto]);
   if (texto && !obligatorio) {
-    return {
-      id: null,
-      texto,
-      usuario: null,
-      legacy: true,
-    };
+    throw crearErrorHttp(
+      400,
+      "Para asignar un responsable debes enviar su ID de usuario activo.",
+      { codigo: "RESPONSABLE_INVALIDO" }
+    );
   }
 
   if ((tieneCampoId || tieneCampoTexto) && obligatorio) {
@@ -148,6 +203,13 @@ const aplicarResponsableResuelto = (payload, campoId, campoTexto, resuelto) => {
 };
 
 const responderErrorResponsable = (res, error) => {
+  if (error?.codigo === "GUARDIA_NO_DISPONIBLE") {
+    return res.status(error.statusCode || 503).json({
+      error: "GUARDIA_NO_DISPONIBLE",
+      message: error.message,
+    });
+  }
+
   if (error?.codigo === "RESPONSABLE_BLOQUEADO") {
     return res.status(409).json({
       error: "RESPONSABLE_BLOQUEADO",
@@ -325,27 +387,36 @@ const registrarEventoFileServiceOrden = async ({
   usuario,
   usuario_rol,
   metadata = {},
+  estricto = false,
+  transaction = null,
 }) => {
   if (!ordenId) return;
 
   try {
-    await OrdenEventoOperativo.create({
-      ordenId,
-      tipo_evento,
-      categoria: "FILE_SERVICE",
-      titulo,
-      descripcion,
-      usuario: usuario || "sistema",
-      usuario_rol: usuario_rol || null,
-      origen: "FILE_SERVICE",
-      metadata: {
-        archivoECUId,
-        ...metadata,
+    await OrdenEventoOperativo.create(
+      {
+        ordenId,
+        tipo_evento,
+        categoria: "FILE_SERVICE",
+        titulo,
+        descripcion,
+        usuario: usuario || "sistema",
+        usuario_rol: usuario_rol || null,
+        origen: "FILE_SERVICE",
+        metadata: {
+          archivoECUId,
+          ...metadata,
+        },
       },
-    });
+      transaction ? { transaction } : undefined
+    );
   } catch (error) {
     console.warn(`No se pudo registrar evento ${tipo_evento}:`, error.message);
+    if (estricto) throw error;
+    return false;
   }
+
+  return true;
 };
 
 const buscarDiagnosticoParaFileService = async ({ ordenId, vehiculoId } = {}) => {
@@ -369,12 +440,12 @@ const buscarDiagnosticoParaFileService = async ({ ordenId, vehiculoId } = {}) =>
         "updatedAt"
       FROM "diagnosticos"
       WHERE "ordenId" = :ordenId
-      ORDER BY
-        CASE
-          WHEN "fase" IS NULL OR "fase" = '' OR "fase" = 'PRE_FILE_SERVICE' THEN 0
-          ELSE 1
-        END,
-        "id" DESC
+        AND (
+          "fase" IS NULL
+          OR TRIM("fase") = ''
+          OR UPPER(TRIM("fase")) = 'PRE_FILE_SERVICE'
+        )
+      ORDER BY "id" DESC
       LIMIT 1;
       `,
       {
@@ -404,12 +475,12 @@ const buscarDiagnosticoParaFileService = async ({ ordenId, vehiculoId } = {}) =>
       FROM "diagnosticos" d
       INNER JOIN "ordenes_trabajo" o ON o."id" = d."ordenId"
       WHERE o."vehiculoId" = :vehiculoId
-      ORDER BY
-        CASE
-          WHEN d."fase" IS NULL OR d."fase" = '' OR d."fase" = 'PRE_FILE_SERVICE' THEN 0
-          ELSE 1
-        END,
-        d."id" DESC
+        AND (
+          d."fase" IS NULL
+          OR TRIM(d."fase") = ''
+          OR UPPER(TRIM(d."fase")) = 'PRE_FILE_SERVICE'
+        )
+      ORDER BY d."id" DESC
       LIMIT 1;
       `,
       {
@@ -431,6 +502,10 @@ const registrarEventoFileServiceCreado = async ({
   servicios_solicitados,
   dtc_snapshot,
   servicios_preset,
+  creado_en_modo_urgente = false,
+  motivo_urgencia = null,
+  regularizacion_pendientes = [],
+  override_guardia = [],
 }) => {
   await registrarEventoFileServiceOrden({
     ordenId,
@@ -445,7 +520,12 @@ const registrarEventoFileServiceCreado = async ({
       tiene_dtc_snapshot: Array.isArray(dtc_snapshot) && dtc_snapshot.length > 0,
       cantidad_dtcs: Array.isArray(dtc_snapshot) ? dtc_snapshot.length : 0,
       servicios_preset: servicios_preset || null,
+      creado_en_modo_urgente,
+      motivo_urgencia: motivo_urgencia || null,
+      regularizacion_pendientes,
+      override_guardia,
     },
+    estricto: true,
   });
 };
 
@@ -509,17 +589,68 @@ const tieneListaOperativa = (valor) => normalizarVersiones(valor).length > 0;
 const tieneResponsableIdFileService = (archivo) =>
   Boolean(
     limpiarTexto(archivo?.tuner_asignado_a_id) ||
-      limpiarTexto(archivo?.operador_ecu_asignado_a_id)
+      limpiarTexto(archivo?.operador_ecu_asignado_a_id) ||
+      limpiarTexto(archivo?.slave_asignado_a_id)
   );
 
 const tieneResponsableTextoFileService = (archivo) =>
   Boolean(
     limpiarTexto(archivo?.tuner_asignado_a) ||
-      limpiarTexto(archivo?.operador_ecu_asignado_a)
+      limpiarTexto(archivo?.operador_ecu_asignado_a) ||
+      limpiarTexto(archivo?.slave_asignado_a)
   );
 
 const tieneResponsableFileService = (archivo) =>
   tieneResponsableIdFileService(archivo) || tieneResponsableTextoFileService(archivo);
+
+const validarResponsablesPersistidosActivos = async (archivo) => {
+  const responsablesId = [
+    limpiarTexto(archivo?.tuner_asignado_a_id),
+    limpiarTexto(archivo?.operador_ecu_asignado_a_id),
+    limpiarTexto(archivo?.slave_asignado_a_id),
+  ].filter(Boolean);
+
+  for (const responsableId of new Set(responsablesId)) {
+    await buscarUsuarioActivoPorId(responsableId);
+  }
+};
+
+const archivoTieneCierreTecnicoOK = (archivo) =>
+  Boolean(archivo?.cierre_tecnico_at) &&
+  limpiarTexto(archivo?.resultado_tecnico).toUpperCase() === "OK";
+
+const responderArchivoTecnicoCerrado = (res) =>
+  res.status(409).json({
+    error: "FILE_SERVICE_FINALIZADO",
+    message:
+      "Este File Service ya tiene cierre técnico OK. Solicita una corrección o carga un nuevo MOD para reabrirlo con trazabilidad.",
+  });
+
+const bloquearArchivosFileServiceOrden = async (ordenId, transaction) => {
+  await ArchivoECU.findAll({
+    where: { ordenId },
+    attributes: ["id"],
+    order: [["id", "ASC"]],
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+};
+
+const recargarArchivoPostPersistenciaSeguro = async (
+  archivo,
+  advertenciasOperativas
+) => {
+  try {
+    return (await ArchivoECU.findByPk(archivo.id)) || archivo;
+  } catch (error) {
+    advertenciasOperativas.push("RECARGA_FILE_SERVICE_PENDIENTE");
+    console.warn(
+      `File Service #${archivo.id} persistido, pero fallo su recarga:`,
+      error.message
+    );
+    return archivo;
+  }
+};
 
 const requiereModParaCierre = (archivo) => {
   const estado = limpiarTexto(archivo?.estado).toUpperCase();
@@ -528,26 +659,19 @@ const requiereModParaCierre = (archivo) => {
     .filter(Boolean);
 
   if (limpiarTexto(archivo?.archivo_modificado)) return true;
-  if (
-    [
-      "MODIFICADO_LISTO",
-      "NOTIFICADO_SLAVE",
-      "POST_ESCRITURA_PENDIENTE",
-      "POST_ESCRITURA_OK",
-    ].includes(estado)
-  ) {
+  if (["MODIFICADO_LISTO", "NOTIFICADO_SLAVE"].includes(estado)) {
     return true;
   }
 
-  const servicioTexto = [
+  const valoresServicio = [
     limpiarTexto(archivo?.tipo_servicio),
     limpiarTexto(archivo?.servicio_principal),
-    servicios.join(" "),
+    ...servicios,
   ]
-    .join(" ")
-    .toUpperCase();
+    .map((valor) => valor.toUpperCase())
+    .filter(Boolean);
 
-  if (!servicioTexto) return false;
+  if (!valoresServicio.length) return false;
 
   const marcadoresSoloRevision = [
     "READINESS",
@@ -559,7 +683,34 @@ const requiereModParaCierre = (archivo) => {
     "LECTURA",
   ];
 
-  return !marcadoresSoloRevision.some((marcador) => servicioTexto.includes(marcador));
+  const marcadoresModificacion = [
+    "STAGE",
+    "DPF",
+    "FAP",
+    "EGR",
+    "ADBLUE",
+    "SCR",
+    "DTC OFF",
+    "IMMO",
+    "POPS",
+    "VMAX",
+    "V-MAX",
+    "TORQUE",
+    "TUNING",
+  ];
+
+  if (
+    valoresServicio.some((valor) =>
+      marcadoresModificacion.some((marcador) => valor.includes(marcador))
+    )
+  ) {
+    return true;
+  }
+
+  return valoresServicio.some(
+    (valor) =>
+      !marcadoresSoloRevision.some((marcador) => valor.includes(marcador))
+  );
 };
 
 const validarChecklistCierreTecnicoOK = (archivo, observacion, opciones = {}) => {
@@ -572,11 +723,14 @@ const validarChecklistCierreTecnicoOK = (archivo, observacion, opciones = {}) =>
   const tieneResponsableTexto = tieneResponsableTextoFileService(archivo);
   const permiteLegacySinResponsable =
     opciones.permitirLegacySinResponsable === true;
+  const permiteSinResponsableAutorizado =
+    opciones.permitirSinResponsableAutorizado === true;
   const legacySinResponsableId = !tieneResponsableId;
   const responsableAceptado =
     tieneResponsableId ||
     tieneResponsableTexto ||
-    permiteLegacySinResponsable;
+    permiteLegacySinResponsable ||
+    permiteSinResponsableAutorizado;
 
   if (!limpiarTexto(archivo?.archivo_original)) {
     faltantes.push("Archivo original");
@@ -602,7 +756,11 @@ const validarChecklistCierreTecnicoOK = (archivo, observacion, opciones = {}) =>
     faltantes.push("Foto/captura scanner post escritura");
   }
 
-  if (!limpiarTexto(archivo?.post_escritura_dtc) && !archivo?.post_escritura_sin_dtc) {
+  if (
+    postEstado !== "NO_APLICA" &&
+    !limpiarTexto(archivo?.post_escritura_dtc) &&
+    !archivo?.post_escritura_sin_dtc
+  ) {
     faltantes.push("DTC post escritura o SIN DTC POST ESCRITURA");
   }
 
@@ -617,7 +775,77 @@ const validarChecklistCierreTecnicoOK = (archivo, observacion, opciones = {}) =>
     legacy_sin_responsable: !tieneResponsableId && !tieneResponsableTexto,
     cierre_legacy_autorizado:
       !tieneResponsableId && !tieneResponsableTexto && permiteLegacySinResponsable,
+    cierre_sin_responsable_autorizado:
+      !tieneResponsableId &&
+      !tieneResponsableTexto &&
+      permiteSinResponsableAutorizado,
   };
+};
+
+const PENDIENTE_DIAGNOSTICO_URGENTE = "DIAGNOSTICO_PENDIENTE";
+const PENDIENTE_RESPONSABLE_URGENTE = "RESPONSABLE_PENDIENTE";
+
+const evaluarRegularizacionUrgente = async (archivo) => {
+  if (!archivo?.creado_en_modo_urgente) {
+    return {
+      pendientes: [],
+      diagnostico_faltantes: [],
+    };
+  }
+
+  const pendientes = [];
+  const validacionDiagnostico = await validarDiagnosticoObligatorio(archivo.ordenId);
+
+  if (!validacionDiagnostico.ok) {
+    pendientes.push(PENDIENTE_DIAGNOSTICO_URGENTE);
+  }
+
+  const responsablesId = [
+    limpiarTexto(archivo.tuner_asignado_a_id),
+    limpiarTexto(archivo.operador_ecu_asignado_a_id),
+    limpiarTexto(archivo.slave_asignado_a_id),
+  ].filter(Boolean);
+
+  if (!responsablesId.length) {
+    pendientes.push(PENDIENTE_RESPONSABLE_URGENTE);
+  } else {
+    for (const responsableId of new Set(responsablesId)) {
+      // Un ID persistido invalido o inactivo nunca puede regularizarse por override.
+      await buscarUsuarioActivoPorId(responsableId);
+    }
+  }
+
+  return {
+    pendientes,
+    diagnostico_faltantes: validacionDiagnostico.faltantes || [],
+  };
+};
+
+const aplicarEstadoRegularizacion = ({
+  payload,
+  evaluacion,
+  req,
+  registroActual,
+  overrideAutorizado = false,
+}) => {
+  const pendientes = evaluacion?.pendientes || [];
+
+  payload.requiere_regularizacion = pendientes.length > 0;
+  payload.regularizacion_pendientes = pendientes;
+  payload.regularizar_antes_de_entrega =
+    pendientes.length > 0 && overrideAutorizado !== true;
+
+  if (
+    !pendientes.length &&
+    registroActual?.requiere_regularizacion === true &&
+    !registroActual?.regularizado_at
+  ) {
+    payload.regularizado_por = usuarioActual(req);
+    payload.regularizado_at = new Date();
+  } else if (pendientes.length) {
+    payload.regularizado_por = null;
+    payload.regularizado_at = null;
+  }
 };
 
 const processGuardResponsableArchivo = (archivo) =>
@@ -1065,6 +1293,15 @@ const mapearArchivoRow = (row) => {
 
     estado: row.estado,
     prioridad: row.prioridad,
+    creado_en_modo_urgente: row.creado_en_modo_urgente,
+    motivo_urgencia: row.motivo_urgencia,
+    requiere_regularizacion: row.requiere_regularizacion,
+    regularizacion_pendientes: normalizarVersiones(row.regularizacion_pendientes),
+    regularizar_antes_de_entrega: row.regularizar_antes_de_entrega,
+    urgente_creado_por: row.urgente_creado_por,
+    urgente_creado_at: row.urgente_creado_at,
+    regularizado_por: row.regularizado_por,
+    regularizado_at: row.regularizado_at,
     tipo_servicio: row.tipo_servicio,
     diagnosticoId: row.diagnosticoId,
     dtc_snapshot: normalizarVersiones(row.dtc_snapshot),
@@ -1341,6 +1578,9 @@ const obtenerContextoSolicitud = async (req, res) => {
 };
 
 const crearArchivoECU = async (req, res) => {
+  let archivoPersistido = false;
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
@@ -1353,7 +1593,7 @@ const crearArchivoECU = async (req, res) => {
     const ordenId = Number(obtenerOrdenId(req.body));
 
     if (!ordenId || Number.isNaN(ordenId)) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "Falta ordenId válido",
       });
     }
@@ -1361,15 +1601,53 @@ const crearArchivoECU = async (req, res) => {
     const orden = await OrdenTrabajo.findByPk(ordenId);
 
     if (!orden) {
-      return res.status(404).json({
+      return responderDescartandoArchivo(req, res, 404, {
         error: "Orden no encontrada",
+      });
+    }
+
+    const estadoOrden = limpiarTexto(orden.estado).toUpperCase();
+    if (
+      orden.archivada === true ||
+      ["ENTREGADO", "ANULADO", "CANCELADO", "ARCHIVADO"].includes(estadoOrden)
+    ) {
+      return responderDescartandoArchivo(req, res, 409, {
+        error: "ORDEN_NO_ACTIVA",
+        message: "No puedes crear File Service sobre una orden cerrada o archivada.",
+      });
+    }
+
+    const modoUrgente = valorBooleano(req.body.modo_urgente);
+    const motivoUrgencia = limpiarTexto(req.body.motivo_urgencia);
+    const overrideGuardiaSolicitado = valorBooleano(req.body.override_guardia);
+    const motivoOverride = limpiarTexto(req.body.motivo_override);
+    const jefaturaAutorizada = esJefaturaUrgente(req);
+
+    if (modoUrgente && !motivoUrgencia) {
+      return responderDescartandoArchivo(req, res, 400, {
+        error: "MOTIVO_URGENCIA_REQUERIDO",
+        message: "Debes indicar el motivo para crear File Service en modo urgente.",
+      });
+    }
+
+    if (overrideGuardiaSolicitado && (!modoUrgente || !jefaturaAutorizada)) {
+      return responderDescartandoArchivo(req, res, 403, {
+        error: "OVERRIDE_GUARDIA_NO_AUTORIZADO",
+        message: "Solo jefatura puede autorizar override de guardia en modo urgente.",
+      });
+    }
+
+    if (overrideGuardiaSolicitado && !motivoOverride) {
+      return responderDescartandoArchivo(req, res, 400, {
+        error: "MOTIVO_OVERRIDE_REQUERIDO",
+        message: "Debes justificar el override de guardia.",
       });
     }
 
     const validacion = await validarDiagnosticoObligatorio(ordenId);
 
-    if (!validacion.ok) {
-      return res.status(409).json({
+    if (!validacion.ok && !modoUrgente) {
+      return responderDescartandoArchivo(req, res, 409, {
         error: "No se puede enviar a File Service. Falta diagnóstico obligatorio.",
         bloqueo: "DIAGNOSTICO_OBLIGATORIO",
         faltantes: validacion.faltantes,
@@ -1380,7 +1658,7 @@ const crearArchivoECU = async (req, res) => {
     const preset = limpiarTexto(req.body.servicios_preset).toUpperCase();
 
     if (preset && !PRESETS_SERVICIOS_FILE_SERVICE[preset]) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "Preset File Service no permitido",
       });
     }
@@ -1391,13 +1669,21 @@ const crearArchivoECU = async (req, res) => {
       tipoServicio: tipoServicioBody,
       preset,
     });
+
+    if (modoUrgente && !serviciosSolicitados.length) {
+      return responderDescartandoArchivo(req, res, 400, {
+        error: "SERVICIO_REQUERIDO",
+        message: "Debes indicar al menos un servicio para crear un File Service urgente.",
+      });
+    }
+
     const observacionServicios = limpiarTexto(req.body.observacion_servicios);
     const requiereObservacionCustom = serviciosSolicitados.some((servicio) =>
       ["CUSTOM", "OTRO"].includes(limpiarTexto(servicio).toUpperCase())
     );
 
     if (requiereObservacionCustom && !observacionServicios) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "Debes describir el servicio custom / otro en observacion_servicios.",
       });
     }
@@ -1417,6 +1703,7 @@ const crearArchivoECU = async (req, res) => {
       "CUSTOM";
     const tipoServicioFinal = tipoServicioBody || servicioPrincipal || preset;
     const responsablesCreacion = {};
+    const overridesGuardia = [];
 
     for (const [campoId, campoTexto] of [
       ["tuner_asignado_a_id", "tuner_asignado_a"],
@@ -1427,19 +1714,82 @@ const crearArchivoECU = async (req, res) => {
         req.body,
         campoId,
         campoTexto,
-        { obligatorio: false }
+        {
+          obligatorio: false,
+          permitirOverrideGuardia:
+            modoUrgente && overrideGuardiaSolicitado && jefaturaAutorizada,
+          motivoOverride,
+        }
       );
       aplicarResponsableResuelto(responsablesCreacion, campoId, campoTexto, resuelto);
+
+      if (resuelto?.guardia?.override_aplicado) {
+        overridesGuardia.push({
+          campo: campoId,
+          responsable_id: resuelto.id,
+          responsable: resuelto.texto,
+          motivo_override: motivoOverride,
+          pendientes_criticos: (resuelto.guardia.pendientes_criticos || []).slice(0, 10),
+        });
+      }
     }
 
-    if (
-      !limpiarTexto(responsablesCreacion.tuner_asignado_a_id) &&
-      !limpiarTexto(responsablesCreacion.operador_ecu_asignado_a_id)
-    ) {
-      return res.status(400).json({
+    const tieneTunerUOperador = Boolean(
+      limpiarTexto(responsablesCreacion.tuner_asignado_a_id) ||
+        limpiarTexto(responsablesCreacion.operador_ecu_asignado_a_id)
+    );
+    const tieneResponsableUrgente = Boolean(
+      tieneTunerUOperador ||
+        limpiarTexto(responsablesCreacion.slave_asignado_a_id)
+    );
+
+    if (!modoUrgente && !tieneTunerUOperador) {
+      return responderDescartandoArchivo(req, res, 400, {
         error: "RESPONSABLE_REQUERIDO",
         message:
           "Debes seleccionar Tuner/Master u Operador ECU activo para crear File Service.",
+      });
+    }
+
+    if (modoUrgente && !tieneResponsableUrgente && !jefaturaAutorizada) {
+      return responderDescartandoArchivo(req, res, 403, {
+        error: "URGENTE_POR_ASIGNAR_NO_AUTORIZADO",
+        message:
+          "Solo jefatura puede crear un File Service urgente con responsable por asignar.",
+      });
+    }
+
+    const regularizacionPendientes = [];
+    if (!validacion.ok) {
+      regularizacionPendientes.push(PENDIENTE_DIAGNOSTICO_URGENTE);
+    }
+    if (
+      !limpiarTexto(responsablesCreacion.tuner_asignado_a_id) &&
+      !limpiarTexto(responsablesCreacion.operador_ecu_asignado_a_id) &&
+      !limpiarTexto(responsablesCreacion.slave_asignado_a_id)
+    ) {
+      regularizacionPendientes.push(PENDIENTE_RESPONSABLE_URGENTE);
+    }
+    const requiereRegularizacion = regularizacionPendientes.length > 0;
+
+    transaction = await sequelize.transaction();
+    const ordenBloqueada = await OrdenTrabajo.findByPk(ordenId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const estadoOrdenBloqueada = limpiarTexto(ordenBloqueada?.estado).toUpperCase();
+
+    if (
+      !ordenBloqueada ||
+      ordenBloqueada.archivada === true ||
+      ["ENTREGADO", "ANULADO", "CANCELADO", "ARCHIVADO"].includes(
+        estadoOrdenBloqueada
+      )
+    ) {
+      await transaction.rollback();
+      return responderDescartandoArchivo(req, res, 409, {
+        error: "ORDEN_NO_ACTIVA",
+        message: "La orden dejó de estar activa antes de crear File Service.",
       });
     }
 
@@ -1447,7 +1797,16 @@ const crearArchivoECU = async (req, res) => {
       ordenId,
 
       estado: "NOTIFICADO_MASTER",
-      prioridad: limpiarTexto(req.body.prioridad) || "MEDIA",
+      prioridad: modoUrgente ? "URGENTE" : limpiarTexto(req.body.prioridad) || "MEDIA",
+      creado_en_modo_urgente: modoUrgente,
+      motivo_urgencia: modoUrgente ? motivoUrgencia : null,
+      requiere_regularizacion: requiereRegularizacion,
+      regularizacion_pendientes: regularizacionPendientes,
+      regularizar_antes_de_entrega: requiereRegularizacion,
+      urgente_creado_por: modoUrgente ? usuarioActual(req) : null,
+      urgente_creado_at: modoUrgente ? new Date() : null,
+      regularizado_por: null,
+      regularizado_at: null,
       tipo_servicio: tipoServicioFinal,
       diagnosticoId,
       dtc_snapshot: dtcSnapshot,
@@ -1517,44 +1876,106 @@ const crearArchivoECU = async (req, res) => {
       observacion_cierre_tecnico: null,
 
       archivado: false,
-    });
+    }, { transaction });
+
+    await ordenBloqueada.update(
+      {
+        estado: "EN_PROGRAMACION",
+        tecnico_finalizado_at: null,
+        tecnico_finalizado_por: null,
+      },
+      { transaction }
+    );
+
+    for (const override of overridesGuardia) {
+      await registrarEventoFileServiceOrden({
+        ordenId,
+        archivoECUId: nuevoArchivo.id,
+        tipo_evento: "OVERRIDE_GUARDIA_FILE_SERVICE",
+        titulo: "Asignacion urgente con override de guardia",
+        descripcion: override.motivo_override,
+        usuario: usuarioActual(req),
+        usuario_rol: req.usuario?.rol || req.user?.rol || null,
+        metadata: override,
+        estricto: true,
+        transaction,
+      });
+    }
+    await transaction.commit();
+    archivoPersistido = true;
+
+    const advertenciasOperativas = [];
 
     try {
-      await orden.update({
-        estado: "EN_PROGRAMACION",
+      await crearNotificacionesInternas({
+        rolesDestino: modoUrgente
+          ? ["TUNER", "OWNER", "SUPERVISOR"]
+          : ["TUNER", "OWNER"],
+        tipo: "FILE_ORIGINAL_CARGADO",
+        titulo: modoUrgente
+          ? "File Service urgente original cargado"
+          : "File Service original cargado",
+        mensaje: `Se cargo un archivo original para la orden #${ordenId}.`,
+        ordenId,
+        archivoECUId: nuevoArchivo.id,
+        metadata: {
+          prioridad: modoUrgente ? "URGENTE" : nuevoArchivo.prioridad,
+          creado_en_modo_urgente: modoUrgente,
+          motivo_urgencia: modoUrgente ? motivoUrgencia : null,
+          regularizacion_pendientes: regularizacionPendientes,
+          override_guardia: overridesGuardia,
+        },
       });
-    } catch (estadoError) {
+    } catch (errorNotificacion) {
+      advertenciasOperativas.push("NOTIFICACION_INTERNA_PENDIENTE");
       console.warn(
-        "No se pudo actualizar estado de orden al crear File Service:",
-        estadoError.message
+        "File Service creado, pero fallo la notificacion interna:",
+        errorNotificacion.message
       );
     }
 
-    await crearNotificacionesInternas({
-      rolesDestino: ["TUNER", "OWNER"],
-      tipo: "FILE_ORIGINAL_CARGADO",
-      titulo: "File Service original cargado",
-      mensaje: `Se cargo un archivo original para la orden #${ordenId}.`,
-      ordenId,
-      archivoECUId: nuevoArchivo.id,
-    });
-
-    await registrarEventoFileServiceCreado({
-      req,
-      ordenId,
-      archivoECUId: nuevoArchivo.id,
-      servicios_solicitados: serviciosSolicitados,
-      dtc_snapshot: dtcSnapshot,
-      servicios_preset: preset || null,
-    });
+    try {
+      await registrarEventoFileServiceCreado({
+        req,
+        ordenId,
+        archivoECUId: nuevoArchivo.id,
+        servicios_solicitados: serviciosSolicitados,
+        dtc_snapshot: dtcSnapshot,
+        servicios_preset: preset || null,
+        creado_en_modo_urgente: modoUrgente,
+        motivo_urgencia: modoUrgente ? motivoUrgencia : null,
+        regularizacion_pendientes: regularizacionPendientes,
+        override_guardia: overridesGuardia,
+      });
+    } catch (errorAuditoria) {
+      advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      console.warn(
+        "File Service creado, pero fallo el evento de auditoria:",
+        errorAuditoria.message
+      );
+    }
 
     res.status(201).json({
-      mensaje: "Archivo ECU guardado y Master notificado internamente",
+      mensaje: modoUrgente
+        ? "Archivo ECU urgente guardado con advertencias de regularizacion"
+        : "Archivo ECU guardado y Master notificado internamente",
       archivo: nuevoArchivo,
       id: nuevoArchivo.id,
       archivoECUId: nuevoArchivo.id,
+      requiere_regularizacion: requiereRegularizacion,
+      advertencias: modoUrgente ? regularizacionPendientes : [],
+      diagnostico_faltantes:
+        modoUrgente && !validacion.ok ? validacion.faltantes || [] : [],
+      advertencias_operativas: advertenciasOperativas,
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    if (!archivoPersistido) {
+      await eliminarArchivoLocal(req.file);
+    }
+
     console.error("ERROR AL CREAR ARCHIVO ECU:", error);
 
     const controlado = responderErrorResponsable(res, error);
@@ -1568,19 +1989,22 @@ const crearArchivoECU = async (req, res) => {
 };
 
 const subirArchivoModificado = async (req, res) => {
+  let cambioPersistido = false;
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
     const archivo = await ArchivoECU.findByPk(req.params.id);
 
     if (!archivo) {
-      return res.status(404).json({
+      return responderDescartandoArchivo(req, res, 404, {
         error: "Registro no encontrado",
       });
     }
 
     if (archivo.archivado) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "No puedes subir modificaciones a un archivo archivado",
       });
     }
@@ -1601,6 +2025,27 @@ const subirArchivoModificado = async (req, res) => {
       instruccionesTuner ||
       archivo.observaciones ||
       "";
+
+    transaction = await sequelize.transaction();
+    await archivo.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    const ordenBloqueada = await OrdenTrabajo.findByPk(archivo.ordenId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const estadoOrden = limpiarTexto(ordenBloqueada?.estado).toUpperCase();
+
+    if (
+      archivo.archivado === true ||
+      !ordenBloqueada ||
+      ordenBloqueada.archivada === true ||
+      ["ENTREGADO", "ANULADO", "CANCELADO", "ARCHIVADO"].includes(estadoOrden)
+    ) {
+      await transaction.rollback();
+      return responderDescartandoArchivo(req, res, 409, {
+        error: "ORDEN_NO_ACTIVA",
+        message: "No puedes subir un MOD sobre una orden cerrada o archivada.",
+      });
+    }
 
     const versionesActuales = normalizarVersiones(archivo.versiones_modificadas);
 
@@ -1656,45 +2101,77 @@ const subirArchivoModificado = async (req, res) => {
       cierre_tecnico_por_id: null,
       resultado_tecnico: "PENDIENTE",
       observacion_cierre_tecnico: null,
-    });
+    }, { transaction });
 
-    await registrarEventoFileServiceOrden({
-      ordenId: archivo.ordenId,
-      archivoECUId: archivo.id,
-      tipo_evento: "MOD_SUBIDO",
-      titulo: "MOD cargado",
-      descripcion: `Se cargo ${nuevaVersion.etiqueta} para File Service.`,
-      usuario: usuarioActual(req),
-      usuario_rol: req.usuario?.rol || req.user?.rol || null,
-      metadata: {
-        version: nuevaVersionNumero,
-        es_final: req.body.es_final === "true" || req.body.es_final === true,
+    await ordenBloqueada.update(
+      {
+        estado: "EN_PROGRAMACION",
+        tecnico_finalizado_at: null,
+        tecnico_finalizado_por: null,
       },
-    });
+      { transaction }
+    );
+    await transaction.commit();
+    cambioPersistido = true;
 
-    await crearNotificacionesInternas({
-      rolesDestino: ["OPERADOR_ECU", "OWNER"],
-      tipo: "FILE_MOD_LISTO",
-      titulo: "MOD listo para escritura",
-      mensaje: `Se cargo ${nuevaVersion.etiqueta} para el File Service #${archivo.id}.`,
-      ordenId: archivo.ordenId,
-      archivoECUId: archivo.id,
-      accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
-      accion_tipo: "ABRIR_POST_ESCRITURA",
-      entidad_tipo: "ARCHIVO_ECU",
-      entidad_id: archivo.id,
-      metadata: {
-        prioridad: "ALTA",
-        proceso_guard: true,
-      },
-    });
+    const advertenciasOperativas = [];
+
+    try {
+      await registrarEventoFileServiceOrden({
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        tipo_evento: "MOD_SUBIDO",
+        titulo: "MOD cargado",
+        descripcion: `Se cargo ${nuevaVersion.etiqueta} para File Service.`,
+        usuario: usuarioActual(req),
+        usuario_rol: req.usuario?.rol || req.user?.rol || null,
+        metadata: {
+          version: nuevaVersionNumero,
+          es_final: req.body.es_final === "true" || req.body.es_final === true,
+        },
+        estricto: true,
+      });
+    } catch (errorEvento) {
+      advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      console.warn("MOD persistido, pero fallo su evento:", errorEvento.message);
+    }
+
+    try {
+      await crearNotificacionesInternas({
+        rolesDestino: ["OPERADOR_ECU", "OWNER"],
+        tipo: "FILE_MOD_LISTO",
+        titulo: "MOD listo para escritura",
+        mensaje: `Se cargo ${nuevaVersion.etiqueta} para el File Service #${archivo.id}.`,
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+        accion_tipo: "ABRIR_POST_ESCRITURA",
+        entidad_tipo: "ARCHIVO_ECU",
+        entidad_id: archivo.id,
+        metadata: {
+          prioridad: "ALTA",
+          proceso_guard: true,
+        },
+      });
+    } catch (errorNotificacion) {
+      advertenciasOperativas.push("NOTIFICACION_INTERNA_PENDIENTE");
+      console.warn("MOD persistido, pero fallo su notificacion:", errorNotificacion.message);
+    }
 
     res.json({
       mensaje: `Software modificado ${nuevaVersion.etiqueta} cargado con éxito`,
       archivo,
       version: nuevaVersion,
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+    if (!cambioPersistido) {
+      await eliminarArchivoLocal(req.file);
+    }
+
     console.error("ERROR AL SUBIR ARCHIVO MODIFICADO:", error);
 
     res.status(500).json({
@@ -1704,19 +2181,21 @@ const subirArchivoModificado = async (req, res) => {
 };
 
 const registrarProcesamientoExterno = async (req, res) => {
+  let cambioPersistido = false;
+
   try {
     await prepararColumnas();
 
     const archivo = await ArchivoECU.findByPk(req.params.id);
 
     if (!archivo) {
-      return res.status(404).json({
+      return responderDescartandoArchivo(req, res, 404, {
         error: "Registro no encontrado",
       });
     }
 
     if (archivo.archivado) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "No puedes registrar procesamiento externo en un archivo archivado",
       });
     }
@@ -1750,13 +2229,13 @@ const registrarProcesamientoExterno = async (req, res) => {
     herramienta = herramienta.toUpperCase();
 
     if (!estadosPermitidos.includes(estado)) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "Estado de procesamiento externo inválido",
       });
     }
 
     if (!herramientasPermitidas.includes(herramienta)) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "Herramienta de procesamiento externo inválida",
       });
     }
@@ -1790,6 +2269,7 @@ const registrarProcesamientoExterno = async (req, res) => {
         rutaArchivo || archivo.procesamiento_externo_archivo_resultado,
       procesamiento_externo_archivos: [...historial, evento],
     });
+    cambioPersistido = true;
 
     res.json({
       mensaje: "Procesamiento externo registrado correctamente",
@@ -1797,6 +2277,10 @@ const registrarProcesamientoExterno = async (req, res) => {
       evento,
     });
   } catch (error) {
+    if (!cambioPersistido) {
+      await eliminarArchivoLocal(req.file);
+    }
+
     console.error("ERROR AL REGISTRAR PROCESAMIENTO EXTERNO:", error);
 
     res.status(500).json({
@@ -1806,34 +2290,52 @@ const registrarProcesamientoExterno = async (req, res) => {
 };
 
 const notificarMaster = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
-    const archivo = await ArchivoECU.findByPk(req.params.id);
+    transaction = await sequelize.transaction();
+    const archivo = await ArchivoECU.findByPk(req.params.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
 
     if (!archivo) {
+      await transaction.rollback();
       return res.status(404).json({
         error: "Archivo ECU no encontrado",
       });
     }
 
     if (archivo.archivado) {
+      await transaction.rollback();
       return res.status(400).json({
         error: "No puedes notificar un archivo archivado",
       });
+    }
+
+    if (archivoTieneCierreTecnicoOK(archivo)) {
+      await transaction.rollback();
+      return responderArchivoTecnicoCerrado(res);
     }
 
     await archivo.update({
       estado: "NOTIFICADO_MASTER",
       notificado_master_at: new Date(),
       notificado_master_por: usuarioActual(req),
-    });
+    }, { transaction });
+    await transaction.commit();
 
     res.json({
       mensaje: "Master notificado correctamente",
       archivo,
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR NOTIFICANDO MASTER:", error);
 
     res.status(500).json({
@@ -1843,24 +2345,38 @@ const notificarMaster = async (req, res) => {
 };
 
 const notificarSlave = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
-    const archivo = await ArchivoECU.findByPk(req.params.id);
+    transaction = await sequelize.transaction();
+    const archivo = await ArchivoECU.findByPk(req.params.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
 
     if (!archivo) {
+      await transaction.rollback();
       return res.status(404).json({
         error: "Archivo ECU no encontrado",
       });
     }
 
     if (archivo.archivado) {
+      await transaction.rollback();
       return res.status(400).json({
         error: "No puedes notificar un archivo archivado",
       });
     }
 
+    if (archivoTieneCierreTecnicoOK(archivo)) {
+      await transaction.rollback();
+      return responderArchivoTecnicoCerrado(res);
+    }
+
     if (!archivo.archivo_modificado) {
+      await transaction.rollback();
       return res.status(400).json({
         error: "No puedes notificar al Slave sin archivo modificado cargado",
       });
@@ -1879,13 +2395,18 @@ const notificarSlave = async (req, res) => {
       proceso_guard_responsable_id: processGuardResponsableArchivo(archivo),
       cierre_tecnico_obligatorio: true,
       resultado_tecnico: normalizarResultadoTecnico(archivo.resultado_tecnico),
-    });
+    }, { transaction });
+    await transaction.commit();
 
     res.json({
       mensaje: "Slave / Operador ECU notificado correctamente",
       archivo,
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR NOTIFICANDO SLAVE:", error);
 
     res.status(500).json({
@@ -1895,6 +2416,8 @@ const notificarSlave = async (req, res) => {
 };
 
 const solicitarCorreccion = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
@@ -1921,6 +2444,26 @@ const solicitarCorreccion = async (req, res) => {
       });
     }
 
+    transaction = await sequelize.transaction();
+    await archivo.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    const ordenBloqueada = await OrdenTrabajo.findByPk(archivo.ordenId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const estadoOrden = limpiarTexto(ordenBloqueada?.estado).toUpperCase();
+
+    if (
+      !ordenBloqueada ||
+      ordenBloqueada.archivada === true ||
+      ["ENTREGADO", "ANULADO", "CANCELADO", "ARCHIVADO"].includes(estadoOrden)
+    ) {
+      await transaction.rollback();
+      return res.status(409).json({
+        error: "ORDEN_NO_ACTIVA",
+        message: "No puedes reabrir File Service sobre una orden cerrada o archivada.",
+      });
+    }
+
     await archivo.update({
       estado: "REQUIERE_CORRECCION",
       correccion_pendiente: true,
@@ -1929,45 +2472,76 @@ const solicitarCorreccion = async (req, res) => {
       proceso_guard_estado: "CRITICO",
       proceso_guard_started_at: archivo.proceso_guard_started_at || new Date(),
       cierre_tecnico_obligatorio: true,
+      cierre_tecnico_at: null,
+      cierre_tecnico_por: null,
+      cierre_tecnico_por_id: null,
       resultado_tecnico: "REQUIERE_CORRECCION",
-    });
+    }, { transaction });
 
-    await crearNotificacionesInternas({
-      rolesDestino: ["TUNER", "OWNER"],
-      tipo: "FILE_REQUIERE_CORRECCION",
-      titulo: "File Service requiere correccion",
-      mensaje: `El File Service #${archivo.id} requiere correccion.`,
-      ordenId: archivo.ordenId,
-      archivoECUId: archivo.id,
-      accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
-      accion_tipo: "ABRIR_CORRECCION_FILE_SERVICE",
-      entidad_tipo: "ARCHIVO_ECU",
-      entidad_id: archivo.id,
-      metadata: {
-        prioridad: "URGENTE",
-        proceso_guard: true,
+    await ordenBloqueada.update(
+      {
+        estado: "EN_PROGRAMACION",
+        tecnico_finalizado_at: null,
+        tecnico_finalizado_por: null,
       },
-    });
+      { transaction }
+    );
+    await transaction.commit();
 
-    await registrarEventoFileServiceOrden({
-      ordenId: archivo.ordenId,
-      archivoECUId: archivo.id,
-      tipo_evento: "CORRECCION_SOLICITADA",
-      titulo: "Correccion File Service solicitada",
-      descripcion:
-        observacion || dtcPost || "Se solicito correccion tecnica de File Service.",
-      usuario: usuarioActual(req),
-      usuario_rol: req.usuario?.rol || req.user?.rol || null,
-      metadata: {
-        tiene_dtc_post: Boolean(dtcPost),
-      },
-    });
+    const advertenciasOperativas = [];
+
+    try {
+      await crearNotificacionesInternas({
+        rolesDestino: ["TUNER", "OWNER"],
+        tipo: "FILE_REQUIERE_CORRECCION",
+        titulo: "File Service requiere correccion",
+        mensaje: `El File Service #${archivo.id} requiere correccion.`,
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+        accion_tipo: "ABRIR_CORRECCION_FILE_SERVICE",
+        entidad_tipo: "ARCHIVO_ECU",
+        entidad_id: archivo.id,
+        metadata: {
+          prioridad: "URGENTE",
+          proceso_guard: true,
+        },
+      });
+    } catch (errorNotificacion) {
+      advertenciasOperativas.push("NOTIFICACION_INTERNA_PENDIENTE");
+      console.warn("Correccion persistida, pero fallo notificacion:", errorNotificacion.message);
+    }
+
+    try {
+      await registrarEventoFileServiceOrden({
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        tipo_evento: "CORRECCION_SOLICITADA",
+        titulo: "Correccion File Service solicitada",
+        descripcion:
+          observacion || dtcPost || "Se solicito correccion tecnica de File Service.",
+        usuario: usuarioActual(req),
+        usuario_rol: req.usuario?.rol || req.user?.rol || null,
+        metadata: {
+          tiene_dtc_post: Boolean(dtcPost),
+        },
+        estricto: true,
+      });
+    } catch (errorEvento) {
+      advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      console.warn("Correccion persistida, pero fallo evento:", errorEvento.message);
+    }
 
     res.json({
       mensaje: "Corrección solicitada. El tuner puede cargar una nueva versión MOD.",
       archivo,
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR SOLICITANDO CORRECCIÓN:", error);
 
     res.status(500).json({
@@ -1977,24 +2551,32 @@ const solicitarCorreccion = async (req, res) => {
 };
 
 const registrarPostEscritura = async (req, res) => {
+  let cambioPersistido = false;
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
     const archivo = await ArchivoECU.findByPk(req.params.id);
 
     if (!archivo) {
-      return res.status(404).json({
+      return responderDescartandoArchivo(req, res, 404, {
         error: "Archivo ECU no encontrado",
       });
     }
 
     if (archivo.archivado) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "No puedes registrar post escritura en un archivo archivado",
       });
     }
 
-    const resultado = limpiarTexto(req.body.post_escritura_estado);
+    if (archivoTieneCierreTecnicoOK(archivo)) {
+      await eliminarArchivoLocal(req.file);
+      return responderArchivoTecnicoCerrado(res);
+    }
+
+    const resultado = limpiarTexto(req.body.post_escritura_estado).toUpperCase();
     const dtc = limpiarTexto(req.body.post_escritura_dtc);
     const observacion = limpiarTexto(req.body.post_escritura_observacion);
 
@@ -2004,7 +2586,7 @@ const registrarPostEscritura = async (req, res) => {
       String(req.body.post_escritura_sin_dtc) === "1";
 
     if (!resultado) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "Debes indicar resultado post escritura",
       });
     }
@@ -2018,32 +2600,32 @@ const registrarPostEscritura = async (req, res) => {
     ];
 
     if (!resultadosPermitidos.includes(resultado)) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "Resultado post escritura inválido",
         permitidos: resultadosPermitidos,
       });
     }
 
     if (resultado !== "NO_APLICA" && !archivo.archivo_modificado) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "No puedes registrar post escritura sin archivo modificado cargado",
       });
     }
 
     if (resultado !== "NO_APLICA" && !req.file) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "La foto/captura del scanner post escritura es obligatoria",
       });
     }
 
     if (resultado === "NO_APLICA" && !observacion) {
-      return res.status(400).json({
+      return responderDescartandoArchivo(req, res, 400, {
         error: "Debes indicar observacion tecnica cuando post escritura no aplica",
       });
     }
 
-    if (!sinDtc && !dtc) {
-      return res.status(400).json({
+    if (resultado !== "NO_APLICA" && !sinDtc && !dtc) {
+      return responderDescartandoArchivo(req, res, 400, {
         error: "Debes ingresar DTC post escritura o marcar SIN DTC POST ESCRITURA",
       });
     }
@@ -2076,6 +2658,29 @@ const registrarPostEscritura = async (req, res) => {
         ? "ADVERTENCIA"
         : "CRITICO";
 
+    transaction = await sequelize.transaction();
+    await archivo.reload({ transaction, lock: transaction.LOCK.UPDATE });
+
+    if (archivo.archivado) {
+      await transaction.rollback();
+      return responderDescartandoArchivo(req, res, 400, {
+        error: "No puedes registrar post escritura en un archivo archivado",
+      });
+    }
+
+    if (archivoTieneCierreTecnicoOK(archivo)) {
+      await transaction.rollback();
+      await eliminarArchivoLocal(req.file);
+      return responderArchivoTecnicoCerrado(res);
+    }
+
+    if (resultado !== "NO_APLICA" && !archivo.archivo_modificado) {
+      await transaction.rollback();
+      return responderDescartandoArchivo(req, res, 400, {
+        error: "No puedes registrar post escritura sin archivo modificado cargado",
+      });
+    }
+
     await archivo.update({
       estado: nuevoEstado,
 
@@ -2101,22 +2706,32 @@ const registrarPostEscritura = async (req, res) => {
         resultado === "REQUIERE_CORRECCION" || resultado === "FALLO_ESCRITURA"
           ? observacion
           : archivo.observacion_correccion,
-    });
+    }, { transaction });
+    await transaction.commit();
+    cambioPersistido = true;
 
-    await registrarEventoFileServiceOrden({
-      ordenId: archivo.ordenId,
-      archivoECUId: archivo.id,
-      tipo_evento: "POST_ESCRITURA_REGISTRADA",
-      titulo: "Post escritura registrada",
-      descripcion: `Resultado post escritura: ${resultado}.`,
-      usuario: usuarioActual(req),
-      usuario_rol: req.usuario?.rol || req.user?.rol || null,
-      metadata: {
-        resultado,
-        sin_dtc: sinDtc,
-        tiene_dtc: Boolean(textoDtc),
-      },
-    });
+    const advertenciasOperativas = [];
+
+    try {
+      await registrarEventoFileServiceOrden({
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        tipo_evento: "POST_ESCRITURA_REGISTRADA",
+        titulo: "Post escritura registrada",
+        descripcion: `Resultado post escritura: ${resultado}.`,
+        usuario: usuarioActual(req),
+        usuario_rol: req.usuario?.rol || req.user?.rol || null,
+        metadata: {
+          resultado,
+          sin_dtc: sinDtc,
+          tiene_dtc: Boolean(textoDtc),
+        },
+        estricto: true,
+      });
+    } catch (errorEvento) {
+      advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      console.warn("Post escritura persistida, pero fallo su evento:", errorEvento.message);
+    }
 
     res.json({
       mensaje:
@@ -2124,8 +2739,17 @@ const registrarPostEscritura = async (req, res) => {
           ? "Post escritura registrado correctamente. Archivo listo para cierre técnico."
           : "Post escritura registrado. Revisa el estado del trabajo.",
       archivo,
+      advertencias_operativas: advertenciasOperativas,
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
+    if (!cambioPersistido) {
+      await eliminarArchivoLocal(req.file);
+    }
+
     console.error("ERROR REGISTRANDO POST ESCRITURA:", error);
 
     res.status(500).json({
@@ -2135,24 +2759,38 @@ const registrarPostEscritura = async (req, res) => {
 };
 
 const marcarModDescargado = async (req, res) => {
+  let transaction = null;
+
   try {
     await prepararColumnas();
 
-    const archivo = await ArchivoECU.findByPk(req.params.id);
+    transaction = await sequelize.transaction();
+    const archivo = await ArchivoECU.findByPk(req.params.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
 
     if (!archivo) {
+      await transaction.rollback();
       return res.status(404).json({
         error: "Archivo ECU no encontrado",
       });
     }
 
     if (archivo.archivado) {
+      await transaction.rollback();
       return res.status(400).json({
         error: "No puedes marcar MOD descargado en un archivo archivado",
       });
     }
 
+    if (archivoTieneCierreTecnicoOK(archivo)) {
+      await transaction.rollback();
+      return responderArchivoTecnicoCerrado(res);
+    }
+
     if (!archivo.archivo_modificado) {
+      await transaction.rollback();
       return res.status(400).json({
         error: "No puedes marcar MOD descargado sin archivo modificado cargado",
       });
@@ -2174,7 +2812,8 @@ const marcarModDescargado = async (req, res) => {
       proceso_guard_responsable_id: processGuardResponsableArchivo(archivo),
       cierre_tecnico_obligatorio: true,
       resultado_tecnico: normalizarResultadoTecnico(archivo.resultado_tecnico),
-    });
+    }, { transaction });
+    await transaction.commit();
 
     res.json({
       mensaje:
@@ -2183,6 +2822,10 @@ const marcarModDescargado = async (req, res) => {
       process_guard: evaluacion,
     });
   } catch (error) {
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
     console.error("ERROR MARCANDO MOD DESCARGADO:", error);
 
     res.status(500).json({
@@ -2192,19 +2835,29 @@ const marcarModDescargado = async (req, res) => {
 };
 
 const registrarCierreTecnico = async (req, res) => {
-  const transaction = await sequelize.transaction();
+  let transaction = null;
 
   try {
+    transaction = await sequelize.transaction();
     await prepararColumnas();
 
-    const archivo = await ArchivoECU.findByPk(req.params.id, { transaction });
+    const referenciaArchivo = await ArchivoECU.findByPk(req.params.id, {
+      attributes: ["id", "ordenId"],
+      transaction,
+    });
 
-    if (!archivo) {
+    if (!referenciaArchivo) {
       await transaction.rollback();
       return res.status(404).json({
         error: "Archivo ECU no encontrado",
       });
     }
+
+    await bloquearArchivosFileServiceOrden(
+      referenciaArchivo.ordenId,
+      transaction
+    );
+    const archivo = await ArchivoECU.findByPk(req.params.id, { transaction });
 
     if (archivo.archivado) {
       await transaction.rollback();
@@ -2213,15 +2866,45 @@ const registrarCierreTecnico = async (req, res) => {
       });
     }
 
-    const resultado = normalizarResultadoTecnico(
+    if (archivoTieneCierreTecnicoOK(archivo)) {
+      await transaction.rollback();
+      return responderArchivoTecnicoCerrado(res);
+    }
+
+    const ordenBloqueada = await OrdenTrabajo.findByPk(archivo.ordenId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const estadoOrdenBloqueada = limpiarTexto(ordenBloqueada?.estado).toUpperCase();
+
+    if (
+      !ordenBloqueada ||
+      ordenBloqueada.archivada === true ||
+      ["ENTREGADO", "ANULADO", "CANCELADO", "ARCHIVADO"].includes(
+        estadoOrdenBloqueada
+      )
+    ) {
+      await transaction.rollback();
+      return res.status(409).json({
+        error: "ORDEN_NO_ACTIVA",
+        message: "No puedes cerrar File Service sobre una orden cerrada o archivada.",
+      });
+    }
+
+    const resultadoSolicitado = limpiarTexto(
       req.body.resultado_tecnico || req.body.resultado
-    );
-    const observacion =
+    ).toUpperCase();
+    const resultadoCanonico =
+      resultadoSolicitado === "FALLO_ESCRITURA"
+        ? "FALLO"
+        : resultadoSolicitado;
+    const resultado = normalizarResultadoTecnico(resultadoCanonico);
+    let observacion =
       limpiarTexto(req.body.observacion_cierre_tecnico) ||
       limpiarTexto(req.body.observacion) ||
       "";
 
-    if (!RESULTADOS_TECNICOS.includes(resultado)) {
+    if (!RESULTADOS_TECNICOS.includes(resultadoCanonico)) {
       await transaction.rollback();
       return res.status(400).json({
         error: "Resultado técnico inválido",
@@ -2230,10 +2913,59 @@ const registrarCierreTecnico = async (req, res) => {
     }
 
     let checklistCierre = null;
+    let evaluacionRegularizacion = null;
+    let overrideRegularizacionAutorizado = false;
+    let motivoOverrideRegularizacion = "";
 
     if (resultado === "OK") {
+      await validarResponsablesPersistidosActivos(archivo);
+
+      if (archivo.creado_en_modo_urgente) {
+        evaluacionRegularizacion = await evaluarRegularizacionUrgente(archivo);
+
+        if (evaluacionRegularizacion.pendientes.length > 0) {
+          const solicitaOverride = valorBooleano(req.body.override_regularizacion);
+          motivoOverrideRegularizacion = limpiarTexto(req.body.motivo_override);
+
+          if (!solicitaOverride) {
+            await transaction.rollback();
+            return res.status(400).json({
+              error: "REGULARIZACION_PENDIENTE",
+              message:
+                "El File Service urgente debe regularizarse antes del cierre técnico OK.",
+              pendientes: evaluacionRegularizacion.pendientes,
+              diagnostico_faltantes:
+                evaluacionRegularizacion.diagnostico_faltantes || [],
+            });
+          }
+
+          if (!esJefaturaUrgente(req)) {
+            await transaction.rollback();
+            return res.status(403).json({
+              error: "OVERRIDE_REGULARIZACION_NO_AUTORIZADO",
+              message: "Solo jefatura puede autorizar cierre con regularización pendiente.",
+            });
+          }
+
+          if (!motivoOverrideRegularizacion) {
+            await transaction.rollback();
+            return res.status(400).json({
+              error: "MOTIVO_OVERRIDE_REQUERIDO",
+              message: "Debes justificar el override de regularización.",
+            });
+          }
+
+          overrideRegularizacionAutorizado = true;
+        }
+      }
+
       checklistCierre = validarChecklistCierreTecnicoOK(archivo, observacion, {
-        permitirLegacySinResponsable: puedeCerrarLegacySinResponsable(req),
+        permitirLegacySinResponsable:
+          puedeCerrarLegacySinResponsable(req) &&
+          archivo.creado_en_modo_urgente !== true &&
+          !tieneResponsableFileService(archivo),
+        permitirSinResponsableAutorizado:
+          overrideRegularizacionAutorizado && esJefaturaUrgente(req),
       });
       const { faltantes } = checklistCierre;
 
@@ -2244,6 +2976,10 @@ const registrarCierreTecnico = async (req, res) => {
           message: "No se puede cerrar tecnicamente. Faltan requisitos.",
           faltantes,
         });
+      }
+
+      if (overrideRegularizacionAutorizado) {
+        observacion = `${observacion}\n[OVERRIDE REGULARIZACION URGENTE] ${motivoOverrideRegularizacion}`;
       }
     } else if (!observacion) {
       await transaction.rollback();
@@ -2262,6 +2998,16 @@ const registrarCierreTecnico = async (req, res) => {
     };
 
     if (resultado === "OK") {
+      if (archivo.creado_en_modo_urgente && evaluacionRegularizacion) {
+        aplicarEstadoRegularizacion({
+          payload,
+          evaluacion: evaluacionRegularizacion,
+          req,
+          registroActual: archivo,
+          overrideAutorizado: overrideRegularizacionAutorizado,
+        });
+      }
+
       payload.estado = "FINALIZADO_TECNICO";
       payload.correccion_pendiente = false;
       payload.proceso_guard_estado = "CERRADO";
@@ -2299,117 +3045,205 @@ const registrarCierreTecnico = async (req, res) => {
 
     await archivo.update(payload, { transaction });
 
-    if (resultado === "OK") {
-      const [resultadoOrden] = await sequelize.query(
-        `
-        UPDATE "ordenes_trabajo"
-        SET
-          "estado" = 'LISTO_PARA_ENTREGA',
-          "tecnico_finalizado_por" = :usuario,
-          "tecnico_finalizado_at" = NOW(),
-          "updatedAt" = NOW()
-        WHERE "id" = :ordenId
-        RETURNING "id";
-        `,
+    if (resultado !== "OK") {
+      await ordenBloqueada.update(
         {
-          replacements: {
-            ordenId: archivo.ordenId,
-            usuario: usuarioActual(req),
-          },
-          transaction,
-        }
+          estado: "EN_PROGRAMACION",
+          tecnico_finalizado_at: null,
+          tecnico_finalizado_por: null,
+        },
+        { transaction }
       );
+    }
 
-      if (!resultadoOrden || resultadoOrden.length === 0) {
-        await transaction.rollback();
-        return res.status(404).json({
-          error:
-            "Cierre técnico válido, pero no se encontró la orden asociada. No se aplicaron cambios.",
-        });
+    let ordenListaParaEntrega = false;
+    let bloqueoOrden = null;
+
+    if (resultado === "OK") {
+      try {
+        const ordenValidada =
+          await validarOrdenListaParaEntregaDesdeFileService({
+            ordenId: archivo.ordenId,
+            transaction,
+          });
+
+        await ordenValidada.update(
+          {
+            estado: "LISTO_PARA_ENTREGA",
+            tecnico_finalizado_por: usuarioActual(req),
+            tecnico_finalizado_at: new Date(),
+          },
+          { transaction }
+        );
+        ordenListaParaEntrega = true;
+      } catch (errorOrden) {
+        const bloqueosEsperados = new Set([
+          "REGULARIZACION_PENDIENTE",
+          "CIERRE_TECNICO_FILE_SERVICE_REQUERIDO",
+          "MATERIAL_RECUPERADO_PENDIENTE",
+          "ITEMS_SERVICIO_PENDIENTES",
+        ]);
+
+        if (!bloqueosEsperados.has(errorOrden.codigo)) throw errorOrden;
+
+        bloqueoOrden = {
+          codigo: errorOrden.codigo,
+          message: errorOrden.message,
+          advertencias: errorOrden.advertencias || [],
+          archivos_pendientes: errorOrden.archivos_pendientes || [],
+          items_pendientes: errorOrden.itemsPendientes || [],
+        };
       }
+    }
+
+    if (overrideRegularizacionAutorizado) {
+      await registrarEventoFileServiceOrden({
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        tipo_evento: "OVERRIDE_REGULARIZACION_FILE_SERVICE",
+        titulo: "Cierre urgente autorizado con pendientes",
+        descripcion: motivoOverrideRegularizacion,
+        usuario: usuarioActual(req),
+        usuario_rol: req.usuario?.rol || req.user?.rol || null,
+        metadata: {
+          regularizacion_pendientes:
+            evaluacionRegularizacion?.pendientes || [],
+          resultado_tecnico: resultado,
+        },
+        estricto: true,
+        transaction,
+      });
     }
 
     await transaction.commit();
 
-    const archivoActualizado = await ArchivoECU.findByPk(req.params.id);
+    const advertenciasOperativas = [];
+    const archivoActualizado = await recargarArchivoPostPersistenciaSeguro(
+      archivo,
+      advertenciasOperativas
+    );
 
-    await registrarEventoFileServiceOrden({
-      ordenId: archivo.ordenId,
-      archivoECUId: archivo.id,
-      tipo_evento: "CIERRE_TECNICO",
-      titulo:
-        resultado === "OK"
-          ? "Cierre tecnico File Service OK"
-          : "Cierre tecnico File Service no OK",
-      descripcion: observacion || `Resultado tecnico: ${resultado}.`,
-      usuario: usuarioActual(req),
-      usuario_rol: req.usuario?.rol || req.user?.rol || null,
-      metadata: {
-        resultado_tecnico: resultado,
-        legacy_sin_responsable_id:
-          checklistCierre?.legacy_sin_responsable_id || false,
-        legacy_sin_responsable:
-          checklistCierre?.legacy_sin_responsable || false,
-        cierre_legacy_autorizado:
-          checklistCierre?.cierre_legacy_autorizado || false,
-      },
-    });
-
-    if (resultado === "OK") {
-      await crearNotificacionesInternas({
-        rolesDestino: ["RECEPCION", "ADMIN", "OWNER"],
-        tipo: "ORDEN_LISTA_ENTREGA",
-        titulo: "Orden lista para entrega",
-        mensaje: `La orden #${archivo.ordenId} esta lista para entrega comercial.`,
+    try {
+      await registrarEventoFileServiceOrden({
         ordenId: archivo.ordenId,
         archivoECUId: archivo.id,
-        accion_url: `/ordenes?ordenId=${archivo.ordenId}#entrega`,
-        accion_tipo: "ABRIR_ENTREGA",
-        entidad_tipo: "ORDEN_TRABAJO",
-        entidad_id: archivo.ordenId,
+        tipo_evento: "CIERRE_TECNICO",
+        titulo:
+          resultado === "OK"
+            ? "Cierre tecnico File Service OK"
+            : "Cierre tecnico File Service no OK",
+        descripcion: observacion || `Resultado tecnico: ${resultado}.`,
+        usuario: usuarioActual(req),
+        usuario_rol: req.usuario?.rol || req.user?.rol || null,
         metadata: {
-          proceso_guard: true,
-          prioridad: "ALTA",
-        },
-      });
-    } else {
-      await crearNotificacionesInternas({
-        rolesDestino: ["OWNER", "SUPERVISOR", "TUNER", "OPERADOR_ECU"],
-        tipo: "PROCESS_GUARD_CIERRE_NO_OK",
-        titulo: "Cierre técnico requiere acción",
-        mensaje: `File Service #${archivo.id} quedó con resultado técnico ${resultado}.`,
-        ordenId: archivo.ordenId,
-        archivoECUId: archivo.id,
-        accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
-        accion_tipo: "ABRIR_PROCESS_GUARD",
-        entidad_tipo: "ARCHIVO_ECU",
-        entidad_id: archivo.id,
-        metadata: {
-          proceso_guard: true,
           resultado_tecnico: resultado,
-          prioridad: ["REQUIERE_CORRECCION", "REQUIERE_NUEVA_LECTURA", "FALLO"].includes(
-            resultado
-          )
-            ? "URGENTE"
-            : "ALTA",
+          orden_lista_para_entrega: ordenListaParaEntrega,
+          bloqueo_orden: bloqueoOrden,
+          legacy_sin_responsable_id:
+            checklistCierre?.legacy_sin_responsable_id || false,
+          legacy_sin_responsable:
+            checklistCierre?.legacy_sin_responsable || false,
+          cierre_legacy_autorizado:
+            checklistCierre?.cierre_legacy_autorizado || false,
+          creado_en_modo_urgente: archivo.creado_en_modo_urgente === true,
+          regularizacion_pendientes:
+            evaluacionRegularizacion?.pendientes || [],
+          override_regularizacion: overrideRegularizacionAutorizado,
+          motivo_override: overrideRegularizacionAutorizado
+            ? motivoOverrideRegularizacion
+            : null,
         },
+        estricto: true,
       });
+    } catch (errorEvento) {
+      advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+      console.warn("Cierre persistido, pero fallo su evento:", errorEvento.message);
+    }
+
+    try {
+      if (resultado === "OK" && ordenListaParaEntrega) {
+        await crearNotificacionesInternas({
+          rolesDestino: ["RECEPCION", "ADMIN", "OWNER"],
+          tipo: "ORDEN_LISTA_ENTREGA",
+          titulo: "Orden lista para entrega",
+          mensaje: `La orden #${archivo.ordenId} esta lista para entrega comercial.`,
+          ordenId: archivo.ordenId,
+          archivoECUId: archivo.id,
+          accion_url: `/ordenes?ordenId=${archivo.ordenId}#entrega`,
+          accion_tipo: "ABRIR_ENTREGA",
+          entidad_tipo: "ORDEN_TRABAJO",
+          entidad_id: archivo.ordenId,
+          metadata: { proceso_guard: true, prioridad: "ALTA" },
+        });
+      } else if (resultado === "OK") {
+        await crearNotificacionesInternas({
+          rolesDestino: ["RECEPCION", "SUPERVISOR", "ADMIN", "OWNER"],
+          tipo: "ORDEN_PENDIENTE_REGULARIZACION",
+          titulo: "File Service listo; orden aún no entregable",
+          mensaje: `La orden #${archivo.ordenId} debe completar controles antes de la entrega.`,
+          ordenId: archivo.ordenId,
+          archivoECUId: archivo.id,
+          accion_url: `/ordenes?ordenId=${archivo.ordenId}`,
+          metadata: { bloqueo_orden: bloqueoOrden, prioridad: "ALTA" },
+        });
+      } else {
+        await crearNotificacionesInternas({
+          rolesDestino: ["OWNER", "SUPERVISOR", "TUNER", "OPERADOR_ECU"],
+          tipo: "PROCESS_GUARD_CIERRE_NO_OK",
+          titulo: "Cierre técnico requiere acción",
+          mensaje: `File Service #${archivo.id} quedó con resultado técnico ${resultado}.`,
+          ordenId: archivo.ordenId,
+          archivoECUId: archivo.id,
+          accion_url: `/archivos-ecu?archivoId=${archivo.id}#post-escritura`,
+          accion_tipo: "ABRIR_PROCESS_GUARD",
+          entidad_tipo: "ARCHIVO_ECU",
+          entidad_id: archivo.id,
+          metadata: {
+            proceso_guard: true,
+            resultado_tecnico: resultado,
+            prioridad: [
+              "REQUIERE_CORRECCION",
+              "REQUIERE_NUEVA_LECTURA",
+              "FALLO",
+            ].includes(resultado)
+              ? "URGENTE"
+              : "ALTA",
+          },
+        });
+      }
+    } catch (errorNotificacion) {
+      advertenciasOperativas.push("NOTIFICACION_INTERNA_PENDIENTE");
+      console.warn(
+        "Cierre persistido, pero fallo la notificacion:",
+        errorNotificacion.message
+      );
     }
 
     res.json({
       mensaje:
-        resultado === "OK"
+        resultado === "OK" && ordenListaParaEntrega
           ? "Cierre técnico registrado. Orden lista para entrega comercial."
+          : resultado === "OK"
+            ? "Cierre técnico registrado. La orden sigue activa hasta completar sus controles."
           : "Resultado técnico registrado. El proceso sigue pendiente hasta resolver.",
       archivo: archivoActualizado,
+      orden_lista_para_entrega: ordenListaParaEntrega,
+      bloqueo_orden: bloqueoOrden,
+      advertencias_operativas: advertenciasOperativas,
     });
   } catch (error) {
-    await transaction.rollback();
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
 
     console.error("ERROR REGISTRANDO CIERRE TECNICO:", error);
 
-    res.status(500).json({
-      error: error.message,
+    const controlado = responderErrorResponsable(res, error);
+    if (controlado) return;
+
+    res.status(error.statusCode || 500).json({
+      error: error.codigo || error.message,
+      message: error.message,
     });
   }
 };
@@ -2512,20 +3346,30 @@ const obtenerArchivoECUPorId = async (req, res) => {
 };
 
 const actualizarArchivoECU = async (req, res) => {
-  const transaction = await sequelize.transaction();
+  let transaction = null;
 
   try {
+    transaction = await sequelize.transaction();
     await prepararColumnas();
 
-    const archivo = await ArchivoECU.findByPk(req.params.id, { transaction });
+    const referenciaArchivo = await ArchivoECU.findByPk(req.params.id, {
+      attributes: ["id", "ordenId"],
+      transaction,
+    });
 
-    if (!archivo) {
+    if (!referenciaArchivo) {
       await transaction.rollback();
 
       return res.status(404).json({
         error: "No encontrado",
       });
     }
+
+    await bloquearArchivosFileServiceOrden(
+      referenciaArchivo.ordenId,
+      transaction
+    );
+    const archivo = await ArchivoECU.findByPk(req.params.id, { transaction });
 
     if (archivo.archivado) {
       await transaction.rollback();
@@ -2535,37 +3379,78 @@ const actualizarArchivoECU = async (req, res) => {
       });
     }
 
-    const nuevoEstado = limpiarTexto(req.body.estado);
+    const ordenBloqueada = await OrdenTrabajo.findByPk(archivo.ordenId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    const estadoOrdenBloqueada = limpiarTexto(ordenBloqueada?.estado).toUpperCase();
+
+    if (
+      !ordenBloqueada ||
+      ordenBloqueada.archivada === true ||
+      ["ENTREGADO", "ANULADO", "CANCELADO", "ARCHIVADO"].includes(
+        estadoOrdenBloqueada
+      )
+    ) {
+      await transaction.rollback();
+      return res.status(409).json({
+        error: "ORDEN_NO_ACTIVA",
+        message: "No puedes modificar File Service sobre una orden cerrada o archivada.",
+      });
+    }
+
+    const nuevoEstado = limpiarTexto(req.body.estado).toUpperCase();
 
     const quiereFinalizarTecnico =
       nuevoEstado === "FINALIZADO" || nuevoEstado === "FINALIZADO_TECNICO";
+    const estadoActualFinalizado = ["FINALIZADO", "FINALIZADO_TECNICO"].includes(
+      limpiarTexto(archivo.estado).toUpperCase()
+    );
+    const tieneCierreTecnicoVigente = archivoTieneCierreTecnicoOK(archivo);
+    const camposQueRequierenReapertura = [
+      "estado",
+      "tipo_servicio",
+      "servicio_principal",
+      "servicios_preset",
+      "servicios_solicitados",
+      "tuner_asignado_a_id",
+      "tuner_asignado_a",
+      "operador_ecu_asignado_a_id",
+      "operador_ecu_asignado_a",
+      "slave_asignado_a_id",
+      "slave_asignado_a",
+      "post_escritura_estado",
+      "post_escritura_dtc",
+      "post_escritura_sin_dtc",
+      "post_escritura_scanner",
+    ].filter((campo) => Object.prototype.hasOwnProperty.call(req.body, campo));
+    const modificaDatosDeCierre = camposQueRequierenReapertura.some(
+      (campo) => campo !== "estado"
+    );
+
+    if (
+      (estadoActualFinalizado || tieneCierreTecnicoVigente) &&
+      camposQueRequierenReapertura.length > 0 &&
+      (modificaDatosDeCierre || !quiereFinalizarTecnico)
+    ) {
+      await transaction.rollback();
+      return res.status(409).json({
+        error: "FILE_SERVICE_FINALIZADO",
+        message:
+          "Este File Service ya tiene cierre técnico. Registra una corrección o reapertura antes de cambiar servicios, responsables o evidencia.",
+        campos: camposQueRequierenReapertura,
+      });
+    }
     const observacionCierreSolicitada =
       limpiarTexto(req.body.observacion_cierre_tecnico) ||
       limpiarTexto(req.body.observacion) ||
       archivo.observacion_cierre_tecnico ||
       "";
     let checklistCierre = null;
-
-    if (quiereFinalizarTecnico) {
-      checklistCierre = validarChecklistCierreTecnicoOK(
-        archivo,
-        observacionCierreSolicitada,
-        {
-          permitirLegacySinResponsable: puedeCerrarLegacySinResponsable(req),
-        }
-      );
-      const { faltantes } = checklistCierre;
-
-      if (faltantes.length > 0) {
-        await transaction.rollback();
-
-        return res.status(400).json({
-          error:
-            "No puedes finalizar técnicamente sin evidencia post escritura completa",
-          faltantes,
-        });
-      }
-    }
+    let evaluacionRegularizacion = null;
+    let overrideRegularizacionAutorizado = false;
+    let motivoOverrideRegularizacion = "";
+    const overridesGuardia = [];
 
     const payload = {};
 
@@ -2595,10 +3480,48 @@ const actualizarArchivoECU = async (req, res) => {
     ];
 
     camposTexto.forEach((campo) => {
+      if (
+        ["tuner_asignado_a", "operador_ecu_asignado_a", "slave_asignado_a"].includes(
+          campo
+        )
+      ) {
+        return;
+      }
+
       if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
         payload[campo] = limpiarTexto(req.body[campo]);
       }
     });
+
+    for (const [campoId, campoTexto] of [
+      ["tuner_asignado_a_id", "tuner_asignado_a"],
+      ["operador_ecu_asignado_a_id", "operador_ecu_asignado_a"],
+      ["slave_asignado_a_id", "slave_asignado_a"],
+    ]) {
+      const cambiaTexto = Object.prototype.hasOwnProperty.call(req.body, campoTexto);
+      const enviaId = Object.prototype.hasOwnProperty.call(req.body, campoId);
+
+      if (
+        cambiaTexto &&
+        !enviaId &&
+        limpiarTexto(req.body[campoTexto]) !== limpiarTexto(archivo[campoTexto])
+      ) {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: "RESPONSABLE_INVALIDO",
+          message:
+            "Selecciona el encargado desde la lista de usuarios activos; no se aceptan responsables escritos manualmente.",
+          campo: campoId,
+        });
+      }
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(payload, "estado") &&
+      ["FINALIZADO", "FINALIZADO_TECNICO"].includes(nuevoEstado)
+    ) {
+      payload.estado = nuevoEstado;
+    }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "servicios_solicitados")) {
       payload.servicios_solicitados = normalizarServiciosSolicitados({
@@ -2623,6 +3546,28 @@ const actualizarArchivoECU = async (req, res) => {
         String(req.body.correccion_pendiente).toLowerCase() === "true";
     }
 
+    const overrideGuardiaSolicitado = valorBooleano(req.body.override_guardia);
+    const motivoOverrideGuardia = limpiarTexto(req.body.motivo_override);
+
+    if (
+      overrideGuardiaSolicitado &&
+      (!archivo.creado_en_modo_urgente || !esJefaturaUrgente(req))
+    ) {
+      await transaction.rollback();
+      return res.status(403).json({
+        error: "OVERRIDE_GUARDIA_NO_AUTORIZADO",
+        message: "Solo jefatura puede autorizar override de guardia en modo urgente.",
+      });
+    }
+
+    if (overrideGuardiaSolicitado && !motivoOverrideGuardia) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: "MOTIVO_OVERRIDE_REQUERIDO",
+        message: "Debes justificar el override de guardia.",
+      });
+    }
+
     const responsablesIdConfig = [
       ["tuner_asignado_a_id", "tuner_asignado_a"],
       ["operador_ecu_asignado_a_id", "operador_ecu_asignado_a"],
@@ -2636,9 +3581,7 @@ const actualizarArchivoECU = async (req, res) => {
 
       if (!nuevoResponsableId) {
         payload[campoId] = null;
-        payload[campoTexto] = Object.prototype.hasOwnProperty.call(req.body, campoTexto)
-          ? limpiarTexto(req.body[campoTexto])
-          : "";
+        payload[campoTexto] = "";
         continue;
       }
 
@@ -2649,13 +3592,184 @@ const actualizarArchivoECU = async (req, res) => {
         {
           validarGuardia:
             String(archivo[campoId] || "") !== String(nuevoResponsableId),
+          permitirOverrideGuardia: overrideGuardiaSolicitado,
+          motivoOverride: motivoOverrideGuardia,
         }
       );
 
       aplicarResponsableResuelto(payload, campoId, campoTexto, resuelto);
+
+      if (resuelto?.guardia?.override_aplicado) {
+        overridesGuardia.push({
+          campo: campoId,
+          responsable_id: resuelto.id,
+          responsable: resuelto.texto,
+          motivo_override: motivoOverrideGuardia,
+          pendientes_criticos: (resuelto.guardia.pendientes_criticos || []).slice(0, 10),
+        });
+      }
+    }
+
+    const modificaAsignacion = responsablesIdConfig.some(([campoId]) =>
+      Object.prototype.hasOwnProperty.call(req.body, campoId)
+    );
+    const quedaPorAsignar = responsablesIdConfig.every(([campoId]) =>
+      !limpiarTexto(
+        Object.prototype.hasOwnProperty.call(payload, campoId)
+          ? payload[campoId]
+          : archivo[campoId]
+      )
+    );
+    const quedaSinResponsablePrimario = responsablesIdConfig
+      .slice(0, 2)
+      .every(([campoId]) =>
+        !limpiarTexto(
+          Object.prototype.hasOwnProperty.call(payload, campoId)
+            ? payload[campoId]
+            : archivo[campoId]
+        )
+      );
+
+    if (
+      archivo.creado_en_modo_urgente !== true &&
+      modificaAsignacion &&
+      quedaSinResponsablePrimario
+    ) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error: "RESPONSABLE_REQUERIDO",
+        message:
+          "El File Service normal debe mantener Tuner/Master u Operador ECU activo.",
+      });
+    }
+
+    if (archivo.creado_en_modo_urgente && modificaAsignacion && quedaPorAsignar) {
+      if (!esJefaturaUrgente(req)) {
+        await transaction.rollback();
+        return res.status(403).json({
+          error: "URGENTE_POR_ASIGNAR_NO_AUTORIZADO",
+          message: "Solo jefatura puede dejar un File Service urgente por asignar.",
+        });
+      }
+
+      if (!motivoOverrideGuardia) {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: "MOTIVO_OVERRIDE_REQUERIDO",
+          message: "Debes indicar el motivo para dejar esta urgencia por asignar.",
+        });
+      }
+
+      overridesGuardia.push({
+        tipo_evento: "FILE_SERVICE_URGENTE_POR_ASIGNAR",
+        titulo: "File Service urgente dejado por asignar",
+        campo: "POR_ASIGNAR",
+        responsable_id: null,
+        responsable: null,
+        motivo_override: motivoOverrideGuardia,
+        pendientes_criticos: [],
+      });
+    }
+
+    const archivoProspectivo = {
+      ...archivo.get({ plain: true }),
+      ...payload,
+    };
+
+    if (archivo.creado_en_modo_urgente) {
+      evaluacionRegularizacion = await evaluarRegularizacionUrgente(archivoProspectivo);
+
+      if (quiereFinalizarTecnico && evaluacionRegularizacion.pendientes.length > 0) {
+        const solicitaOverrideRegularizacion = valorBooleano(
+          req.body.override_regularizacion
+        );
+        motivoOverrideRegularizacion = limpiarTexto(req.body.motivo_override);
+
+        if (!solicitaOverrideRegularizacion) {
+          await transaction.rollback();
+          return res.status(400).json({
+            error: "REGULARIZACION_PENDIENTE",
+            message:
+              "El File Service urgente debe regularizarse antes del cierre técnico OK.",
+            pendientes: evaluacionRegularizacion.pendientes,
+            diagnostico_faltantes:
+              evaluacionRegularizacion.diagnostico_faltantes || [],
+          });
+        }
+
+        if (!esJefaturaUrgente(req)) {
+          await transaction.rollback();
+          return res.status(403).json({
+            error: "OVERRIDE_REGULARIZACION_NO_AUTORIZADO",
+            message: "Solo jefatura puede autorizar cierre con regularización pendiente.",
+          });
+        }
+
+        if (!motivoOverrideRegularizacion) {
+          await transaction.rollback();
+          return res.status(400).json({
+            error: "MOTIVO_OVERRIDE_REQUERIDO",
+            message: "Debes justificar el override de regularización.",
+          });
+        }
+
+        overrideRegularizacionAutorizado = true;
+      }
+
+      const modificaDatosDeRegularizacion =
+        quiereFinalizarTecnico ||
+        Object.prototype.hasOwnProperty.call(req.body, "override_regularizacion") ||
+        responsablesIdConfig.some(([campoId]) =>
+          Object.prototype.hasOwnProperty.call(req.body, campoId)
+        );
+      const conservaOverridePrevio =
+        !modificaDatosDeRegularizacion &&
+        archivo.requiere_regularizacion === true &&
+        archivo.regularizar_antes_de_entrega === false;
+
+      aplicarEstadoRegularizacion({
+        payload,
+        evaluacion: evaluacionRegularizacion,
+        req,
+        registroActual: archivo,
+        overrideAutorizado:
+          overrideRegularizacionAutorizado || conservaOverridePrevio,
+      });
     }
 
     if (quiereFinalizarTecnico) {
+      const archivoCierre = {
+        ...archivoProspectivo,
+        ...payload,
+      };
+
+      await validarResponsablesPersistidosActivos(archivoCierre);
+
+      checklistCierre = validarChecklistCierreTecnicoOK(
+        archivoCierre,
+        observacionCierreSolicitada,
+        {
+          permitirLegacySinResponsable:
+            puedeCerrarLegacySinResponsable(req) &&
+            archivo.creado_en_modo_urgente !== true &&
+            !modificaAsignacion &&
+            !tieneResponsableFileService(archivo),
+          permitirSinResponsableAutorizado:
+            overrideRegularizacionAutorizado && esJefaturaUrgente(req),
+        }
+      );
+      const { faltantes } = checklistCierre;
+
+      if (faltantes.length > 0) {
+        await transaction.rollback();
+
+        return res.status(400).json({
+          error:
+            "No puedes finalizar técnicamente sin evidencia post escritura completa",
+          faltantes,
+        });
+      }
+
       payload.estado = "FINALIZADO_TECNICO";
       payload.correccion_pendiente = false;
       payload.proceso_guard_estado = "CERRADO";
@@ -2669,6 +3783,10 @@ const actualizarArchivoECU = async (req, res) => {
         limpiarTexto(req.body.observacion) ||
         archivo.observacion_cierre_tecnico ||
         "Cierre técnico registrado al finalizar File Service.";
+
+      if (overrideRegularizacionAutorizado) {
+        payload.observacion_cierre_tecnico = `${payload.observacion_cierre_tecnico}\n[OVERRIDE REGULARIZACION URGENTE] ${motivoOverrideRegularizacion}`;
+      }
     }
 
     const responsablesPrevios = {
@@ -2694,43 +3812,103 @@ const actualizarArchivoECU = async (req, res) => {
 
     await archivo.update(payload, { transaction });
 
+    let ordenListaParaEntrega = false;
+    let bloqueoOrden = null;
+
     if (quiereFinalizarTecnico) {
-      const [resultadoOrden] = await sequelize.query(
-        `
-        UPDATE "ordenes_trabajo"
-        SET
-          "estado" = 'LISTO_PARA_ENTREGA',
-          "tecnico_finalizado_por" = :usuario,
-          "tecnico_finalizado_at" = NOW(),
-          "updatedAt" = NOW()
-        WHERE "id" = :ordenId
-        RETURNING "id", "estado", "estado_pago", "monto_total";
-        `,
-        {
-          replacements: {
+      try {
+        const ordenValidada =
+          await validarOrdenListaParaEntregaDesdeFileService({
             ordenId: archivo.ordenId,
-            usuario: usuarioActual(req),
+            transaction,
+          });
+
+        await ordenValidada.update(
+          {
+            estado: "LISTO_PARA_ENTREGA",
+            tecnico_finalizado_por: usuarioActual(req),
+            tecnico_finalizado_at: new Date(),
           },
-          transaction,
-        }
-      );
+          { transaction }
+        );
+        ordenListaParaEntrega = true;
+      } catch (errorOrden) {
+        const bloqueosEsperados = new Set([
+          "REGULARIZACION_PENDIENTE",
+          "CIERRE_TECNICO_FILE_SERVICE_REQUERIDO",
+          "MATERIAL_RECUPERADO_PENDIENTE",
+          "ITEMS_SERVICIO_PENDIENTES",
+        ]);
 
-      if (!resultadoOrden || resultadoOrden.length === 0) {
-        await transaction.rollback();
+        if (!bloqueosEsperados.has(errorOrden.codigo)) throw errorOrden;
 
-        return res.status(404).json({
-          error:
-            "Archivo finalizado técnicamente, pero no se encontró la orden asociada. No se aplicaron cambios.",
-        });
+        bloqueoOrden = {
+          codigo: errorOrden.codigo,
+          message: errorOrden.message,
+          advertencias: errorOrden.advertencias || [],
+          archivos_pendientes: errorOrden.archivos_pendientes || [],
+          items_pendientes: errorOrden.itemsPendientes || [],
+        };
       }
+    }
+
+    if (overrideRegularizacionAutorizado) {
+      await registrarEventoFileServiceOrden({
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        tipo_evento: "OVERRIDE_REGULARIZACION_FILE_SERVICE",
+        titulo: "Cierre urgente autorizado con pendientes",
+        descripcion: motivoOverrideRegularizacion,
+        usuario: usuarioActual(req),
+        usuario_rol: req.usuario?.rol || req.user?.rol || null,
+        metadata: {
+          regularizacion_pendientes:
+            evaluacionRegularizacion?.pendientes || [],
+          resultado_tecnico: quiereFinalizarTecnico ? "OK" : null,
+        },
+        estricto: true,
+        transaction,
+      });
+    }
+
+    for (const overrideGuardia of overridesGuardia) {
+      await registrarEventoFileServiceOrden({
+        ordenId: archivo.ordenId,
+        archivoECUId: archivo.id,
+        tipo_evento:
+          overrideGuardia.tipo_evento || "OVERRIDE_GUARDIA_FILE_SERVICE",
+        titulo:
+          overrideGuardia.titulo || "Asignacion urgente con override de guardia",
+        descripcion: overrideGuardia.motivo_override,
+        usuario: usuarioActual(req),
+        usuario_rol: req.usuario?.rol || req.user?.rol || null,
+        metadata: overrideGuardia,
+        estricto: true,
+        transaction,
+      });
     }
 
     await transaction.commit();
 
-    const archivoActualizado = await ArchivoECU.findByPk(req.params.id);
+    const advertenciasOperativas = [];
+    const archivoActualizado = await recargarArchivoPostPersistenciaSeguro(
+      archivo,
+      advertenciasOperativas
+    );
+    const registrarEventoPostCommitSeguro = async (evento) => {
+      try {
+        await registrarEventoFileServiceOrden({ ...evento, estricto: true });
+      } catch (errorEvento) {
+        advertenciasOperativas.push("AUDITORIA_OPERATIVA_PENDIENTE");
+        console.warn(
+          "Actualizacion persistida, pero fallo un evento File Service:",
+          errorEvento.message
+        );
+      }
+    };
 
     for (const notificacion of notificacionesResponsables) {
-      await registrarEventoFileServiceOrden({
+      await registrarEventoPostCommitSeguro({
         ordenId: archivo.ordenId,
         archivoECUId: archivo.id,
         tipo_evento: "RESPONSABLE_FILE_SERVICE_ASIGNADO",
@@ -2745,7 +3923,7 @@ const actualizarArchivoECU = async (req, res) => {
     }
 
     if (quiereFinalizarTecnico) {
-      await registrarEventoFileServiceOrden({
+      await registrarEventoPostCommitSeguro({
         ordenId: archivo.ordenId,
         archivoECUId: archivo.id,
         tipo_evento: "CIERRE_TECNICO",
@@ -2757,25 +3935,51 @@ const actualizarArchivoECU = async (req, res) => {
         usuario_rol: req.usuario?.rol || req.user?.rol || null,
         metadata: {
           resultado_tecnico: "OK",
+          orden_lista_para_entrega: ordenListaParaEntrega,
+          bloqueo_orden: bloqueoOrden,
           legacy_sin_responsable_id:
             checklistCierre?.legacy_sin_responsable_id || false,
           legacy_sin_responsable:
             checklistCierre?.legacy_sin_responsable || false,
           cierre_legacy_autorizado:
             checklistCierre?.cierre_legacy_autorizado || false,
+          creado_en_modo_urgente: archivo.creado_en_modo_urgente === true,
+          regularizacion_pendientes:
+            evaluacionRegularizacion?.pendientes || [],
+          override_regularizacion: overrideRegularizacionAutorizado,
+          motivo_override: overrideRegularizacionAutorizado
+            ? motivoOverrideRegularizacion
+            : null,
         },
       });
     }
 
     if (quiereFinalizarTecnico) {
-      await crearNotificacionesInternas({
-        rolesDestino: ["RECEPCION", "ADMIN", "OWNER"],
-        tipo: "ORDEN_LISTA_ENTREGA",
-        titulo: "Orden lista para entrega",
-        mensaje: `La orden #${archivo.ordenId} esta lista para entrega comercial.`,
-        ordenId: archivo.ordenId,
-        archivoECUId: archivo.id,
-      });
+      try {
+        await crearNotificacionesInternas({
+          rolesDestino: ordenListaParaEntrega
+            ? ["RECEPCION", "ADMIN", "OWNER"]
+            : ["RECEPCION", "SUPERVISOR", "ADMIN", "OWNER"],
+          tipo: ordenListaParaEntrega
+            ? "ORDEN_LISTA_ENTREGA"
+            : "ORDEN_PENDIENTE_REGULARIZACION",
+          titulo: ordenListaParaEntrega
+            ? "Orden lista para entrega"
+            : "File Service listo; orden aún no entregable",
+          mensaje: ordenListaParaEntrega
+            ? `La orden #${archivo.ordenId} esta lista para entrega comercial.`
+            : `La orden #${archivo.ordenId} debe completar controles antes de la entrega.`,
+          ordenId: archivo.ordenId,
+          archivoECUId: archivo.id,
+          metadata: { bloqueo_orden: bloqueoOrden },
+        });
+      } catch (errorNotificacion) {
+        advertenciasOperativas.push("NOTIFICACION_INTERNA_PENDIENTE");
+        console.warn(
+          "Cierre persistido, pero fallo la notificacion de estado de orden:",
+          errorNotificacion.message
+        );
+      }
     }
 
     if (notificacionesResponsables.length > 0) {
@@ -2793,6 +3997,7 @@ const actualizarArchivoECU = async (req, res) => {
           )
         );
       } catch (errorNotificacion) {
+        advertenciasOperativas.push("NOTIFICACION_INTERNA_PENDIENTE");
         console.warn(
           "No se pudieron crear notificaciones de responsables File Service:",
           errorNotificacion.message
@@ -2801,21 +4006,30 @@ const actualizarArchivoECU = async (req, res) => {
     }
 
     res.json({
-      mensaje: quiereFinalizarTecnico
-        ? "Archivo ECU finalizado técnicamente y orden marcada como LISTO_PARA_ENTREGA"
-        : "Archivo ECU actualizado",
+      mensaje:
+        quiereFinalizarTecnico && ordenListaParaEntrega
+          ? "Archivo ECU finalizado técnicamente y orden marcada como LISTO_PARA_ENTREGA"
+          : quiereFinalizarTecnico
+            ? "Archivo ECU finalizado; la orden sigue activa hasta completar sus controles"
+            : "Archivo ECU actualizado",
       archivo: archivoActualizado,
+      orden_lista_para_entrega: ordenListaParaEntrega,
+      bloqueo_orden: bloqueoOrden,
+      advertencias_operativas: [...new Set(advertenciasOperativas)],
     });
   } catch (error) {
-    await transaction.rollback();
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
 
     console.error("ERROR AL ACTUALIZAR ARCHIVO ECU:", error);
 
     const controlado = responderErrorResponsable(res, error);
     if (controlado) return;
 
-    res.status(500).json({
-      error: error.message,
+    res.status(error.statusCode || 500).json({
+      error: error.codigo || error.message,
+      message: error.message,
     });
   }
 };
