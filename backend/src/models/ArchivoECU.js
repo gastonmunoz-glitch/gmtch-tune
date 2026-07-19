@@ -10,6 +10,17 @@ const ArchivoECU = sequelize.define(
       autoIncrement: true,
     },
 
+    empresaId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "empresa_cuentas",
+        key: "id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "RESTRICT",
+    },
+
     ordenId: {
       type: DataTypes.INTEGER,
       allowNull: false,

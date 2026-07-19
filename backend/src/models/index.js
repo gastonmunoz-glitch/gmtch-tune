@@ -55,6 +55,126 @@ Usuario.belongsTo(EmpresaCuenta, {
   foreignKey: "empresaId",
 });
 
+EmpresaCuenta.hasMany(Cliente, {
+  as: "Clientes",
+  foreignKey: "empresaId",
+});
+
+Cliente.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(Vehiculo, {
+  as: "Vehiculos",
+  foreignKey: "empresaId",
+});
+
+Vehiculo.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(OrdenTrabajo, {
+  as: "OrdenesTrabajo",
+  foreignKey: "empresaId",
+});
+
+OrdenTrabajo.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(Diagnostico, {
+  as: "Diagnosticos",
+  foreignKey: "empresaId",
+});
+
+Diagnostico.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(FotoVehiculo, {
+  as: "FotosVehiculo",
+  foreignKey: "empresaId",
+});
+
+FotoVehiculo.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(ArchivoECU, {
+  as: "ArchivosECU",
+  foreignKey: "empresaId",
+});
+
+ArchivoECU.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(OrdenServicioItem, {
+  as: "OrdenServicioItems",
+  foreignKey: "empresaId",
+});
+
+OrdenServicioItem.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(MaterialRecuperado, {
+  as: "MaterialesRecuperados",
+  foreignKey: "empresaId",
+});
+
+MaterialRecuperado.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(OrdenEventoOperativo, {
+  as: "OrdenEventosOperativos",
+  foreignKey: "empresaId",
+});
+
+OrdenEventoOperativo.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(Conversacion, {
+  as: "Conversaciones",
+  foreignKey: "empresaId",
+});
+
+Conversacion.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(MensajeConversacion, {
+  as: "MensajesConversacion",
+  foreignKey: "empresaId",
+});
+
+MensajeConversacion.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
+EmpresaCuenta.hasMany(Notificacion, {
+  as: "Notificaciones",
+  foreignKey: "empresaId",
+});
+
+Notificacion.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
+
 // Cliente / Vehículo
 Cliente.hasMany(Vehiculo, {
   foreignKey: "clienteId",

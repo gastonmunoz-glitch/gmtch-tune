@@ -11,6 +11,17 @@ const Conversacion = sequelize.define(
       allowNull: false,
     },
 
+    empresaId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "empresa_cuentas",
+        key: "id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "RESTRICT",
+    },
+
     canal: {
       type: DataTypes.STRING(40),
       allowNull: false,
