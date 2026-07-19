@@ -77,12 +77,23 @@ const listarUsuarios = async (req, res) => {
 
 const listarResponsables = async (req, res) => {
   try {
+    const empresaId = String(req.auth?.empresaId || "").trim();
+
+    if (!empresaId) {
+      return res.status(503).json({
+        error: "EMPRESA_NO_DISPONIBLE",
+        codigo: "EMPRESA_NO_DISPONIBLE",
+        message: "La empresa autenticada no esta disponible para listar responsables.",
+      });
+    }
+
     await prepararColumnasPresencia();
 
     const usuarios = await Usuario.findAll({
       attributes: ["id", "nombre", "username", "rol", "activo"],
       where: {
         activo: true,
+        empresaId,
       },
       order: [
         ["rol", "ASC"],

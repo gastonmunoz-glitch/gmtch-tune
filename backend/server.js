@@ -376,6 +376,21 @@ const normalizarPatenteDirecta = (patente) => {
   return String(patente || "").trim().toUpperCase().replace(/\s+/g, "");
 };
 
+const obtenerEmpresaIdRecepcion = (req, res) => {
+  const empresaId = String(req.auth?.empresaId || "").trim();
+
+  if (!empresaId) {
+    res.status(503).json({
+      error: "EMPRESA_NO_DISPONIBLE",
+      codigo: "EMPRESA_NO_DISPONIBLE",
+      message: "La empresa autenticada no esta disponible para operar en recepcion.",
+    });
+    return null;
+  }
+
+  return empresaId;
+};
+
 const armarVehiculoDesdeRows = (rows = []) => {
   if (!rows.length) return null;
 
@@ -484,8 +499,12 @@ const queryVehiculoDetalleSQL = `
     o."updatedAt" AS "orden_updatedAt"
 
   FROM "vehiculos" v
-  LEFT JOIN "clientes" c ON c."id" = v."clienteId"
-  LEFT JOIN "ordenes_trabajo" o ON o."vehiculoId" = v."id"
+  LEFT JOIN "clientes" c
+    ON c."id" = v."clienteId"
+   AND c."empresaId" = v."empresaId"
+  LEFT JOIN "ordenes_trabajo" o
+    ON o."vehiculoId" = v."id"
+   AND o."empresaId" = v."empresaId"
 `;
 
 app.get(
@@ -506,6 +525,8 @@ app.get(
   async (req, res) => {
     try {
       console.log("GET /api/vehiculos DIRECT-SERVER-V6");
+      const empresaId = obtenerEmpresaIdRecepcion(req, res);
+      if (!empresaId) return;
 
       const rows = await sequelize.query(
         `
@@ -534,13 +555,18 @@ app.get(
             SELECT COUNT(*)::int
             FROM "ordenes_trabajo" o
             WHERE o."vehiculoId" = v."id"
+              AND o."empresaId" = :empresaId
           ) AS "total_ordenes"
 
         FROM "vehiculos" v
-        LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+        LEFT JOIN "clientes" c
+          ON c."id" = v."clienteId"
+         AND c."empresaId" = v."empresaId"
+        WHERE v."empresaId" = :empresaId
         ORDER BY c."nombre" ASC NULLS LAST, v."patente" ASC;
         `,
         {
+          replacements: { empresaId },
           type: QueryTypes.SELECT,
         }
       );
@@ -595,6 +621,8 @@ app.post(
   async (req, res) => {
     try {
       console.log("POST /api/vehiculos DIRECT-SERVER-V6 BODY:", req.body);
+      const empresaId = obtenerEmpresaIdRecepcion(req, res);
+      if (!empresaId) return;
 
       const patente = normalizarPatenteDirecta(req.body.patente);
       const clienteId = req.body.clienteId ? Number(req.body.clienteId) : null;
@@ -625,10 +653,11 @@ app.post(
         SELECT "id"
         FROM "clientes"
         WHERE "id" = :clienteId
+          AND "empresaId" = :empresaId
         LIMIT 1;
         `,
         {
-          replacements: { clienteId },
+          replacements: { clienteId, empresaId },
           type: QueryTypes.SELECT,
         }
       );
@@ -645,10 +674,11 @@ app.post(
         SELECT "id", "patente"
         FROM "vehiculos"
         WHERE UPPER(TRIM("patente")) = :patente
+          AND "empresaId" = :empresaId
         LIMIT 1;
         `,
         {
-          replacements: { patente },
+          replacements: { patente, empresaId },
           type: QueryTypes.SELECT,
         }
       );
@@ -665,6 +695,7 @@ app.post(
         `
         INSERT INTO "vehiculos"
           (
+            "empresaId",
             "clienteId",
             "patente",
             "marca",
@@ -678,6 +709,7 @@ app.post(
           )
         VALUES
           (
+            :empresaId,
             :clienteId,
             :patente,
             :marca,
@@ -693,6 +725,7 @@ app.post(
         `,
         {
           replacements: {
+            empresaId,
             clienteId,
             patente,
             marca,
@@ -738,16 +771,19 @@ app.get(
   }),
   async (req, res) => {
     try {
+      const empresaId = obtenerEmpresaIdRecepcion(req, res);
+      if (!empresaId) return;
       const patente = normalizarPatenteDirecta(req.params.patente);
 
       const rows = await sequelize.query(
         `
         ${queryVehiculoDetalleSQL}
         WHERE UPPER(TRIM(v."patente")) = :patente
+          AND v."empresaId" = :empresaId
         ORDER BY o."createdAt" DESC NULLS LAST;
         `,
         {
-          replacements: { patente },
+          replacements: { patente, empresaId },
           type: QueryTypes.SELECT,
         }
       );
@@ -790,6 +826,8 @@ app.get(
   }),
   async (req, res) => {
     try {
+      const empresaId = obtenerEmpresaIdRecepcion(req, res);
+      if (!empresaId) return;
       const id = Number(req.params.id);
 
       const vehiculoRows = await sequelize.query(
@@ -816,12 +854,15 @@ app.get(
           c."nota_cliente" AS "cliente_nota_cliente"
 
         FROM "vehiculos" v
-        LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+        LEFT JOIN "clientes" c
+          ON c."id" = v."clienteId"
+         AND c."empresaId" = v."empresaId"
         WHERE v."id" = :id
+          AND v."empresaId" = :empresaId
         LIMIT 1;
         `,
         {
-          replacements: { id },
+          replacements: { id, empresaId },
           type: QueryTypes.SELECT,
         }
       );
@@ -840,10 +881,11 @@ app.get(
         SELECT *
         FROM "ordenes_trabajo"
         WHERE "vehiculoId" = :id
+          AND "empresaId" = :empresaId
         ORDER BY "createdAt" DESC NULLS LAST;
         `,
         {
-          replacements: { id },
+          replacements: { id, empresaId },
           type: QueryTypes.SELECT,
         }
       );
@@ -873,7 +915,7 @@ app.get(
 
         try {
           return await sequelize.query(sql, {
-            replacements: { ordenIds },
+            replacements: { ordenIds, empresaId },
             type: QueryTypes.SELECT,
           });
         } catch (error) {
@@ -894,6 +936,7 @@ app.get(
           SELECT *
           FROM "diagnosticos"
           WHERE "ordenId" IN (:ordenIds)
+            AND "empresaId" = :empresaId
           ORDER BY "createdAt" DESC NULLS LAST;
           `
         ),
@@ -903,6 +946,7 @@ app.get(
           SELECT *
           FROM "fotos_vehiculo"
           WHERE "ordenId" IN (:ordenIds)
+            AND "empresaId" = :empresaId
           ORDER BY "createdAt" DESC NULLS LAST;
           `
         ),
@@ -912,6 +956,7 @@ app.get(
           SELECT *
           FROM "archivos_ecu"
           WHERE "ordenId" IN (:ordenIds)
+            AND "empresaId" = :empresaId
           ORDER BY "createdAt" DESC NULLS LAST;
           `
         ),
@@ -921,6 +966,7 @@ app.get(
           SELECT *
           FROM "orden_servicio_items"
           WHERE "ordenId" IN (:ordenIds)
+            AND "empresaId" = :empresaId
           ORDER BY "id" ASC;
           `
         ),
@@ -930,6 +976,7 @@ app.get(
           SELECT *
           FROM "materiales_recuperados"
           WHERE "ordenId" IN (:ordenIds)
+            AND "empresaId" = :empresaId
           ORDER BY "createdAt" DESC NULLS LAST;
           `
         ),
@@ -1077,6 +1124,8 @@ app.put(
   }),
   async (req, res) => {
     try {
+      const empresaId = obtenerEmpresaIdRecepcion(req, res);
+      if (!empresaId) return;
       const id = Number(req.params.id);
 
       const existente = await sequelize.query(
@@ -1084,10 +1133,11 @@ app.put(
         SELECT *
         FROM "vehiculos"
         WHERE "id" = :id
+          AND "empresaId" = :empresaId
         LIMIT 1;
         `,
         {
-          replacements: { id },
+          replacements: { id, empresaId },
           type: QueryTypes.SELECT,
         }
       );
@@ -1137,6 +1187,50 @@ app.put(
       const activo =
         req.body.activo !== undefined ? Boolean(req.body.activo) : actual.activo;
 
+      const cliente = await sequelize.query(
+        `
+        SELECT "id"
+        FROM "clientes"
+        WHERE "id" = :clienteId
+          AND "empresaId" = :empresaId
+        LIMIT 1;
+        `,
+        {
+          replacements: { clienteId, empresaId },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      if (cliente.length === 0) {
+        return res.status(404).json({
+          error: "Cliente no encontrado",
+          controller: "DIRECT-SERVER-V6",
+        });
+      }
+
+      const patenteDuplicada = await sequelize.query(
+        `
+        SELECT "id", "patente"
+        FROM "vehiculos"
+        WHERE UPPER(TRIM("patente")) = :patente
+          AND "empresaId" = :empresaId
+          AND "id" <> :id
+        LIMIT 1;
+        `,
+        {
+          replacements: { id, patente, empresaId },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      if (patenteDuplicada.length > 0) {
+        return res.status(409).json({
+          error: "La patente ya esta registrada en esta empresa",
+          controller: "DIRECT-SERVER-V6",
+          vehiculo: patenteDuplicada[0],
+        });
+      }
+
       const actualizado = await sequelize.query(
         `
         UPDATE "vehiculos"
@@ -1151,11 +1245,13 @@ app.put(
           "activo" = :activo,
           "updatedAt" = NOW()
         WHERE "id" = :id
+          AND "empresaId" = :empresaId
         RETURNING *;
         `,
         {
           replacements: {
             id,
+            empresaId,
             clienteId,
             patente,
             marca,

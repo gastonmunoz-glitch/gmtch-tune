@@ -82,15 +82,33 @@ const crearErrorHttp = (statusCode, message, extra = {}) => {
   return error;
 };
 
-const buscarUsuarioActivoPorId = async (usuarioId) => {
+const obtenerEmpresaIdRequerida = (req) => {
+  const empresaId = limpiarTexto(req.auth?.empresaId);
+
+  if (!empresaId) {
+    throw crearErrorHttp(
+      503,
+      "La empresa autenticada no esta disponible para operar en recepcion.",
+      { codigo: "EMPRESA_NO_DISPONIBLE" }
+    );
+  }
+
+  return empresaId;
+};
+
+const buscarUsuarioActivoPorId = async (usuarioId, empresaId = null) => {
   const id = limpiarTexto(usuarioId);
   if (!id) return null;
 
-  const usuario = await Usuario.findByPk(id, {
-    attributes: ["id", "nombre", "username", "rol", "activo"],
+  const where = { id, activo: true };
+  if (empresaId) where.empresaId = empresaId;
+
+  const usuario = await Usuario.findOne({
+    where,
+    attributes: ["id", "nombre", "username", "rol", "activo", "empresaId"],
   });
 
-  if (!usuario || usuario.activo === false) {
+  if (!usuario) {
     throw crearErrorHttp(400, "El responsable seleccionado no existe o está inactivo.", {
       codigo: "RESPONSABLE_INVALIDO",
     });
@@ -106,12 +124,13 @@ const resolverResponsableDesdeBody = async (
   opciones = {}
 ) => {
   const obligatorio = opciones.obligatorio === true;
+  const empresaId = limpiarTexto(opciones.empresaId);
   const tieneCampoId = Object.prototype.hasOwnProperty.call(body, campoId);
   const tieneCampoTexto = Object.prototype.hasOwnProperty.call(body, campoTexto);
   const usuarioId = limpiarTexto(body[campoId]);
 
   if (usuarioId) {
-    const usuario = await buscarUsuarioActivoPorId(usuarioId);
+    const usuario = await buscarUsuarioActivoPorId(usuarioId, empresaId || null);
     return {
       id: String(usuario.id),
       texto: obtenerSnapshotUsuario(usuario),
@@ -256,6 +275,7 @@ const prepararTablaEventosOrden = async () => {
 };
 
 const registrarEventoOrden = async ({
+  empresaId,
   ordenId,
   tipo_evento,
   categoria,
@@ -274,6 +294,7 @@ const registrarEventoOrden = async ({
     await prepararTablaEventosOrden();
 
     return await OrdenEventoOperativo.create({
+      empresaId: empresaId || null,
       ordenId,
       tipo_evento,
       categoria: categoria || null,
@@ -299,6 +320,7 @@ const registrarEventoOrdenDesdeReq = async (
 ) => {
   const evento = await registrarEventoOrden({
     ...datos,
+    empresaId: obtenerEmpresaIdRequerida(req),
     usuario: datos.usuario || usuarioEventoDesdeReq(req),
     usuario_rol: datos.usuario_rol || rolActual(req),
   });
@@ -336,6 +358,14 @@ const enviarErrorPermiso = (res) =>
   });
 
 const responderErrorControlado = (res, error) => {
+  if (error?.codigo === "EMPRESA_NO_DISPONIBLE") {
+    return res.status(503).json({
+      error: "EMPRESA_NO_DISPONIBLE",
+      codigo: "EMPRESA_NO_DISPONIBLE",
+      message: error.message,
+    });
+  }
+
   if (error?.codigo === "RESPONSABLE_BLOQUEADO") {
     return res.status(409).json({
       error: "RESPONSABLE_BLOQUEADO",
@@ -403,16 +433,19 @@ const prioridadSugeridaPorCategoria = (categoria) => {
   return mapa[normalizada] || "MEDIA";
 };
 
-const obtenerPrioridadSugeridaPorVehiculo = async (vehiculoId) => {
+const obtenerPrioridadSugeridaPorVehiculo = async (vehiculoId, empresaId) => {
   try {
     const filas = await sequelize.query(
       `SELECT c."categoria_cliente"
        FROM "vehiculos" v
-       LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+       LEFT JOIN "clientes" c
+         ON c."id" = v."clienteId"
+        AND c."empresaId" = v."empresaId"
        WHERE v."id" = :vehiculoId
+         AND v."empresaId" = :empresaId
        LIMIT 1`,
       {
-        replacements: { vehiculoId },
+        replacements: { vehiculoId, empresaId },
         type: QueryTypes.SELECT,
       }
     );
@@ -508,7 +541,7 @@ const obtenerCampoResponsableTecnicoPorServicio = (body = {}) => {
   };
 };
 
-const resolverResponsableTecnicoGenerico = async (body = {}) => {
+const resolverResponsableTecnicoGenerico = async (body = {}, opciones = {}) => {
   const responsableId = limpiarTexto(body.responsable_tecnico_id);
   if (!responsableId) {
     if (
@@ -524,7 +557,10 @@ const resolverResponsableTecnicoGenerico = async (body = {}) => {
     return null;
   }
 
-  const usuario = await buscarUsuarioActivoPorId(responsableId);
+  const usuario = await buscarUsuarioActivoPorId(
+    responsableId,
+    limpiarTexto(opciones.empresaId) || null
+  );
   const snapshot = obtenerSnapshotUsuario(usuario);
   const campo = obtenerCampoResponsableTecnicoPorServicio(body);
 
@@ -1988,14 +2024,18 @@ const queryOrdenesBase = `
     c."nota_cliente" AS "cliente_nota_cliente"
 
   FROM "ordenes_trabajo" o
-  LEFT JOIN "vehiculos" v ON v."id" = o."vehiculoId"
-  LEFT JOIN "clientes" c ON c."id" = v."clienteId"
+  LEFT JOIN "vehiculos" v
+    ON v."id" = o."vehiculoId"
+   AND v."empresaId" = o."empresaId"
+  LEFT JOIN "clientes" c
+    ON c."id" = v."clienteId"
+   AND c."empresaId" = o."empresaId"
 `;
 
-const obtenerDiagnosticosOrden = async (ordenId) => {
+const obtenerDiagnosticosOrden = async (ordenId, empresaId = null) => {
   try {
     return await Diagnostico.findAll({
-      where: { ordenId },
+      where: empresaId ? { ordenId, empresaId } : { ordenId },
       order: [["id", "DESC"]],
     });
   } catch (error) {
@@ -2004,10 +2044,10 @@ const obtenerDiagnosticosOrden = async (ordenId) => {
   }
 };
 
-const obtenerArchivosOrden = async (ordenId) => {
+const obtenerArchivosOrden = async (ordenId, empresaId = null) => {
   try {
     return await ArchivoECU.findAll({
-      where: { ordenId },
+      where: empresaId ? { ordenId, empresaId } : { ordenId },
       order: [["id", "DESC"]],
     });
   } catch (error) {
@@ -2016,10 +2056,10 @@ const obtenerArchivosOrden = async (ordenId) => {
   }
 };
 
-const obtenerFotosOrden = async (ordenId) => {
+const obtenerFotosOrden = async (ordenId, empresaId = null) => {
   try {
     return await FotoVehiculo.findAll({
-      where: { ordenId },
+      where: empresaId ? { ordenId, empresaId } : { ordenId },
       order: [["id", "DESC"]],
     });
   } catch (error) {
@@ -2028,10 +2068,10 @@ const obtenerFotosOrden = async (ordenId) => {
   }
 };
 
-const obtenerItemsOrdenInterno = async (ordenId) => {
+const obtenerItemsOrdenInterno = async (ordenId, empresaId = null) => {
   try {
     return await OrdenServicioItem.findAll({
-      where: { ordenId },
+      where: empresaId ? { ordenId, empresaId } : { ordenId },
       order: [["id", "ASC"]],
     });
   } catch (error) {
@@ -2040,10 +2080,10 @@ const obtenerItemsOrdenInterno = async (ordenId) => {
   }
 };
 
-const obtenerMaterialOrdenInterno = async (ordenId) => {
+const obtenerMaterialOrdenInterno = async (ordenId, empresaId = null) => {
   try {
     return await MaterialRecuperado.findAll({
-      where: { ordenId },
+      where: empresaId ? { ordenId, empresaId } : { ordenId },
       order: [["createdAt", "DESC"]],
     });
   } catch (error) {
@@ -2257,7 +2297,7 @@ const recalcularMontoOrdenPorItems = async (
   return await OrdenTrabajo.findByPk(ordenId, { transaction });
 };
 
-const mapearOrdenRow = async (row, incluirDetalle = true) => {
+const mapearOrdenRow = async (row, incluirDetalle = true, empresaId = null) => {
   const orden = {
     id: row.id,
     vehiculoId: row.vehiculoId,
@@ -2389,11 +2429,11 @@ const mapearOrdenRow = async (row, incluirDetalle = true) => {
   if (incluirDetalle) {
     const [diagnosticos, archivosECU, fotos, items, materialRecuperado] =
       await Promise.all([
-      obtenerDiagnosticosOrden(row.id),
-      obtenerArchivosOrden(row.id),
-      obtenerFotosOrden(row.id),
-      obtenerItemsOrdenInterno(row.id),
-      obtenerMaterialOrdenInterno(row.id),
+      obtenerDiagnosticosOrden(row.id, empresaId),
+      obtenerArchivosOrden(row.id, empresaId),
+      obtenerFotosOrden(row.id, empresaId),
+      obtenerItemsOrdenInterno(row.id, empresaId),
+      obtenerMaterialOrdenInterno(row.id, empresaId),
     ]);
 
     orden.Diagnosticos = diagnosticos;
@@ -2455,16 +2495,18 @@ const obtenerOrdenes = async (req, res) => {
 
 const obtenerOrdenPorId = async (req, res) => {
   try {
+    const empresaId = obtenerEmpresaIdRequerida(req);
     await prepararColumnas();
 
     const rows = await sequelize.query(
       `
       ${queryOrdenesBase}
       WHERE o."id" = :id
+        AND o."empresaId" = :empresaId
       LIMIT 1;
       `,
       {
-        replacements: { id: req.params.id },
+        replacements: { id: req.params.id, empresaId },
         type: QueryTypes.SELECT,
       }
     );
@@ -2475,11 +2517,14 @@ const obtenerOrdenPorId = async (req, res) => {
       });
     }
 
-    const orden = await mapearOrdenRow(rows[0], true);
+    const orden = await mapearOrdenRow(rows[0], true, empresaId);
 
     res.json(orden);
   } catch (error) {
     console.error("ERROR OBTENIENDO ORDEN:", error);
+
+    const controlado = responderErrorControlado(res, error);
+    if (controlado) return;
 
     res.status(500).json({
       error: error.message,
@@ -2549,6 +2594,7 @@ const obtenerEventosOrden = async (req, res) => {
 
 const crearOrden = async (req, res) => {
   try {
+    const empresaId = obtenerEmpresaIdRequerida(req);
     await prepararColumnas();
 
     const modoUrgente = modoUrgenteSolicitado(req.body);
@@ -2594,7 +2640,13 @@ const crearOrden = async (req, res) => {
       });
     }
 
-    const vehiculo = await Vehiculo.findByPk(vehiculoId);
+    const vehiculo = await Vehiculo.findOne({
+      where: {
+        id: vehiculoId,
+        empresaId,
+      },
+      attributes: ["id", "clienteId", "empresaId"],
+    });
 
     if (!vehiculo) {
       return res.status(404).json({
@@ -2602,16 +2654,54 @@ const crearOrden = async (req, res) => {
       });
     }
 
+    if (!vehiculo.clienteId) {
+      return res.status(409).json({
+        error: "RELACION_RECEPCION_INVALIDA",
+        codigo: "RELACION_RECEPCION_INVALIDA",
+        message: "El vehiculo no tiene un cliente asociado dentro de la empresa.",
+      });
+    }
+
+    const cliente = await Cliente.findOne({
+      where: {
+        id: vehiculo.clienteId,
+        empresaId,
+      },
+      attributes: ["id", "empresaId"],
+    });
+
+    if (!cliente) {
+      return res.status(409).json({
+        error: "RELACION_RECEPCION_INVALIDA",
+        codigo: "RELACION_RECEPCION_INVALIDA",
+        message: "El cliente asociado al vehiculo no pertenece a la empresa autenticada.",
+      });
+    }
+
+    const clienteIdSolicitado = Number(
+      req.body.clienteId || req.body.cliente_id || 0
+    );
+
+    if (clienteIdSolicitado && clienteIdSolicitado !== Number(cliente.id)) {
+      return res.status(400).json({
+        error: "RELACION_RECEPCION_INVALIDA",
+        codigo: "RELACION_RECEPCION_INVALIDA",
+        message: "El vehiculo no corresponde al cliente seleccionado.",
+      });
+    }
+
     const prioridadExplicita = modoUrgente
       ? "URGENTE"
       : limpiarTexto(req.body.prioridad);
     const prioridadFinal =
-      prioridadExplicita || (await obtenerPrioridadSugeridaPorVehiculo(vehiculoId));
+      prioridadExplicita ||
+      (await obtenerPrioridadSugeridaPorVehiculo(vehiculoId, empresaId));
     const montoInicial = normalizarDecimal(req.body.monto_total, 0);
     const responsablesCreacion = {};
     const overridesGuardia = [];
     const responsableTecnicoGenerico = await resolverResponsableTecnicoGenerico(
-      req.body
+      req.body,
+      { empresaId }
     );
 
     for (const [campoId, campoTexto] of [
@@ -2622,6 +2712,7 @@ const crearOrden = async (req, res) => {
     ]) {
       const resuelto = await resolverResponsableDesdeBody(req.body, campoId, campoTexto, {
         obligatorio: false,
+        empresaId,
       });
       if (resuelto?.usuario) {
         const overrideGuardia = await validarGuardiaResponsableUrgente({
@@ -2703,6 +2794,7 @@ const crearOrden = async (req, res) => {
       : [];
 
     const nuevaOrden = await OrdenTrabajo.create({
+      empresaId,
       vehiculoId,
       prioridad: prioridadFinal,
       estado: modoUrgente
@@ -2851,9 +2943,15 @@ const actualizarOrden = async (req, res) => {
   let transaction = null;
 
   try {
+    const empresaId = obtenerEmpresaIdRequerida(req);
     await prepararColumnas();
 
-    const orden = await OrdenTrabajo.findByPk(req.params.id);
+    const orden = await OrdenTrabajo.findOne({
+      where: {
+        id: req.params.id,
+        empresaId,
+      },
+    });
 
     if (!orden) {
       return res.status(404).json({
@@ -3031,6 +3129,7 @@ const actualizarOrden = async (req, res) => {
           config.campoTexto,
           {
             obligatorio: tieneCampoId,
+            empresaId,
           }
         );
 
@@ -3064,10 +3163,11 @@ const actualizarOrden = async (req, res) => {
           "supervisor_asignado_a_id"
         FROM "ordenes_trabajo"
         WHERE "id" = :id
+          AND "empresaId" = :empresaId
         LIMIT 1;
         `,
         {
-          replacements: { id: orden.id },
+          replacements: { id: orden.id, empresaId },
           type: QueryTypes.SELECT,
         }
       );

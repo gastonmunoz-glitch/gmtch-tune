@@ -3,7 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-const { FotoVehiculo } = require("../models");
+const { FotoVehiculo, OrdenTrabajo } = require("../models");
 const { permitirRoles } = require("../middleware/authMiddleware");
 
 const router = express.Router();
@@ -98,13 +98,28 @@ const obtenerArchivosSubidos = (req) => {
   return [];
 };
 
+const exigirEmpresaRecepcion = (req, res, next) => {
+  const empresaId = String(req.auth?.empresaId || "").trim();
+
+  if (!empresaId) {
+    return res.status(503).json({
+      error: "EMPRESA_NO_DISPONIBLE",
+      codigo: "EMPRESA_NO_DISPONIBLE",
+      message: "La empresa autenticada no esta disponible para subir fotografias.",
+    });
+  }
+
+  req.empresaIdRecepcion = empresaId;
+  next();
+};
+
 router.post("/", permitirRoles(
   "OWNER",
   "ADMIN",
   "SUPERVISOR",
   "RECEPCION",
   "OPERADOR_ECU"
-), (req, res, next) => {
+), exigirEmpresaRecepcion, (req, res, next) => {
   subirFoto(req, res, (error) => {
     if (error) {
       console.error("ERROR MULTER FOTOS:", error.message);
@@ -135,6 +150,21 @@ router.post("/", permitirRoles(
       });
     }
 
+    const orden = await OrdenTrabajo.findOne({
+      where: {
+        id: Number(ordenId),
+        empresaId: req.empresaIdRecepcion,
+      },
+      attributes: ["id", "empresaId"],
+    });
+
+    if (!orden) {
+      return res.status(404).json({
+        error: "Orden no encontrada",
+        codigo: "ORDEN_NO_ENCONTRADA",
+      });
+    }
+
     const tipoFoto =
       String(req.body.tipo_foto || req.body.tipo || "OTRO")
         .trim()
@@ -148,6 +178,7 @@ router.post("/", permitirRoles(
         const urlFoto = `/uploads/fotos/${archivo.filename}`;
 
         return FotoVehiculo.create({
+          empresaId: req.empresaIdRecepcion,
           ordenId: Number(ordenId),
           url_foto: urlFoto,
           descripcion,

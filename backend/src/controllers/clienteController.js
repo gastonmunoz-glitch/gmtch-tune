@@ -4,6 +4,32 @@ const { Cliente, Vehiculo, OrdenTrabajo } = require("../models");
 
 let columnasPreparadas = false;
 
+const obtenerEmpresaIdRequerida = (req) => {
+  const empresaId = String(req.auth?.empresaId || "").trim();
+
+  if (!empresaId) {
+    const error = new Error(
+      "La empresa autenticada no esta disponible para operar en recepcion."
+    );
+    error.statusCode = 503;
+    error.codigo = "EMPRESA_NO_DISPONIBLE";
+    throw error;
+  }
+
+  return empresaId;
+};
+
+const responderErrorEmpresa = (res, error) => {
+  if (error?.codigo !== "EMPRESA_NO_DISPONIBLE") return false;
+
+  res.status(503).json({
+    error: "EMPRESA_NO_DISPONIBLE",
+    codigo: "EMPRESA_NO_DISPONIBLE",
+    message: error.message,
+  });
+  return true;
+};
+
 const normalizarCategoria = (categoria) => {
   const valor = String(categoria || "NORMAL").trim().toUpperCase();
   const compatibilidad = {
@@ -78,17 +104,21 @@ const maxFecha = (fechas) => {
 
 const obtenerClientes = async (req, res) => {
   try {
+    const empresaId = obtenerEmpresaIdRequerida(req);
     await prepararColumnas();
 
     const clientes = await Cliente.findAll({
+      where: { empresaId },
       include: [
         {
           model: Vehiculo,
           required: false,
+          where: { empresaId },
           include: [
             {
               model: OrdenTrabajo,
               required: false,
+              where: { empresaId },
             },
           ],
         },
@@ -100,6 +130,8 @@ const obtenerClientes = async (req, res) => {
   } catch (error) {
     console.error("ERROR OBTENIENDO CLIENTES:", error);
 
+    if (responderErrorEmpresa(res, error)) return;
+
     res.status(500).json({
       error: error.message,
       detalle: error.errors?.map((e) => e.message) || null,
@@ -109,6 +141,7 @@ const obtenerClientes = async (req, res) => {
 
 const obtenerClientePorId = async (req, res) => {
   try {
+    const empresaId = obtenerEmpresaIdRequerida(req);
     await prepararColumnas();
 
     const clienteId = req.params.id;
@@ -117,9 +150,10 @@ const obtenerClientePorId = async (req, res) => {
       `SELECT id, nombre, telefono, email, direccion, categoria_cliente, excluir_estadisticas, nota_cliente, "createdAt", "updatedAt"
        FROM clientes
        WHERE id = :clienteId
+         AND "empresaId" = :empresaId
        LIMIT 1`,
       {
-        replacements: { clienteId },
+        replacements: { clienteId, empresaId },
         type: QueryTypes.SELECT,
       }
     );
@@ -136,9 +170,10 @@ const obtenerClientePorId = async (req, res) => {
       `SELECT *
        FROM vehiculos
        WHERE "clienteId" = :clienteId
+         AND "empresaId" = :empresaId
        ORDER BY patente ASC`,
       {
-        replacements: { clienteId },
+        replacements: { clienteId, empresaId },
         type: QueryTypes.SELECT,
       }
     );
@@ -151,9 +186,10 @@ const obtenerClientePorId = async (req, res) => {
         `SELECT *
          FROM ordenes_trabajo
          WHERE "vehiculoId" IN (:vehiculoIds)
+           AND "empresaId" = :empresaId
          ORDER BY "createdAt" DESC`,
         {
-          replacements: { vehiculoIds },
+          replacements: { vehiculoIds, empresaId },
           type: QueryTypes.SELECT,
         }
       );
@@ -210,6 +246,8 @@ const obtenerClientePorId = async (req, res) => {
   } catch (error) {
     console.error("ERROR OBTENIENDO FICHA CRM CLIENTE:", error);
 
+    if (responderErrorEmpresa(res, error)) return;
+
     res.status(500).json({
       error: error.message,
       detalle: error.errors?.map((e) => e.message) || null,
@@ -219,9 +257,13 @@ const obtenerClientePorId = async (req, res) => {
 
 const crearCliente = async (req, res) => {
   try {
+    const empresaId = obtenerEmpresaIdRequerida(req);
     await prepararColumnas();
 
-    const payload = limpiarPayloadCliente(req.body);
+    const payload = {
+      ...limpiarPayloadCliente(req.body),
+      empresaId,
+    };
 
     if (!payload.nombre || !payload.nombre.trim()) {
       return res.status(400).json({
@@ -234,6 +276,8 @@ const crearCliente = async (req, res) => {
     res.status(201).json(nuevoCliente);
   } catch (error) {
     console.error("ERROR CREANDO CLIENTE:", error);
+
+    if (responderErrorEmpresa(res, error)) return;
 
     res.status(500).json({
       error: error.message,
