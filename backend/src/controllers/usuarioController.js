@@ -1,5 +1,8 @@
 const sequelize = require("../config/database");
 const { Usuario } = require("../models");
+const {
+  asegurarEmpresaPrincipalGmtch,
+} = require("../services/empresaCuentaService");
 
 let columnasPresenciaPreparadas = false;
 
@@ -204,12 +207,20 @@ const crearUsuario = async (req, res) => {
       });
     }
 
+    let empresaId = req.auth?.empresaId || null;
+
+    if (!empresaId) {
+      const empresaGmtch = await asegurarEmpresaPrincipalGmtch();
+      empresaId = empresaGmtch.id;
+    }
+
     const usuario = await Usuario.create({
       nombre,
       username,
       password,
       rol,
       activo: true,
+      empresaId,
     });
 
     res.status(201).json({

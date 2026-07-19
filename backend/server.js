@@ -236,6 +236,9 @@ app.get("/api/portal/files/:id/descargar-mod", portalDownloadRateLimiter);
 // ====================== MODELOS ======================
 
 require("./src/models");
+const {
+  asegurarEmpresaPrincipalGmtch,
+} = require("./src/services/empresaCuentaService");
 
 const {
   autenticar,
@@ -1764,10 +1767,35 @@ const prepararBaseDatos = async () => {
 
 // ====================== CREAR / ACTUALIZAR OWNER ======================
 
-const crearUsuarioMaestro = async () => {
+const existeColumnaEmpresaUsuario = async () => {
+  const resultado = await sequelize.query(
+    `
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'Usuarios'
+        AND column_name = 'empresaId'
+    ) AS "existe";
+    `,
+    { type: QueryTypes.SELECT }
+  );
+
+  return Boolean(resultado[0]?.existe);
+};
+
+const crearUsuarioMaestro = async (empresaGmtch = null) => {
   try {
     const passwordInicial = process.env.OWNER_INITIAL_PASSWORD || "123";
     const passwordHash = await bcrypt.hash(passwordInicial, 10);
+    const tieneEmpresaId = await existeColumnaEmpresaUsuario();
+    const empresaId = empresaGmtch?.id || null;
+
+    if (!tieneEmpresaId) {
+      console.warn(
+        'Migración SaaS Foundation V0 pendiente: "Usuarios" aún no tiene "empresaId".'
+      );
+    }
 
     const [usuarios] = await sequelize.query(`
       SELECT "id", "username", "rol"
@@ -1777,38 +1805,66 @@ const crearUsuarioMaestro = async () => {
     `);
 
     if (usuarios.length > 0) {
-      await sequelize.query(
-        `
-        UPDATE "Usuarios"
-        SET "rol" = 'OWNER',
-            "nombre" = COALESCE("nombre", 'Gastón Muñoz'),
-            "activo" = true,
-            "updatedAt" = NOW()
-        WHERE "username" = 'gaston';
-        `
-      );
+      if (tieneEmpresaId && empresaId) {
+        await sequelize.query(
+          `
+          UPDATE "Usuarios"
+          SET "rol" = 'OWNER',
+              "nombre" = COALESCE("nombre", 'Gastón Muñoz'),
+              "activo" = true,
+              "empresaId" = COALESCE("empresaId", :empresaId),
+              "updatedAt" = NOW()
+          WHERE "username" = 'gaston';
+          `,
+          { replacements: { empresaId } }
+        );
+      } else {
+        await sequelize.query(
+          `
+          UPDATE "Usuarios"
+          SET "rol" = 'OWNER',
+              "nombre" = COALESCE("nombre", 'Gastón Muñoz'),
+              "activo" = true,
+              "updatedAt" = NOW()
+          WHERE "username" = 'gaston';
+          `
+        );
+      }
 
       console.log("Usuario gaston verificado como OWNER sin resetear password");
       return;
     }
 
-    await sequelize.query(
-      `
-      INSERT INTO "Usuarios"
-        ("id", "nombre", "username", "password", "rol", "activo", "createdAt", "updatedAt")
-      VALUES
-        (:id, :nombre, :username, :password, :rol, true, NOW(), NOW());
-      `,
-      {
-        replacements: {
-          id: crypto.randomUUID(),
-          nombre: "Gastón Muñoz",
-          username: "gaston",
-          password: passwordHash,
-          rol: "OWNER",
-        },
-      }
-    );
+    const replacements = {
+      id: crypto.randomUUID(),
+      nombre: "Gastón Muñoz",
+      username: "gaston",
+      password: passwordHash,
+      rol: "OWNER",
+      empresaId,
+    };
+
+    if (tieneEmpresaId && empresaId) {
+      await sequelize.query(
+        `
+        INSERT INTO "Usuarios"
+          ("id", "nombre", "username", "password", "rol", "activo", "empresaId", "createdAt", "updatedAt")
+        VALUES
+          (:id, :nombre, :username, :password, :rol, true, :empresaId, NOW(), NOW());
+        `,
+        { replacements }
+      );
+    } else {
+      await sequelize.query(
+        `
+        INSERT INTO "Usuarios"
+          ("id", "nombre", "username", "password", "rol", "activo", "createdAt", "updatedAt")
+        VALUES
+          (:id, :nombre, :username, :password, :rol, true, NOW(), NOW());
+        `,
+        { replacements }
+      );
+    }
 
     console.log("ACCESO OWNER CREADO: usuario gaston");
   } catch (error) {
@@ -1826,10 +1882,13 @@ const startServer = async () => {
     await sequelize.sync();
     console.log("BASE DE DATOS SINCRONIZADA SIN ALTER AUTOMÁTICO");
 
+    const empresaGmtch = await asegurarEmpresaPrincipalGmtch();
+    console.log("EMPRESA PRINCIPAL GMTCH VERIFICADA");
+
     await prepararColumnasOmnicanal();
     console.log("COLUMNAS OMNICANAL VERIFICADAS");
 
-    await crearUsuarioMaestro();
+    await crearUsuarioMaestro(empresaGmtch);
 
     console.log("Uploads path:", uploadsPath);
 

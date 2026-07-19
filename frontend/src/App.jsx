@@ -353,16 +353,78 @@ const obtenerSeccionesMenu = (usuario) => {
   return secciones;
 };
 
+const normalizarEmpresa = (datos = {}) => {
+  const empresaBase =
+    datos.empresa && typeof datos.empresa === "object" ? datos.empresa : {};
+  const id = empresaBase.id || datos.empresaId || null;
+  const slug = empresaBase.slug || datos.empresaSlug || null;
+  const nombre = empresaBase.nombre || datos.empresaNombre || null;
+
+  if (!id && !slug && !nombre) return null;
+
+  return {
+    ...empresaBase,
+    id,
+    slug,
+    nombre,
+  };
+};
+
+const guardarEmpresaLocal = (empresa) => {
+  if (!empresa) {
+    localStorage.removeItem("empresa");
+    localStorage.removeItem("empresaId");
+    localStorage.removeItem("empresaSlug");
+    localStorage.removeItem("empresaNombre");
+    return;
+  }
+
+  localStorage.setItem("empresa", JSON.stringify(empresa));
+
+  if (empresa.id) localStorage.setItem("empresaId", empresa.id);
+  else localStorage.removeItem("empresaId");
+
+  if (empresa.slug) localStorage.setItem("empresaSlug", empresa.slug);
+  else localStorage.removeItem("empresaSlug");
+
+  if (empresa.nombre) localStorage.setItem("empresaNombre", empresa.nombre);
+  else localStorage.removeItem("empresaNombre");
+};
+
+const leerEmpresaLocal = () => {
+  let empresaGuardada = null;
+
+  try {
+    const empresaJson = localStorage.getItem("empresa");
+    empresaGuardada = empresaJson ? JSON.parse(empresaJson) : null;
+  } catch {
+    localStorage.removeItem("empresa");
+  }
+
+  return normalizarEmpresa({
+    empresa: empresaGuardada,
+    empresaId: localStorage.getItem("empresaId"),
+    empresaSlug: localStorage.getItem("empresaSlug"),
+    empresaNombre: localStorage.getItem("empresaNombre"),
+  });
+};
+
 const leerUsuarioLocal = () => {
   const token = localStorage.getItem("token");
 
   if (!token) return null;
+
+  const empresa = leerEmpresaLocal();
 
   return {
     id: localStorage.getItem("userId"),
     nombre: localStorage.getItem("nombre"),
     username: localStorage.getItem("username"),
     rol: localStorage.getItem("rol"),
+    empresa,
+    empresaId: empresa?.id || null,
+    empresaSlug: empresa?.slug || null,
+    empresaNombre: empresa?.nombre || null,
   };
 };
 
@@ -465,6 +527,7 @@ const limpiarSesion = () => {
   localStorage.removeItem("username");
   localStorage.removeItem("nombre");
   localStorage.removeItem("userId");
+  guardarEmpresaLocal(null);
 };
 
 const SOUND_ALERTS_KEY = "gmtch_sound_alerts_enabled";
@@ -931,17 +994,23 @@ function App() {
 
         if (!activo) return;
 
+        const empresa = normalizarEmpresa(res.data);
         const u = {
           id: res.data.id,
           nombre: res.data.nombre || res.data.username,
           username: res.data.username,
           rol: res.data.rol,
+          empresa,
+          empresaId: empresa?.id || null,
+          empresaSlug: empresa?.slug || null,
+          empresaNombre: empresa?.nombre || null,
         };
 
         localStorage.setItem("userId", u.id);
         localStorage.setItem("nombre", u.nombre);
         localStorage.setItem("username", u.username);
         localStorage.setItem("rol", u.rol);
+        guardarEmpresaLocal(empresa);
 
         setUsuario(u);
         setAuth(true);
@@ -1347,6 +1416,12 @@ function App() {
                   <p className="text-[9px] font-black text-blue-400 uppercase">
                     {usuario?.rol}
                   </p>
+
+                  {(usuario?.empresaNombre || usuario?.empresa?.nombre) && (
+                    <p className="mt-2 text-[9px] font-semibold text-slate-400">
+                      Empresa: {usuario?.empresaNombre || usuario?.empresa?.nombre}
+                    </p>
+                  )}
                 </div>
 
                 <button

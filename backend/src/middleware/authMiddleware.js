@@ -1,5 +1,8 @@
 const jwt = require("jsonwebtoken");
-const { Usuario } = require("../models");
+const { Usuario, EmpresaCuenta } = require("../models");
+const {
+  asegurarEmpresaPrincipalGmtch,
+} = require("../services/empresaCuentaService");
 
 const JWT_SECRET =
   process.env.JWT_SECRET ||
@@ -20,6 +23,8 @@ const ROLES = {
   TUNER: "TUNER",
 };
 
+const EMPRESA_ATTRIBUTES = ["id", "nombre", "slug", "plan", "estado"];
+
 const autenticar = async (req, res, next) => {
   try {
     const header = req.headers.authorization || "";
@@ -32,9 +37,25 @@ const autenticar = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
+    const usuarioId = decoded.usuarioId || decoded.id;
 
-    const usuario = await Usuario.findByPk(decoded.id, {
-      attributes: ["id", "nombre", "username", "rol", "activo"],
+    const usuario = await Usuario.findByPk(usuarioId, {
+      attributes: [
+        "id",
+        "nombre",
+        "username",
+        "rol",
+        "activo",
+        "empresaId",
+      ],
+      include: [
+        {
+          model: EmpresaCuenta,
+          as: "Empresa",
+          attributes: EMPRESA_ATTRIBUTES,
+          required: false,
+        },
+      ],
     });
 
     if (!usuario) {
@@ -48,6 +69,33 @@ const autenticar = async (req, res, next) => {
         error: "Usuario desactivado",
       });
     }
+
+    let empresa = usuario.Empresa || null;
+
+    if (!usuario.empresaId) {
+      empresa = await asegurarEmpresaPrincipalGmtch();
+      usuario.empresaId = empresa.id;
+      await usuario.save({ fields: ["empresaId"] });
+      usuario.setDataValue("Empresa", empresa);
+      usuario.Empresa = empresa;
+    }
+
+    if (!empresa) {
+      return res.status(503).json({
+        error: "EMPRESA_NO_DISPONIBLE",
+        message: "La empresa asociada al usuario no está disponible.",
+      });
+    }
+
+    req.auth = {
+      usuarioId: usuario.id,
+      username: usuario.username,
+      rol: usuario.rol,
+      empresaId: usuario.empresaId,
+      empresaSlug: empresa?.slug || null,
+      empresaNombre: empresa?.nombre || null,
+      esSuperadmin: false,
+    };
 
     req.usuario = usuario;
     req.user = usuario;

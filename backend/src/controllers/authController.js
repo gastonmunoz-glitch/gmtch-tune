@@ -1,7 +1,10 @@
-const Usuario = require("../models/Usuario");
+const { Usuario, EmpresaCuenta } = require("../models");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { prepararColumnasPresencia } = require("./usuarioController");
+const {
+  asegurarEmpresaPrincipalGmtch,
+} = require("../services/empresaCuentaService");
 
 const JWT_SECRET =
   process.env.JWT_SECRET ||
@@ -16,13 +19,79 @@ const mensajeErrorServidor = (error) =>
     ? "Error interno del servidor"
     : error.message || "Error interno del servidor";
 
+const EMPRESA_ATTRIBUTES = ["id", "nombre", "slug", "plan", "estado"];
+
+const crearErrorEmpresaNoDisponible = () => {
+  const error = new Error("La empresa asociada al usuario no está disponible.");
+  error.code = "EMPRESA_NO_DISPONIBLE";
+  return error;
+};
+
+const asociarEmpresaCargada = (usuario, empresa) => {
+  if (!usuario || !empresa) return;
+
+  usuario.setDataValue("Empresa", empresa);
+  usuario.Empresa = empresa;
+};
+
+const resolverEmpresaUsuario = async (usuario) => {
+  let empresa = usuario.Empresa || usuario.get?.("Empresa") || null;
+
+  if (!usuario.empresaId) {
+    empresa = await asegurarEmpresaPrincipalGmtch();
+    usuario.empresaId = empresa.id;
+    await usuario.save({ fields: ["empresaId"] });
+    asociarEmpresaCargada(usuario, empresa);
+  } else if (!empresa) {
+    empresa = await EmpresaCuenta.findByPk(usuario.empresaId, {
+      attributes: EMPRESA_ATTRIBUTES,
+    });
+
+    asociarEmpresaCargada(usuario, empresa);
+  }
+
+  if (!empresa) {
+    throw crearErrorEmpresaNoDisponible();
+  }
+
+  return empresa;
+};
+
+const serializarEmpresa = (empresa) => {
+  if (!empresa) return null;
+
+  return {
+    id: empresa.id,
+    nombre: empresa.nombre,
+    slug: empresa.slug,
+    plan: empresa.plan,
+    estado: empresa.estado,
+  };
+};
+
 const login = async (req, res) => {
   try {
     const { username, password } = req.body;
 
     const user = await Usuario.findOne({
       where: { username },
-      attributes: ["id", "nombre", "username", "password", "rol", "activo"],
+      attributes: [
+        "id",
+        "nombre",
+        "username",
+        "password",
+        "rol",
+        "activo",
+        "empresaId",
+      ],
+      include: [
+        {
+          model: EmpresaCuenta,
+          as: "Empresa",
+          attributes: EMPRESA_ATTRIBUTES,
+          required: false,
+        },
+      ],
     });
 
     if (!user) {
@@ -44,6 +113,8 @@ const login = async (req, res) => {
         error: "Credenciales inválidas",
       });
     }
+
+    const empresa = await resolverEmpresaUsuario(user);
 
     try {
       const ahora = new Date();
@@ -73,6 +144,9 @@ const login = async (req, res) => {
         id: user.id,
         username: user.username,
         rol: user.rol,
+        empresaId: user.empresaId,
+        empresaSlug: empresa?.slug || null,
+        empresaNombre: empresa?.nombre || null,
       },
       JWT_SECRET,
       {
@@ -87,29 +161,43 @@ const login = async (req, res) => {
       username: user.username,
       rol: user.rol,
       activo: user.activo,
+      empresa: serializarEmpresa(empresa),
     });
   } catch (error) {
     console.error("ERROR LOGIN:", error);
 
-    res.status(500).json({
-      error: mensajeErrorServidor(error),
-    });
+    if (error.code === "EMPRESA_NO_DISPONIBLE") {
+      return res.status(503).json({
+        error: error.code,
+        message: error.message,
+      });
+    }
+
+    res.status(500).json({ error: mensajeErrorServidor(error) });
   }
 };
 
 const me = async (req, res) => {
   try {
+    const empresa = await resolverEmpresaUsuario(req.usuario);
+
     res.json({
       id: req.usuario.id,
       nombre: req.usuario.nombre,
       username: req.usuario.username,
       rol: req.usuario.rol,
       activo: req.usuario.activo,
+      empresa: serializarEmpresa(empresa),
     });
   } catch (error) {
-    res.status(500).json({
-      error: mensajeErrorServidor(error),
-    });
+    if (error.code === "EMPRESA_NO_DISPONIBLE") {
+      return res.status(503).json({
+        error: error.code,
+        message: error.message,
+      });
+    }
+
+    res.status(500).json({ error: mensajeErrorServidor(error) });
   }
 };
 

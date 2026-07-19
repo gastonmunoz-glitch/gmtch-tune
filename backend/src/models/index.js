@@ -7,6 +7,7 @@ const Diagnostico = require("./Diagnostico");
 const ArchivoECU = require("./ArchivoECU");
 const FotoVehiculo = require("./FotoVehiculo");
 const Usuario = require("./Usuario");
+const EmpresaCuenta = require("./EmpresaCuenta");
 const Notificacion = require("./Notificacion");
 const PushSubscription = require("./PushSubscription");
 const BitacoraOperativa = require("./BitacoraOperativa");
@@ -43,6 +44,16 @@ try {
 } catch (error) {
   console.warn("⚠️ Modelo Operador no cargado:", error.message);
 }
+
+// Empresa / usuarios internos
+EmpresaCuenta.hasMany(Usuario, {
+  foreignKey: "empresaId",
+});
+
+Usuario.belongsTo(EmpresaCuenta, {
+  as: "Empresa",
+  foreignKey: "empresaId",
+});
 
 // Cliente / Vehículo
 Cliente.hasMany(Vehiculo, {
@@ -520,6 +531,7 @@ module.exports = {
   ArchivoECU,
   FotoVehiculo,
   Usuario,
+  EmpresaCuenta,
   Notificacion,
   PushSubscription,
   BitacoraOperativa,

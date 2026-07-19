@@ -39,6 +39,17 @@ const Usuario = sequelize.define(
       defaultValue: true,
     },
 
+    empresaId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "empresa_cuentas",
+        key: "id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "RESTRICT",
+    },
+
     last_login_at: {
       type: DataTypes.DATE,
       allowNull: true,

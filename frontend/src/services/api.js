@@ -28,6 +28,10 @@ api.interceptors.response.use(
       localStorage.removeItem("username");
       localStorage.removeItem("nombre");
       localStorage.removeItem("userId");
+      localStorage.removeItem("empresa");
+      localStorage.removeItem("empresaId");
+      localStorage.removeItem("empresaSlug");
+      localStorage.removeItem("empresaNombre");
 
       window.location.href = "/login";
     }

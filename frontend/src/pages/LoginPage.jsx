@@ -23,11 +23,48 @@ function LoginPage({ setAuth, setUsuario }) {
       localStorage.setItem("nombre", res.data.nombre || res.data.username);
       localStorage.setItem("userId", res.data.id);
 
+      const empresaRespuesta =
+        res.data.empresa && typeof res.data.empresa === "object"
+          ? res.data.empresa
+          : null;
+      const empresaId = empresaRespuesta?.id || res.data.empresaId || null;
+      const empresaSlug = empresaRespuesta?.slug || res.data.empresaSlug || null;
+      const empresaNombre =
+        empresaRespuesta?.nombre || res.data.empresaNombre || null;
+      const empresa =
+        empresaId || empresaSlug || empresaNombre
+          ? {
+              ...empresaRespuesta,
+              id: empresaId,
+              slug: empresaSlug,
+              nombre: empresaNombre,
+            }
+          : null;
+
+      if (empresa) {
+        localStorage.setItem("empresa", JSON.stringify(empresa));
+        if (empresaId) localStorage.setItem("empresaId", empresaId);
+        else localStorage.removeItem("empresaId");
+        if (empresaSlug) localStorage.setItem("empresaSlug", empresaSlug);
+        else localStorage.removeItem("empresaSlug");
+        if (empresaNombre) localStorage.setItem("empresaNombre", empresaNombre);
+        else localStorage.removeItem("empresaNombre");
+      } else {
+        localStorage.removeItem("empresa");
+        localStorage.removeItem("empresaId");
+        localStorage.removeItem("empresaSlug");
+        localStorage.removeItem("empresaNombre");
+      }
+
       setUsuario({
         id: res.data.id,
         nombre: res.data.nombre || res.data.username,
         username: res.data.username,
         rol: res.data.rol,
+        empresa,
+        empresaId,
+        empresaSlug,
+        empresaNombre,
       });
 
       setAuth(true);
