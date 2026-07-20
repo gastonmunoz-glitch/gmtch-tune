@@ -6,6 +6,10 @@ const ESTADO_ORDEN_FINAL_RECEPCION = "PARA_DIAGNOSTICO";
 const MODO_RECEPCION_NORMAL = "NORMAL";
 const MODO_RECEPCION_URGENTE = "URGENTE";
 const ROLES_PUEDEN_DEJAR_POR_ASIGNAR = ["OWNER", "ADMIN", "SUPERVISOR"];
+const MENSAJE_CONFIRMAR_CAMBIO_VEHICULO =
+  "Estás cambiando de vehículo. El trabajo y las fotos ingresadas pertenecen al vehículo actual y se limpiarán para evitar mezclarlos con otra orden.";
+const MENSAJE_BORRADOR_OTRO_VEHICULO =
+  "El borrador pertenece a otro vehículo. Revisa el trabajo antes de continuar.";
 const ESTADOS_BUSQUEDA_PATENTE = Object.freeze({
   IDLE: "IDLE",
   BUSCANDO: "BUSCANDO",
@@ -104,6 +108,18 @@ const normalizarPatente = (valor) => {
     .trim()
     .toUpperCase()
     .replace(/[\s.\-\u2010-\u2015\u2212]/gu, "");
+};
+
+const crearFingerprintVehiculo = ({ id, patente, nuevo = false }) => {
+  const patenteNormalizada = normalizarPatente(patente);
+
+  if (!patenteNormalizada) return "";
+  if (nuevo) return `NUEVO:${patenteNormalizada}`;
+
+  const idNormalizado = String(id ?? "").trim();
+  return idNormalizado
+    ? `VEHICULO:${idNormalizado}:${patenteNormalizada}`
+    : "";
 };
 
 const formatearFecha = (fecha) => {
@@ -307,6 +323,7 @@ const normalizarListaResponsables = (data) => {
 
 function RecepcionRapidaPage() {
   const fotosInputRef = useRef(null);
+  const fotosArchivosRef = useRef([]);
   const busquedaPatenteAbortRef = useRef(null);
   const busquedaPatenteSecuenciaRef = useRef(0);
   const rolUsuario = String(leerStorage("rol") || "").toUpperCase();
@@ -340,6 +357,7 @@ function RecepcionRapidaPage() {
   const [origenRecepcion, setOrigenRecepcion] = useState("");
 
   const [fotosArchivos, setFotosArchivos] = useState([]);
+  const [asociacionBorrador, setAsociacionBorrador] = useState(null);
   const esModoUrgente = modoRecepcion === MODO_RECEPCION_URGENTE;
 
   const etiquetas = [
@@ -355,10 +373,18 @@ function RecepcionRapidaPage() {
     escribirStorage("gmtch_paso_recepcion", paso);
   }, [paso]);
 
+  useEffect(() => {
+    fotosArchivosRef.current = fotosArchivos;
+  }, [fotosArchivos]);
+
   useEffect(
     () => () => {
       busquedaPatenteAbortRef.current?.abort();
       busquedaPatenteSecuenciaRef.current += 1;
+      fotosArchivosRef.current.forEach((foto) => {
+        const urlTemporal = foto?.previewUrl || foto?.urlTemporal;
+        if (urlTemporal) URL.revokeObjectURL(urlTemporal);
+      });
     }, []
   );
 
@@ -449,6 +475,14 @@ function RecepcionRapidaPage() {
   };
 
   const anterior = () => {
+    if (cargando) {
+      mostrarAviso(
+        "error",
+        "Espera a que termine la operación actual antes de cambiar de vehículo."
+      );
+      return;
+    }
+
     limpiarAviso();
     setPaso((p) => Math.max(1, p - 1));
   };
@@ -566,24 +600,173 @@ function RecepcionRapidaPage() {
   };
 
   const obtenerOrdenActual = () => {
-    return ordenId || leerStorage("gmtch_ordenId") || null;
+    return ordenId || null;
   };
 
-  const limpiarContextoTrabajo = (usarModoUrgente = esModoUrgente) => {
+  const tieneBorradorOperativo = () => {
+    const camposConTexto = [
+      orden.kilometraje,
+      orden.servicio_solicitado,
+      orden.motivo_urgencia,
+      orden.sintomas_cliente,
+      orden.observaciones_visuales,
+      orden.responsable_tecnico_id,
+      orden.responsable_tecnico_texto,
+      orden.motivo_override,
+      orden.monto_total,
+    ];
+    const prioridadModificada =
+      String(orden.prioridad || ESTADO_INICIAL_ORDEN.prioridad) !==
+      ESTADO_INICIAL_ORDEN.prioridad;
+    const requerimientosModificados =
+      orden.requiere_scanner !== ESTADO_INICIAL_ORDEN.requiere_scanner ||
+      orden.requiere_lectura_ecu !== ESTADO_INICIAL_ORDEN.requiere_lectura_ecu ||
+      orden.requiere_mecanica !== ESTADO_INICIAL_ORDEN.requiere_mecanica;
+
+    return Boolean(
+      camposConTexto.some((valor) => String(valor ?? "").trim()) ||
+        prioridadModificada ||
+        requerimientosModificados ||
+        orden.override_guardia === true ||
+        modoRecepcion === MODO_RECEPCION_URGENTE ||
+        ordenId ||
+        origenRecepcion ||
+        advertenciasBackend.length > 0 ||
+        fotosArchivos.length > 0
+    );
+  };
+
+  const revocarUrlsTemporalesFotos = () => {
+    fotosArchivos.forEach((foto) => {
+      const urlTemporal = foto?.previewUrl || foto?.urlTemporal;
+      if (urlTemporal) URL.revokeObjectURL(urlTemporal);
+    });
+  };
+
+  const limpiarBorradorOperativo = () => {
+    revocarUrlsTemporalesFotos();
+
+    setOrden({ ...ESTADO_INICIAL_ORDEN });
+    setOrdenId(null);
+    setOrigenRecepcion("");
+    setAdvertenciasBackend([]);
+    setModoRecepcion(MODO_RECEPCION_NORMAL);
+    setFotosArchivos([]);
+    setAsociacionBorrador(null);
+    setAviso(null);
+
     setCliente({ ...ESTADO_INICIAL_CLIENTE });
     setClienteId(null);
-
     setVehiculo({ ...ESTADO_INICIAL_VEHICULO });
     setVehiculoId(null);
 
-    setOrden({
-      ...ESTADO_INICIAL_ORDEN,
-      prioridad: usarModoUrgente ? "URGENTE" : ESTADO_INICIAL_ORDEN.prioridad,
-    });
-    setOrdenId(null);
+    if (fotosInputRef.current) {
+      fotosInputRef.current.value = "";
+    }
 
-    setFotosArchivos([]);
     limpiarStorageFlujo();
+  };
+
+  const prepararCambioVehiculo = ({ id, patente, nuevo = false }) => {
+    const fingerprintDestino = crearFingerprintVehiculo({ id, patente, nuevo });
+
+    if (!fingerprintDestino) {
+      return { permitido: false, mismoVehiculo: false, fingerprintDestino: "" };
+    }
+
+    if (cargando) {
+      mostrarAviso(
+        "error",
+        "Espera a que termine la operación actual antes de cambiar de vehículo."
+      );
+      return { permitido: false, mismoVehiculo: false, fingerprintDestino };
+    }
+
+    const fingerprintActivo = asociacionBorrador?.fingerprint || "";
+    const hayVehiculoActivo = Boolean(
+      fingerprintActivo ||
+        vehiculoId ||
+        normalizarPatente(vehiculo.patente) ||
+        clienteId ||
+        ordenId
+    );
+    const mismoVehiculo =
+      Boolean(fingerprintActivo) && fingerprintActivo === fingerprintDestino;
+    const cambioReal = hayVehiculoActivo && !mismoVehiculo;
+
+    if (
+      cambioReal &&
+      tieneBorradorOperativo() &&
+      !window.confirm(MENSAJE_CONFIRMAR_CAMBIO_VEHICULO)
+    ) {
+      return { permitido: false, mismoVehiculo: false, fingerprintDestino };
+    }
+
+    if (cambioReal) {
+      limpiarBorradorOperativo();
+    }
+
+    return { permitido: true, mismoVehiculo, fingerprintDestino };
+  };
+
+  const validarAsociacionBorradorActiva = ({ requiereOrden = false } = {}) => {
+    const patenteActiva = normalizarPatente(vehiculo.patente);
+    const fingerprintActivo = crearFingerprintVehiculo({
+      id: vehiculoId,
+      patente: patenteActiva,
+    });
+    const asociacionValida = Boolean(
+      asociacionBorrador?.hidratado === true &&
+        fingerprintActivo &&
+        asociacionBorrador.fingerprint === fingerprintActivo &&
+        String(asociacionBorrador.vehiculoId ?? "") === String(vehiculoId ?? "") &&
+        asociacionBorrador.patente === patenteActiva
+    );
+    const ordenValida =
+      !requiereOrden ||
+      Boolean(
+        ordenId &&
+          asociacionBorrador?.ordenId &&
+          String(asociacionBorrador.ordenId) === String(ordenId)
+      );
+
+    if (!asociacionValida || !ordenValida) {
+      mostrarAviso("error", MENSAJE_BORRADOR_OTRO_VEHICULO);
+      return false;
+    }
+
+    return true;
+  };
+
+  const esContextoVehiculoAceptado = (vehiculoContexto, clienteContexto) => {
+    const patenteContexto = normalizarPatente(vehiculoContexto?.patente);
+    const fingerprintContexto = crearFingerprintVehiculo({
+      id: vehiculoContexto?.id,
+      patente: patenteContexto,
+    });
+
+    return Boolean(
+      vehiculoContexto?.activo !== false &&
+        clienteContexto?.id &&
+        asociacionBorrador?.origen === "CONTEXTO" &&
+        asociacionBorrador?.hidratado === true &&
+        asociacionBorrador?.fingerprint === fingerprintContexto &&
+        String(asociacionBorrador?.vehiculoId ?? "") ===
+          String(vehiculoContexto?.id ?? "") &&
+        String(vehiculoId ?? "") === String(vehiculoContexto?.id ?? "") &&
+        String(clienteId ?? "") === String(clienteContexto.id) &&
+        asociacionBorrador?.patente === patenteContexto &&
+        normalizarPatente(vehiculo.patente) === patenteContexto
+    );
+  };
+
+  const limpiarContextoTrabajo = (usarModoUrgente = false) => {
+    limpiarBorradorOperativo();
+
+    if (usarModoUrgente) {
+      setModoRecepcion(MODO_RECEPCION_URGENTE);
+      setOrden({ ...ESTADO_INICIAL_ORDEN, prioridad: "URGENTE" });
+    }
   };
 
   const mensajeErrorAmigable = (err, entidad) => {
@@ -669,8 +852,12 @@ function RecepcionRapidaPage() {
         setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.ENCONTRADO);
       } else if (contexto?.resultado === "AMBIGUO") {
         setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.MULTIPLES);
-      } else {
+      } else if (contexto?.resultado === "NO_ENCONTRADO") {
         setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.NO_ENCONTRADO);
+      } else {
+        setContextoPatente(null);
+        setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.ERROR);
+        setErrorBusquedaPatente("Respuesta inesperada al buscar la patente.");
       }
     } catch (err) {
       if (
@@ -723,6 +910,13 @@ function RecepcionRapidaPage() {
       return;
     }
 
+    const cambio = prepararCambioVehiculo({
+      id: vehiculoContexto.id,
+      patente: vehiculoContexto.patente,
+    });
+
+    if (!cambio.permitido) return;
+
     setVehiculo({
       patente: vehiculoContexto.patente || patenteBusqueda,
       marca: vehiculoContexto.marca || "",
@@ -741,10 +935,24 @@ function RecepcionRapidaPage() {
     });
     setVehiculoId(vehiculoContexto.id);
     setClienteId(clienteContexto.id);
-    setOrdenId(null);
+
+    if (!cambio.mismoVehiculo) {
+      setOrdenId(null);
+      borrarStorage("gmtch_ordenId");
+    }
+
+    setAsociacionBorrador({
+      fingerprint: cambio.fingerprintDestino,
+      vehiculoId: vehiculoContexto.id,
+      patente: normalizarPatente(vehiculoContexto.patente),
+      hidratado: true,
+      origen: "CONTEXTO",
+      ordenId: cambio.mismoVehiculo
+        ? asociacionBorrador?.ordenId || ordenId || null
+        : null,
+    });
     escribirStorage("gmtch_vehiculoId", vehiculoContexto.id);
     escribirStorage("gmtch_clienteId", clienteContexto.id);
-    borrarStorage("gmtch_ordenId");
     mostrarAviso(
       "ok",
       "Datos seleccionados. Puedes revisar las sugerencias y crear una nueva orden."
@@ -753,25 +961,116 @@ function RecepcionRapidaPage() {
 
   const iniciarIngresoNuevo = () => {
     const patente = contextoPatente?.patente || normalizarPatente(patenteBusqueda);
+
+    const cambio = prepararCambioVehiculo({ patente, nuevo: true });
+    if (!cambio.permitido) return;
+
+    if (cambio.mismoVehiculo) {
+      setPaso(2);
+      return;
+    }
+
     setCliente({ ...ESTADO_INICIAL_CLIENTE });
     setClienteId(null);
     setVehiculo({ ...ESTADO_INICIAL_VEHICULO, patente });
     setVehiculoId(null);
     setOrdenId(null);
+    setAsociacionBorrador({
+      fingerprint: cambio.fingerprintDestino,
+      vehiculoId: null,
+      patente: normalizarPatente(patente),
+      hidratado: true,
+      origen: "NUEVO",
+      ordenId: null,
+    });
     borrarStorage("gmtch_clienteId");
     borrarStorage("gmtch_vehiculoId");
     borrarStorage("gmtch_ordenId");
     setPaso(2);
   };
 
+  const confirmarCambioPatenteManual = () => {
+    const patenteNueva = normalizarPatente(vehiculo.patente);
+    const patenteAsociada = asociacionBorrador?.patente || "";
+
+    if (!patenteNueva || !patenteAsociada || patenteNueva === patenteAsociada) {
+      return;
+    }
+
+    const clienteConservado = { ...cliente };
+    const clienteIdConservado = clienteId;
+    const cambio = prepararCambioVehiculo({ patente: patenteNueva, nuevo: true });
+
+    if (!cambio.permitido) {
+      setVehiculo((prev) => ({ ...prev, patente: patenteAsociada }));
+      return;
+    }
+
+    setCliente(clienteConservado);
+    setClienteId(clienteIdConservado);
+    setVehiculo({ ...ESTADO_INICIAL_VEHICULO, patente: patenteNueva });
+    setVehiculoId(null);
+    setOrdenId(null);
+    setAsociacionBorrador({
+      fingerprint: cambio.fingerprintDestino,
+      vehiculoId: null,
+      patente: patenteNueva,
+      hidratado: true,
+      origen: "MANUAL",
+      ordenId: null,
+    });
+    setPatenteBusqueda(patenteNueva);
+    setEstadoBusquedaPatente(ESTADOS_BUSQUEDA_PATENTE.IDLE);
+    setContextoPatente(null);
+    setErrorBusquedaPatente("");
+
+    if (clienteIdConservado) {
+      escribirStorage("gmtch_clienteId", clienteIdConservado);
+    } else {
+      borrarStorage("gmtch_clienteId");
+    }
+
+    borrarStorage("gmtch_vehiculoId");
+    borrarStorage("gmtch_ordenId");
+    setPaso(3);
+  };
+
   const aplicarServicioSugerido = (servicio) => {
     if (!servicio) return;
+
+    if (
+      !esContextoVehiculoAceptado(
+        contextoPatente?.vehiculo,
+        contextoPatente?.cliente
+      )
+    ) {
+      mostrarAviso(
+        "error",
+        "Primero usa los datos del vehículo antes de aplicar una sugerencia."
+      );
+      return;
+    }
+
     setOrden((prev) => ({ ...prev, servicio_solicitado: servicio }));
     mostrarAviso("ok", `Servicio sugerido seleccionado: ${servicio}.`);
   };
 
   const aplicarResponsableSugerido = (responsable) => {
     if (!responsable?.id) return;
+
+    if (
+      !esContextoVehiculoAceptado(
+        contextoPatente?.vehiculo,
+        contextoPatente?.cliente
+      )
+    ) {
+      mostrarAviso(
+        "error",
+        "Primero usa los datos del vehículo antes de aplicar una sugerencia."
+      );
+      return;
+    }
+
     setOrden((prev) => ({
       ...prev,
       responsable_tecnico_id: String(responsable.id),
@@ -788,6 +1087,8 @@ function RecepcionRapidaPage() {
       mostrarAviso("error", "No se detectó el vehículo encontrado.");
       return;
     }
+
+    if (!validarAsociacionBorradorActiva()) return;
 
     setOrden((prev) => ({
       ...prev,
@@ -861,6 +1162,22 @@ function RecepcionRapidaPage() {
       return;
     }
 
+    const fingerprintNuevo = crearFingerprintVehiculo({
+      patente,
+      nuevo: true,
+    });
+    const asociacionNuevaValida = Boolean(
+      asociacionBorrador?.hidratado === true &&
+        asociacionBorrador?.fingerprint === fingerprintNuevo &&
+        asociacionBorrador?.patente === patente &&
+        !asociacionBorrador?.vehiculoId
+    );
+
+    if (!asociacionNuevaValida) {
+      mostrarAviso("error", MENSAJE_BORRADOR_OTRO_VEHICULO);
+      return;
+    }
+
     try {
       setCargando(true);
       limpiarAviso();
@@ -885,6 +1202,17 @@ function RecepcionRapidaPage() {
       }
 
       setVehiculoId(nuevoVehiculoId);
+      setAsociacionBorrador((prev) => ({
+        fingerprint: crearFingerprintVehiculo({
+          id: nuevoVehiculoId,
+          patente,
+        }),
+        vehiculoId: nuevoVehiculoId,
+        patente,
+        hidratado: true,
+        origen: prev?.origen || "NUEVO",
+        ordenId: null,
+      }));
       escribirStorage("gmtch_vehiculoId", nuevoVehiculoId);
 
       mostrarAviso("ok", "Vehículo guardado correctamente. Continúa con servicio y síntomas.");
@@ -925,7 +1253,7 @@ function RecepcionRapidaPage() {
   };
 
   const guardarOrden = async () => {
-    const idVehiculoActual = vehiculoId || leerStorage("gmtch_vehiculoId");
+    const idVehiculoActual = vehiculoId;
 
     const kilometraje = limpiarNumero(orden.kilometraje);
     const servicioSolicitado = String(orden.servicio_solicitado ?? "").trim();
@@ -937,6 +1265,8 @@ function RecepcionRapidaPage() {
       mostrarAviso("error", "Falta vehículo.");
       return;
     }
+
+    if (!validarAsociacionBorradorActiva()) return;
 
     if (!servicioSolicitado) {
       mostrarAviso("error", "Debes indicar el servicio solicitado.");
@@ -1058,6 +1388,9 @@ function RecepcionRapidaPage() {
       }
 
       setOrdenId(nuevaOrdenId);
+      setAsociacionBorrador((prev) =>
+        prev ? { ...prev, ordenId: nuevaOrdenId } : prev
+      );
       setOrigenRecepcion(origenBackend);
       escribirStorage("gmtch_ordenId", nuevaOrdenId);
       registrarAdvertenciasBackend(
@@ -1087,6 +1420,10 @@ function RecepcionRapidaPage() {
 
   const subirFotosSeleccionadas = async () => {
     const idOrdenActual = obtenerOrdenActual();
+
+    if (!validarAsociacionBorradorActiva({ requiereOrden: true })) {
+      return false;
+    }
 
     if (!idOrdenActual) {
       mostrarAviso("error", "Falta orden. Vuelve al paso 4 y guarda la orden nuevamente.");
@@ -1142,6 +1479,8 @@ function RecepcionRapidaPage() {
       return;
     }
 
+    if (!validarAsociacionBorradorActiva({ requiereOrden: true })) return;
+
     if (!fotosArchivos.length && !esModoUrgente) {
       const continuar = window.confirm(
         "No hay fotos seleccionadas. Lo recomendado es subir respaldo exterior e interior. Deseas finalizar sin fotos?"
@@ -1162,7 +1501,8 @@ function RecepcionRapidaPage() {
       setCargando(true);
       limpiarAviso();
 
-      await subirFotosSeleccionadas();
+      const fotosSubidas = await subirFotosSeleccionadas();
+      if (!fotosSubidas) return;
 
       const estadoActualizado = await actualizarOrdenAParaDiagnostico();
 
@@ -1314,8 +1654,9 @@ function RecepcionRapidaPage() {
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {coincidencias.map((item) => {
-              const seleccionado = String(vehiculoId || "") === String(item.id);
               const puedeUsar = item.activo !== false && Boolean(item.cliente?.id);
+              const seleccionado =
+                puedeUsar && esContextoVehiculoAceptado(item, item.cliente);
 
               return (
                 <div
@@ -1351,7 +1692,10 @@ function RecepcionRapidaPage() {
           </div>
 
           {coincidencias.some(
-            (item) => String(item.id) === String(vehiculoId || "")
+            (item) =>
+              item.activo !== false &&
+              item.cliente?.id &&
+              esContextoVehiculoAceptado(item, item.cliente)
           ) && (
             <button
               type="button"
@@ -1390,8 +1734,11 @@ function RecepcionRapidaPage() {
             ([, candidato]) => String(candidato.id) === String(responsable.id)
           ) === indice
       );
-    const contextoAplicado =
-      vehiculoContexto?.id && String(vehiculoId || "") === String(vehiculoContexto.id);
+    const contextoAplicado = Boolean(
+      contextoPatente?.resultado === "EXACTO" &&
+        contextoPatente?.puede_autocompletar === true &&
+        esContextoVehiculoAceptado(vehiculoContexto, clienteContexto)
+    );
 
     return (
       <div className="border-4 border-black bg-slate-50 p-5 space-y-5">
@@ -1498,8 +1845,9 @@ function RecepcionRapidaPage() {
                 <button
                   key={item.servicio}
                   type="button"
+                  disabled={!contextoAplicado}
                   onClick={() => aplicarServicioSugerido(item.servicio)}
-                  className="border-2 border-blue-700 bg-blue-50 px-3 py-2 text-xs font-black uppercase text-blue-900"
+                  className="border-2 border-blue-700 bg-blue-50 px-3 py-2 text-xs font-black uppercase text-blue-900 disabled:border-gray-400 disabled:bg-gray-100 disabled:text-gray-400"
                 >
                   {item.servicio} ({item.veces})
                 </button>
@@ -1516,8 +1864,9 @@ function RecepcionRapidaPage() {
                 <button
                   key={`${tipo}-${responsable.id}`}
                   type="button"
+                  disabled={!contextoAplicado}
                   onClick={() => aplicarResponsableSugerido(responsable)}
-                  className="border-2 border-violet-700 bg-violet-50 px-3 py-2 text-xs font-black uppercase text-violet-900"
+                  className="border-2 border-violet-700 bg-violet-50 px-3 py-2 text-xs font-black uppercase text-violet-900 disabled:border-gray-400 disabled:bg-gray-100 disabled:text-gray-400"
                 >
                   {snapshotUsuario(responsable)} · {tipo.replaceAll("_", " ")}
                 </button>
@@ -1699,6 +2048,7 @@ function RecepcionRapidaPage() {
                   patente: normalizarPatente(e.target.value),
                 }))
               }
+              onBlur={confirmarCambioPatenteManual}
             />
 
             <input
@@ -2382,7 +2732,8 @@ function RecepcionRapidaPage() {
         <button
           type="button"
           onClick={limpiarFlujo}
-          className="text-[10px] uppercase font-black border border-black px-3 py-2"
+          disabled={cargando}
+          className="text-[10px] uppercase font-black border border-black px-3 py-2 disabled:border-gray-400 disabled:text-gray-400"
         >
           Limpiar flujo
         </button>
