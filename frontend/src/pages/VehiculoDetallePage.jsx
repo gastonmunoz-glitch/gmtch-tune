@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
-import api from "../services/api";
+import api, { descargarArchivoAutenticado } from "../services/api";
 
 const prioridadClase = (prioridad) => {
   const p = String(prioridad || "MEDIA").toUpperCase();
@@ -20,14 +20,6 @@ const estadoClase = (estado) => {
   if (e === "EN_PROGRAMACION") return "bg-purple-600 text-white";
   if (e === "PARA_DIAGNOSTICO") return "bg-blue-600 text-white";
   return "bg-gray-300 text-black";
-};
-
-const apiRoot = () => String(api.defaults.baseURL || "").replace(/\/api\/?$/, "");
-
-const fileUrl = (ruta) => {
-  if (!ruta) return null;
-  if (/^https?:\/\//i.test(ruta)) return ruta;
-  return ruta.startsWith("/") ? `${apiRoot()}${ruta}` : `${apiRoot()}/${ruta}`;
 };
 
 const normalizarLista = (...valores) => {
@@ -144,8 +136,23 @@ function VehiculoDetallePage() {
   const [materialesError, setMaterialesError] = useState("");
   const [comprobantesPago, setComprobantesPago] = useState([]);
   const [comprobantesError, setComprobantesError] = useState("");
+  const [archivoError, setArchivoError] = useState("");
   const [eventosOrdenes, setEventosOrdenes] = useState({});
   const [cargando, setCargando] = useState(true);
+
+  const descargarProtegido = async (ruta, nombreFallback) => {
+    try {
+      setArchivoError("");
+      await descargarArchivoAutenticado(ruta, nombreFallback);
+    } catch (err) {
+      setArchivoError(
+        err.mensajeDescarga ||
+          err.response?.data?.message ||
+          err.response?.data?.error ||
+          "No se pudo descargar el archivo. Revisa tus permisos y vuelve a intentar."
+      );
+    }
+  };
 
   useEffect(() => {
     let activo = true;
@@ -364,6 +371,11 @@ function VehiculoDetallePage() {
 
   return (
     <div className="space-y-8">
+      {archivoError && (
+        <div className="border-2 border-red-700 bg-red-50 p-4 text-sm font-black uppercase text-red-900">
+          {archivoError}
+        </div>
+      )}
       <div className="bg-black text-white p-8 border-b-8 border-blue-600 shadow-2xl">
         <Link to="/vehiculos" className="text-xs font-black uppercase text-blue-400">
           Volver al garage
@@ -1083,7 +1095,7 @@ function VehiculoDetallePage() {
                   <Panel id="diagnosticos" title="Diagnosticos asociados">
                     <div className="space-y-3">
                       {diagnosticos.map((diagnostico, index) => {
-                        const scanner = fileUrl(
+                        const tieneScanner = Boolean(
                           diagnostico.foto_scanner || diagnostico.informe_scanner
                         );
 
@@ -1101,15 +1113,19 @@ function VehiculoDetallePage() {
                             <p className="text-xs font-bold uppercase mt-1">
                               Observaciones: {texto(diagnostico.observaciones)}
                             </p>
-                            {scanner && (
-                              <a
-                                href={scanner}
-                                target="_blank"
-                                rel="noreferrer"
+                            {tieneScanner && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  descargarProtegido(
+                                    `/diagnosticos/${diagnostico.id}/scanner`,
+                                    `scanner-diagnostico-${diagnostico.id}`
+                                  )
+                                }
                                 className="inline-block mt-2 text-xs font-black uppercase underline"
                               >
-                                Ver foto scanner
-                              </a>
+                                Descargar foto scanner
+                              </button>
                             )}
                           </div>
                         );
@@ -1122,7 +1138,9 @@ function VehiculoDetallePage() {
                   <Panel id="fotos" title="Fotos del vehiculo">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {fotos.map((foto, index) => {
-                        const url = fileUrl(foto.url_foto || foto.url || foto.path);
+                        const tieneArchivo = Boolean(
+                          foto.url_foto || foto.url || foto.path
+                        );
 
                         return (
                           <div key={foto.id || index} className="border-2 border-black p-3 bg-white">
@@ -1132,15 +1150,19 @@ function VehiculoDetallePage() {
                             <p className="text-xs font-bold uppercase text-gray-500">
                               {formatearFecha(foto.createdAt)}
                             </p>
-                            {url && (
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noreferrer"
+                            {tieneArchivo && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  descargarProtegido(
+                                    `/fotos/${foto.id}/archivo`,
+                                    `foto-vehiculo-${foto.id}`
+                                  )
+                                }
                                 className="inline-block mt-2 text-xs font-black uppercase underline"
                               >
-                                Ver foto
-                              </a>
+                                Descargar foto
+                              </button>
                             )}
                           </div>
                         );
@@ -1153,8 +1175,6 @@ function VehiculoDetallePage() {
                   <Panel id="archivos" title="File Service / archivos ECU">
                     <div className="space-y-3">
                       {archivos.map((archivo, index) => {
-                        const original = fileUrl(archivo.archivo_original);
-                        const mod = fileUrl(archivo.archivo_modificado);
                         const servicios = normalizarJsonLista(
                           archivo.servicios_solicitados
                         );
@@ -1250,15 +1270,33 @@ function VehiculoDetallePage() {
                               )}
 
                             <div className="flex flex-wrap gap-3 mt-3">
-                              {original && (
-                                <a href={original} target="_blank" rel="noreferrer" className="text-xs font-black uppercase underline">
+                              {archivo.archivo_original && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    descargarProtegido(
+                                      `/archivos-ecu/${archivo.id}/descargar/original`,
+                                      `archivo-original-${archivo.id}`
+                                    )
+                                  }
+                                  className="text-xs font-black uppercase underline"
+                                >
                                   Archivo original
-                                </a>
+                                </button>
                               )}
-                              {mod && (
-                                <a href={mod} target="_blank" rel="noreferrer" className="text-xs font-black uppercase underline">
+                              {archivo.archivo_modificado && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    descargarProtegido(
+                                      `/archivos-ecu/${archivo.id}/descargar/mod`,
+                                      `archivo-mod-${archivo.id}`
+                                    )
+                                  }
+                                  className="text-xs font-black uppercase underline"
+                                >
                                   Ultimo MOD
-                                </a>
+                                </button>
                               )}
                             </div>
                           </div>

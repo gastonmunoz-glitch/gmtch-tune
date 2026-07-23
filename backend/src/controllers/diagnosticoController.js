@@ -1,4 +1,6 @@
 const { QueryTypes } = require("sequelize");
+const fs = require("fs");
+const path = require("path");
 const sequelize = require("../config/database");
 const { Diagnostico, OrdenTrabajo } = require("../models");
 
@@ -27,6 +29,33 @@ const obtenerRutaPublicaScanner = (file) => {
   return file.path || null;
 };
 
+const scannerPath = path.resolve(__dirname, "..", "uploads", "scanner");
+
+const eliminarScannerLocal = async (file) => {
+  const ruta = limpiarTexto(file?.path);
+  if (!ruta || /^https?:\/\//i.test(ruta)) return;
+
+  const resuelta = path.resolve(ruta);
+  if (
+    resuelta !== scannerPath &&
+    !resuelta.startsWith(`${scannerPath}${path.sep}`)
+  ) {
+    return;
+  }
+
+  try {
+    await fs.promises.unlink(resuelta);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.warn("No se pudo descartar evidencia scanner no persistida.");
+    }
+  }
+};
+
+const contieneRutaScannerCliente = (body = {}) =>
+  Object.prototype.hasOwnProperty.call(body, "informe_scanner") ||
+  Object.prototype.hasOwnProperty.call(body, "foto_scanner");
+
 const prepararColumnas = async () => {
   if (columnasPreparadas) return;
 
@@ -45,15 +74,31 @@ const prepararColumnas = async () => {
 };
 
 const validarPayload = async (req, modo = "crear") => {
+  const empresaId = limpiarTexto(req.auth?.empresaId);
   const ordenId = Number(req.body.ordenId || req.body.orden_id || req.body.ordenTrabajoId);
   const sinDtc = boolDesdeBody(req.body.sin_dtc);
   const codigosDtc = limpiarTexto(req.body.codigos_dtc);
   const fallas = limpiarTexto(req.body.fallas_detectadas);
   const observaciones = limpiarTexto(req.body.observaciones);
-  const scanner =
-    obtenerRutaPublicaScanner(req.file) ||
-    limpiarTexto(req.body.informe_scanner) ||
-    limpiarTexto(req.body.foto_scanner);
+  const scanner = obtenerRutaPublicaScanner(req.file);
+
+  if (!empresaId) {
+    return {
+      ok: false,
+      status: 503,
+      error: "EMPRESA_NO_DISPONIBLE",
+      codigo: "EMPRESA_NO_DISPONIBLE",
+    };
+  }
+
+  if (contieneRutaScannerCliente(req.body)) {
+    return {
+      ok: false,
+      status: 400,
+      error: "La ruta del scanner no puede enviarse manualmente",
+      codigo: "RUTA_ARCHIVO_NO_PERMITIDA",
+    };
+  }
 
   if (!ordenId || Number.isNaN(ordenId)) {
     return {
@@ -63,7 +108,9 @@ const validarPayload = async (req, modo = "crear") => {
     };
   }
 
-  const orden = await OrdenTrabajo.findByPk(ordenId);
+  const orden = await OrdenTrabajo.findOne({
+    where: { id: ordenId, empresaId },
+  });
 
   if (!orden) {
     return {
@@ -100,6 +147,7 @@ const validarPayload = async (req, modo = "crear") => {
   return {
     ok: true,
     data: {
+      empresaId,
       ordenId,
       fase: limpiarTexto(req.body.fase) || "PRE_FILE_SERVICE",
       fallas_detectadas: fallas,
@@ -119,8 +167,10 @@ const crearDiagnostico = async (req, res) => {
     const validacion = await validarPayload(req, "crear");
 
     if (!validacion.ok) {
+      await eliminarScannerLocal(req.file);
       return res.status(validacion.status).json({
         error: validacion.error,
+        codigo: validacion.codigo,
       });
     }
 
@@ -134,6 +184,7 @@ const crearDiagnostico = async (req, res) => {
         {
           where: {
             id: validacion.data.ordenId,
+            empresaId: validacion.data.empresaId,
           },
         }
       );
@@ -239,9 +290,40 @@ const actualizarDiagnostico = async (req, res) => {
   try {
     await prepararColumnas();
 
-    const diagnostico = await Diagnostico.findByPk(req.params.id);
+    if (contieneRutaScannerCliente(req.body)) {
+      await eliminarScannerLocal(req.file);
+      return res.status(400).json({
+        error: "La ruta del scanner no puede enviarse manualmente",
+        codigo: "RUTA_ARCHIVO_NO_PERMITIDA",
+      });
+    }
+
+    const empresaId = limpiarTexto(req.auth?.empresaId);
+    if (!empresaId) {
+      await eliminarScannerLocal(req.file);
+      return res.status(503).json({
+        error: "EMPRESA_NO_DISPONIBLE",
+        codigo: "EMPRESA_NO_DISPONIBLE",
+      });
+    }
+
+    const diagnostico = await Diagnostico.findOne({
+      where: { id: req.params.id, empresaId },
+    });
 
     if (!diagnostico) {
+      await eliminarScannerLocal(req.file);
+      return res.status(404).json({
+        error: "Diagnóstico no encontrado",
+      });
+    }
+
+    const orden = await OrdenTrabajo.findOne({
+      where: { id: diagnostico.ordenId, empresaId },
+      attributes: ["id", "empresaId"],
+    });
+    if (!orden) {
+      await eliminarScannerLocal(req.file);
       return res.status(404).json({
         error: "Diagnóstico no encontrado",
       });
@@ -289,6 +371,7 @@ const actualizarDiagnostico = async (req, res) => {
 };
 
 module.exports = {
+  contieneRutaScannerCliente,
   crearDiagnostico,
   obtenerDiagnosticos,
   obtenerDiagnosticoPorId,

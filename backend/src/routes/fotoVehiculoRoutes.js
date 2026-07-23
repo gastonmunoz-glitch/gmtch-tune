@@ -2,9 +2,11 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const { FotoVehiculo, OrdenTrabajo } = require("../models");
 const { permitirRoles } = require("../middleware/authMiddleware");
+const { descargarFoto } = require("../controllers/archivoPrivadoController");
 
 const router = express.Router();
 
@@ -26,10 +28,13 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    const extension = path.extname(file.originalname || "");
+    const extensionOriginal = path.extname(file.originalname || "").toLowerCase();
+    const extension = /^\.[a-z0-9]{1,10}$/.test(extensionOriginal)
+      ? extensionOriginal
+      : "";
     const nombreBase = path.basename(file.originalname || "foto", extension);
     const nombreLimpio = limpiarNombreArchivo(nombreBase);
-    const nombreFinal = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${nombreLimpio}${extension}`;
+    const nombreFinal = `${Date.now()}-${crypto.randomUUID()}-${nombreLimpio}${extension}`;
 
     cb(null, nombreFinal);
   },
@@ -244,5 +249,7 @@ router.get("/orden/:ordenId", async (req, res) => {
     });
   }
 });
+
+router.get("/:id/archivo", descargarFoto);
 
 module.exports = router;

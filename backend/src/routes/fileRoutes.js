@@ -14,6 +14,15 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
+// Este flujo legacy no tiene registro, empresa ni orden que permitan autorizar
+// una descarga posterior. Se bloquea antes de que Multer escriba el archivo.
+router.all('/upload-ecu', (req, res) => {
+  return res.status(410).json({
+    error: 'FLUJO_ARCHIVO_LEGACY_DESHABILITADO',
+    message: 'Usa File Service para cargar archivos tecnicos con trazabilidad.'
+  });
+});
+
 router.post('/upload-ecu', upload.single('archivo'), async (req, res) => {
   try {
     const { marca, modelo, motor, userId } = req.body;

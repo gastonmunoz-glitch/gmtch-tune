@@ -11,6 +11,9 @@ const {
   Vehiculo,
 } = require("../models");
 const { crearNotificacionesInternas } = require("./notificacionController");
+const {
+  descargarComprobante: descargarComprobantePrivado,
+} = require("./archivoPrivadoController");
 
 const TIPOS_MATERIAL = ["LOZA_DPF", "OTRO"];
 const ESTADOS_MATERIAL = ["ACUMULADO", "VENDIDO", "DESCARTADO", "AJUSTADO"];
@@ -273,10 +276,16 @@ const ocultarComprobanteSiCorresponde = (comprobante, req) => {
   const data =
     typeof comprobante.toJSON === "function" ? comprobante.toJSON() : comprobante;
 
-  if (puedeVerValores(req) || req.usuario?.rol === "RECEPCION") return data;
+  const seguro = {
+    ...data,
+    archivo_comprobante_disponible: Boolean(data.archivo_comprobante_path),
+  };
+  delete seguro.archivo_comprobante_path;
+
+  if (puedeVerValores(req) || req.usuario?.rol === "RECEPCION") return seguro;
 
   return {
-    ...data,
+    ...seguro,
     monto: null,
     banco_origen: null,
     folio_referencia: null,
@@ -1218,7 +1227,7 @@ const cambiarEstadoComprobante = async (req, res, estado) => {
 
     res.json({
       mensaje: estado === "VALIDADO" ? "Comprobante validado" : "Comprobante rechazado",
-      comprobante,
+      comprobante: ocultarComprobanteSiCorresponde(comprobante, req),
     });
   } catch (error) {
     console.error("ERROR CAMBIANDO COMPROBANTE:", error);
@@ -1229,24 +1238,7 @@ const cambiarEstadoComprobante = async (req, res, estado) => {
 const validarComprobante = (req, res) => cambiarEstadoComprobante(req, res, "VALIDADO");
 const rechazarComprobante = (req, res) => cambiarEstadoComprobante(req, res, "RECHAZADO");
 
-const descargarComprobante = async (req, res) => {
-  try {
-    await prepararTablasFinanzas();
-
-    const comprobante = await ComprobantePago.findByPk(req.params.id);
-    if (!comprobante || !comprobante.archivo_comprobante_path) {
-      return res.status(404).json({ error: "Comprobante no disponible" });
-    }
-
-    return res.download(
-      comprobante.archivo_comprobante_path,
-      comprobante.archivo_comprobante_nombre || `comprobante-${comprobante.id}`
-    );
-  } catch (error) {
-    console.error("ERROR DESCARGANDO COMPROBANTE:", error);
-    res.status(500).json({ error: "No se pudo descargar comprobante" });
-  }
-};
+const descargarComprobante = descargarComprobantePrivado;
 
 const listarFondoReserva = async (req, res) => {
   try {

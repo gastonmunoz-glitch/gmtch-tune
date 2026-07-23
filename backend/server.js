@@ -5,10 +5,15 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const path = require("path");
 const fs = require("fs");
-const bcrypt = require("bcryptjs");
-const crypto = require("crypto");
 const sequelize = require("./src/config/database");
 const { QueryTypes } = require("sequelize");
+const {
+  esRutaConMetadatosPrivados,
+  sanitizarMetadatosArchivo,
+} = require("./src/services/archivoPrivadoService");
+const {
+  bloquearUploadsPublicos,
+} = require("./src/middleware/bloquearUploadsPublicos");
 
 dotenv.config();
 
@@ -94,6 +99,7 @@ const corsOptions = {
     "Accept",
     "Origin",
   ],
+  exposedHeaders: ["Content-Disposition"],
   credentials: true,
   optionsSuccessStatus: 204,
 };
@@ -107,6 +113,7 @@ app.use((req, res, next) => {
 
   res.header("Vary", "Origin");
   res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Expose-Headers", "Content-Disposition");
   res.header(
     "Access-Control-Allow-Methods",
     "GET,POST,PUT,PATCH,DELETE,OPTIONS"
@@ -170,21 +177,19 @@ app.use((req, res, next) => {
 
 // ====================== MIDDLEWARES BASE ======================
 
+app.use(bloquearUploadsPublicos);
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
-// Riesgo controlado V1: /uploads se mantiene publico por compatibilidad interna.
-// Portal Masters usa portal_uploads y no debe montarse como static publico.
-app.use(
-  "/uploads",
-  express.static(uploadsPath, {
-    dotfiles: "deny",
-    setHeaders: (res) => {
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("X-Content-Type-Options", "nosniff");
-    },
-  })
-);
+// Los archivos operativos nunca se publican por path. Las descargas se resuelven
+// mediante endpoints autenticados, identificadores de registros y alcance tenant.
+app.use((req, res, next) => {
+  if (!esRutaConMetadatosPrivados(req.path)) return next();
+
+  const enviarJson = res.json.bind(res);
+  res.json = (payload) => enviarJson(sanitizarMetadatosArchivo(payload));
+  return next();
+});
 
 const crearRateLimiter = ({ windowMs, limit, mensaje }) =>
   rateLimit({
@@ -239,6 +244,7 @@ require("./src/models");
 const {
   asegurarEmpresaPrincipalGmtch,
 } = require("./src/services/empresaCuentaService");
+const { asegurarOwnerInicial } = require("./src/services/ownerBootstrapService");
 
 const {
   autenticar,
@@ -1880,113 +1886,6 @@ const prepararBaseDatos = async () => {
   }
 };
 
-// ====================== CREAR / ACTUALIZAR OWNER ======================
-
-const existeColumnaEmpresaUsuario = async () => {
-  const resultado = await sequelize.query(
-    `
-    SELECT EXISTS (
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-        AND table_name = 'Usuarios'
-        AND column_name = 'empresaId'
-    ) AS "existe";
-    `,
-    { type: QueryTypes.SELECT }
-  );
-
-  return Boolean(resultado[0]?.existe);
-};
-
-const crearUsuarioMaestro = async (empresaGmtch = null) => {
-  try {
-    const passwordInicial = process.env.OWNER_INITIAL_PASSWORD || "123";
-    const passwordHash = await bcrypt.hash(passwordInicial, 10);
-    const tieneEmpresaId = await existeColumnaEmpresaUsuario();
-    const empresaId = empresaGmtch?.id || null;
-
-    if (!tieneEmpresaId) {
-      console.warn(
-        'Migración SaaS Foundation V0 pendiente: "Usuarios" aún no tiene "empresaId".'
-      );
-    }
-
-    const [usuarios] = await sequelize.query(`
-      SELECT "id", "username", "rol"
-      FROM "Usuarios"
-      WHERE "username" = 'gaston'
-      LIMIT 1;
-    `);
-
-    if (usuarios.length > 0) {
-      if (tieneEmpresaId && empresaId) {
-        await sequelize.query(
-          `
-          UPDATE "Usuarios"
-          SET "rol" = 'OWNER',
-              "nombre" = COALESCE("nombre", 'Gastón Muñoz'),
-              "activo" = true,
-              "empresaId" = COALESCE("empresaId", :empresaId),
-              "updatedAt" = NOW()
-          WHERE "username" = 'gaston';
-          `,
-          { replacements: { empresaId } }
-        );
-      } else {
-        await sequelize.query(
-          `
-          UPDATE "Usuarios"
-          SET "rol" = 'OWNER',
-              "nombre" = COALESCE("nombre", 'Gastón Muñoz'),
-              "activo" = true,
-              "updatedAt" = NOW()
-          WHERE "username" = 'gaston';
-          `
-        );
-      }
-
-      console.log("Usuario gaston verificado como OWNER sin resetear password");
-      return;
-    }
-
-    const replacements = {
-      id: crypto.randomUUID(),
-      nombre: "Gastón Muñoz",
-      username: "gaston",
-      password: passwordHash,
-      rol: "OWNER",
-      empresaId,
-    };
-
-    if (tieneEmpresaId && empresaId) {
-      await sequelize.query(
-        `
-        INSERT INTO "Usuarios"
-          ("id", "nombre", "username", "password", "rol", "activo", "empresaId", "createdAt", "updatedAt")
-        VALUES
-          (:id, :nombre, :username, :password, :rol, true, :empresaId, NOW(), NOW());
-        `,
-        { replacements }
-      );
-    } else {
-      await sequelize.query(
-        `
-        INSERT INTO "Usuarios"
-          ("id", "nombre", "username", "password", "rol", "activo", "createdAt", "updatedAt")
-        VALUES
-          (:id, :nombre, :username, :password, :rol, true, NOW(), NOW());
-        `,
-        { replacements }
-      );
-    }
-
-    console.log("ACCESO OWNER CREADO: usuario gaston");
-  } catch (error) {
-    console.error("Error creando usuario maestro:", error);
-    throw error;
-  }
-};
 
 // ====================== INICIAR SERVIDOR ======================
 
@@ -2003,9 +1902,12 @@ const startServer = async () => {
     await prepararColumnasOmnicanal();
     console.log("COLUMNAS OMNICANAL VERIFICADAS");
 
-    await crearUsuarioMaestro(empresaGmtch);
-
-    console.log("Uploads path:", uploadsPath);
+    const ownerBootstrap = await asegurarOwnerInicial(empresaGmtch);
+    if (ownerBootstrap.creado) {
+      console.log("OWNER inicial creado mediante bootstrap seguro");
+    } else {
+      console.log("OWNER inicial verificado");
+    }
 
     const PORT = process.env.PORT || 5000;
 
@@ -2039,9 +1941,16 @@ const startServer = async () => {
       iniciarSchedulerInterno();
     });
   } catch (error) {
-    console.error("ERROR AL ARRANCAR:", error);
+    console.error(
+      "ERROR AL ARRANCAR:",
+      error?.codigo || error?.name || "ERROR_INICIO_NO_CLASIFICADO"
+    );
     process.exit(1);
   }
 };
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = { app, startServer };

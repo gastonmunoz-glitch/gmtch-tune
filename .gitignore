@@ -28,9 +28,19 @@ backend/dist/
 # Uploads locales
 backend/src/uploads/*
 !backend/src/uploads/.gitkeep
+backend/src/uploads/.gitkeep/**
 !backend/src/uploads/fotos/
 backend/src/uploads/fotos/*
 !backend/src/uploads/fotos/.gitkeep
+backend/src/uploads/fotos/.gitkeep/**
+backend/src/portal_uploads/*
+!backend/src/portal_uploads/.gitkeep
+backend/src/portal_uploads/.gitkeep/**
+
+# Destino relativo del upload ECU legacy cuando el proceso arranca desde la raiz.
+src/uploads/*
+!src/uploads/.gitkeep
+src/uploads/.gitkeep/**
 
 # Sistema
 .DS_Store

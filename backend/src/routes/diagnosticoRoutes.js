@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const router = express.Router();
 
@@ -12,6 +13,9 @@ const {
   obtenerDiagnosticosPorOrden,
   actualizarDiagnostico,
 } = require("../controllers/diagnosticoController");
+const {
+  descargarScannerDiagnostico,
+} = require("../controllers/archivoPrivadoController");
 
 const scannerPath = path.join(__dirname, "..", "uploads", "scanner");
 
@@ -24,13 +28,16 @@ const storage = multer.diskStorage({
     cb(null, scannerPath);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || "");
+    const extensionOriginal = path.extname(file.originalname || "").toLowerCase();
+    const ext = /^\.[a-z0-9]{1,10}$/.test(extensionOriginal)
+      ? extensionOriginal
+      : "";
     const base = path
       .basename(file.originalname || "scanner", ext)
       .replace(/\s+/g, "_")
       .replace(/[^a-zA-Z0-9_\-]/g, "");
 
-    cb(null, `${Date.now()}-${base}${ext}`);
+    cb(null, `${Date.now()}-${crypto.randomUUID()}-${base}${ext}`);
   },
 });
 
@@ -71,6 +78,7 @@ const manejarScanner = (req, res, next) => {
 router.post("/", manejarScanner, crearDiagnostico);
 router.get("/", obtenerDiagnosticos);
 router.get("/orden/:ordenId", obtenerDiagnosticosPorOrden);
+router.get("/:id/scanner", descargarScannerDiagnostico);
 router.get("/:id", obtenerDiagnosticoPorId);
 router.put("/:id", manejarScanner, actualizarDiagnostico);
 router.patch("/:id", manejarScanner, actualizarDiagnostico);

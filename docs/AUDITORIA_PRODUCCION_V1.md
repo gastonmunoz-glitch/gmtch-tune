@@ -13,10 +13,10 @@ Objetivo: preparar operacion real y reset controlado de datos demo sin borrar na
    `backend/server.js` aceptaba y reflejaba cualquier `Origin`. Esto era riesgoso antes de abrir Portal Masters externo.
 
 3. **Usuario OWNER se reseteaba en cada arranque.**  
-   `backend/server.js` actualizaba `gaston` y reseteaba password a `123`. Eso es critico para operacion real.
+   La credencial histórica fue retirada. El bootstrap OWNER ahora exige configuración fuerte, explícita y de un solo uso.
 
-4. **Uploads locales expuestos por `/uploads`.**  
-   Fotos, scanner y archivos ECU internos siguen servidos desde filesystem local. Esto mantiene compatibilidad actual, pero no es ideal para datos reales sensibles.
+4. **Uploads locales privados.**
+   El filesystem local sigue siendo temporal, pero `/uploads` ya no se publica. La descarga interna exige autenticación, empresa, permiso y un identificador de registro.
 
 5. **Ruta antigua `/api/files/upload-ecu`.**  
    Existe ruta opcional con webhook externo hardcodeado y logs de archivo. Esta protegida por OWNER/ADMIN, pero conviene retirarla o aislarla si no se usa.
@@ -37,8 +37,8 @@ Objetivo: preparar operacion real y reset controlado de datos demo sin borrar na
 - `frontend/src/services/portalApi.js` queda alineado al fallback oficial.
 - `backend/server.js` ahora limita CORS a dominios oficiales, localhost y variables `FRONTEND_URL` / `FRONTEND_URLS`.
 - `backend/server.js` agrega headers defensivos: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`.
-- `backend/server.js` deja de resetear password del usuario `gaston` si ya existe.
-- `backend/server.js` deja `/uploads` con `no-store`, `nosniff` y `dotfiles: deny`.
+- `backend/server.js` no modifica ni reactiva un OWNER existente durante el arranque.
+- `backend/server.js` bloquea `/uploads`; los endpoints privados responden con `no-store`, `nosniff` y descarga como adjunto.
 - `docs/SMOKE_TEST_PROD_V1.md` actualiza API base a `https://api.gmtchtune.com/api`.
 
 ## Permisos y Roles
@@ -97,7 +97,7 @@ Riesgo Railway: filesystem local puede no ser persistente entre deploys o replic
 
 - Confirmar backup PostgreSQL Railway.
 - Confirmar backup manual de uploads locales si contienen evidencia util.
-- Cambiar password real de `gaston` y definir `OWNER_INITIAL_PASSWORD` solo para creacion inicial.
+- Para una base sin OWNER, habilitar temporalmente `OWNER_BOOTSTRAP_ENABLED`, definir `OWNER_INITIAL_USERNAME` y una `OWNER_INITIAL_PASSWORD` fuerte; retirar el opt-in después.
 - Confirmar `JWT_SECRET` y `PORTAL_JWT_SECRET` fuertes en Railway.
 - Confirmar `FRONTEND_URL=https://gmtchtune.com`.
 - Confirmar `FRONTEND_URLS=https://gmtchtune.com,https://www.gmtchtune.com`.
@@ -152,7 +152,7 @@ Portal Masters, solo si eran pruebas:
 
 ## Prioridad Siguiente
 
-1. Rotar password `gaston` y secretos JWT antes de cargar datos reales.
+1. Rotar credenciales administrativas y secretos JWT antes de cargar datos reales.
 2. Configurar rate limit para login interno y portal.
 3. Migrar uploads a R2/S3 con descargas autenticadas.
 4. Separar UI de Comprobantes operativos de Finanzas completa.

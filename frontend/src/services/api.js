@@ -77,4 +77,56 @@ export const getContextoPatente = (patente, opciones = {}) =>
     })
     .then((response) => response.data);
 
+const nombreDesdeContentDisposition = (valor) => {
+  const header = String(valor || "");
+  const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+  const simple = header.match(/filename="([^"]+)"/i);
+
+  try {
+    if (utf8?.[1]) return decodeURIComponent(utf8[1]);
+  } catch {
+    // El backend ya entrega un fallback ASCII en el mismo header.
+  }
+
+  return simple?.[1] || "";
+};
+
+export const descargarArchivoAutenticado = async (ruta, nombreFallback = "archivo") => {
+  let response;
+  try {
+    response = await api.get(ruta, { responseType: "blob" });
+  } catch (error) {
+    const data = error.response?.data;
+    if (data instanceof Blob) {
+      try {
+        const payload = JSON.parse(await data.text());
+        error.mensajeDescarga = payload.message || payload.error || "";
+      } catch {
+        // La respuesta no contiene un error JSON legible.
+      }
+    }
+    throw error;
+  }
+
+  const nombre =
+    nombreDesdeContentDisposition(response.headers?.["content-disposition"]) ||
+    nombreFallback;
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+  const urlTemporal = window.URL.createObjectURL(blob);
+  const enlace = document.createElement("a");
+
+  try {
+    enlace.href = urlTemporal;
+    enlace.download = nombre;
+    enlace.rel = "noopener";
+    document.body.appendChild(enlace);
+    enlace.click();
+  } finally {
+    enlace.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(urlTemporal), 0);
+  }
+
+  return nombre;
+};
+
 export default api;

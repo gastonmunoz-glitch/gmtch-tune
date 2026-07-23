@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import api from "../services/api";
+import api, { descargarArchivoAutenticado } from "../services/api";
 import {
   getOperationalStatusLabel,
   getStatusColor,
@@ -184,24 +184,6 @@ const SERVICIO_LABELS = SERVICIOS_FILE_SERVICE.flatMap((grupo) => grupo.opciones
 const servicioLabel = (codigo) => SERVICIO_LABELS[codigo] || codigo;
 
 const RUTA_DIAGNOSTICO = "/diagnosticos";
-
-const getApiRoot = () => {
-  const base = api.defaults.baseURL || "";
-  return base.replace(/\/api\/?$/, "");
-};
-
-const fileUrl = (ruta) => {
-  if (!ruta) return "#";
-  if (/^https?:\/\//i.test(ruta)) return ruta;
-
-  const root = getApiRoot();
-
-  if (ruta.startsWith("/")) {
-    return `${root}${ruta}`;
-  }
-
-  return `${root}/${ruta}`;
-};
 
 const formatearFecha = (fecha) => {
   if (!fecha) return "-";
@@ -568,6 +550,20 @@ export default function ArchivosECUPage() {
   const [bloqueoDiagnostico, setBloqueoDiagnostico] = useState(null);
   const [contextoSolicitud, setContextoSolicitud] = useState(null);
   const [cargandoContexto, setCargandoContexto] = useState(false);
+
+  const descargarProtegido = async (ruta, nombreFallback) => {
+    try {
+      setError("");
+      await descargarArchivoAutenticado(ruta, nombreFallback);
+    } catch (err) {
+      setError(
+        err.mensajeDescarga ||
+          err.response?.data?.message ||
+          err.response?.data?.error ||
+          "No se pudo descargar el archivo. Revisa tus permisos y vuelve a intentar."
+      );
+    }
+  };
 
   const [filtro, setFiltro] = useState("PENDIENTES");
   const [busqueda, setBusqueda] = useState("");
@@ -2996,25 +2992,33 @@ export default function ArchivosECUPage() {
 
                   <div className="flex flex-wrap gap-2">
                     {archivo.archivo_original && (
-                      <a
-                        href={fileUrl(archivo.archivo_original)}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          descargarProtegido(
+                            `/archivos-ecu/${archivo.id}/descargar/original`,
+                            `archivo-ecu-${archivo.id}-original.bin`
+                          )
+                        }
                         className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm"
                       >
                         Descargar original
-                      </a>
+                      </button>
                     )}
 
                     {archivo.archivo_modificado && (
-                      <a
-                        href={fileUrl(archivo.archivo_modificado)}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          descargarProtegido(
+                            `/archivos-ecu/${archivo.id}/descargar/mod`,
+                            `archivo-ecu-${archivo.id}-mod.bin`
+                          )
+                        }
                         className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-sm"
                       >
                         Descargar último MOD
-                      </a>
+                      </button>
                     )}
 
                     {archivo.archivo_modificado && !archivo.cierre_tecnico_at && (
@@ -3028,14 +3032,18 @@ export default function ArchivosECUPage() {
                     )}
 
                     {archivo.post_escritura_scanner && (
-                      <a
-                        href={fileUrl(archivo.post_escritura_scanner)}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          descargarProtegido(
+                            `/archivos-ecu/${archivo.id}/descargar/post-scan`,
+                            `archivo-ecu-${archivo.id}-post-scan.bin`
+                          )
+                        }
                         className="px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-600 text-sm"
                       >
-                        Ver scanner de la prueba final
-                      </a>
+                        Descargar scanner de la prueba final
+                      </button>
                     )}
                   </div>
 
@@ -3069,14 +3077,19 @@ export default function ArchivosECUPage() {
                             </div>
 
                             {version.archivo && (
-                              <a
-                                href={fileUrl(version.archivo)}
-                                target="_blank"
-                                rel="noreferrer"
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  descargarProtegido(
+                                    `/archivos-ecu/${archivo.id}/versiones/${version.version}/descargar`,
+                                    version.nombre_archivo ||
+                                      `archivo-ecu-${archivo.id}-mod-v${version.version}.bin`
+                                  )
+                                }
                                 className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm text-center"
                               >
                                 Descargar
-                              </a>
+                              </button>
                             )}
                           </div>
                         ))}
@@ -3373,16 +3386,18 @@ export default function ArchivosECUPage() {
                       </div>
 
                       {archivo.procesamiento_externo_archivo_resultado && (
-                        <a
-                          href={fileUrl(
-                            archivo.procesamiento_externo_archivo_resultado
-                          )}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            descargarProtegido(
+                              `/archivos-ecu/${archivo.id}/descargar/resultado-externo`,
+                              `archivo-ecu-${archivo.id}-resultado-externo.bin`
+                            )
+                          }
                           className="inline-block px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm"
                         >
                           Descargar resultado externo
-                        </a>
+                        </button>
                       )}
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -3504,14 +3519,18 @@ export default function ArchivosECUPage() {
                                 </p>
                               )}
                               {evento.archivo && (
-                                <a
-                                  href={fileUrl(evento.archivo)}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    descargarProtegido(
+                                      `/archivos-ecu/${archivo.id}/procesamiento-externo/${index}/descargar`,
+                                      `archivo-ecu-${archivo.id}-externo-${index + 1}.bin`
+                                    )
+                                  }
                                   className="inline-block mt-2 text-blue-300 hover:text-blue-200"
                                 >
-                                  Ver archivo
-                                </a>
+                                  Descargar archivo
+                                </button>
                               )}
                             </div>
                           ))}

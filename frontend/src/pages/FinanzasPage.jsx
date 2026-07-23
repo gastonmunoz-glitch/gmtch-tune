@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import api from "../services/api";
+import api, { descargarArchivoAutenticado } from "../services/api";
 import {
   getPaymentStatusColor,
   getStatusColor,
@@ -444,20 +444,16 @@ function FinanzasPage() {
     try {
       setError("");
       setMensaje("");
-      const response = await api.get(`/finanzas/comprobantes/${item.id}/descargar`, {
-        responseType: "blob",
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.download =
-        item.archivo_comprobante_nombre || `comprobante-${item.id}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      await descargarArchivoAutenticado(
+        `/finanzas/comprobantes/${item.id}/descargar`,
+        item.archivo_comprobante_nombre || `comprobante-${item.id}.pdf`
+      );
     } catch (err) {
-      setError(err.response?.data?.error || "No se pudo descargar comprobante.");
+      setError(
+        err.mensajeDescarga ||
+          err.response?.data?.error ||
+          "No se pudo descargar comprobante."
+      );
     }
   };
 
@@ -1330,7 +1326,7 @@ const ComprobantesTab = ({ form, setForm, ordenes, comprobantes, onSubmit, valid
           </p>
           </summary>
           <div className="mt-2 flex flex-wrap gap-2">
-            {item.archivo_comprobante_path && (
+            {item.archivo_comprobante_disponible && (
               <button
                 type="button"
                 onClick={() => descargarComprobante(item)}

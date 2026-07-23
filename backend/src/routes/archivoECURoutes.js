@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const {
   crearArchivoECU,
@@ -20,6 +21,11 @@ const {
   archivarArchivoECU,
   eliminarArchivoECU,
 } = require("../controllers/archivoECUController");
+const {
+  descargarArchivoEcu,
+  descargarProcesamientoExterno,
+  descargarVersionEcu,
+} = require("../controllers/archivoPrivadoController");
 
 const router = express.Router();
 
@@ -34,13 +40,16 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname || "");
+    const extensionOriginal = path.extname(file.originalname || "").toLowerCase();
+    const ext = /^\.[a-z0-9]{1,10}$/.test(extensionOriginal)
+      ? extensionOriginal
+      : "";
     const base = path
       .basename(file.originalname || "archivo", ext)
       .replace(/[^a-zA-Z0-9-_]/g, "_")
       .slice(0, 40);
 
-    cb(null, `${Date.now()}-${base}${ext}`);
+    cb(null, `${Date.now()}-${crypto.randomUUID()}-${base}${ext}`);
   },
 });
 
@@ -101,6 +110,12 @@ router.post("/", manejarSubidaArchivo, crearArchivoECU);
 
 router.get("/", obtenerArchivosECU);
 router.get("/contexto-solicitud/:ordenId", obtenerContextoSolicitud);
+router.get("/:id/descargar/:tipo", descargarArchivoEcu);
+router.get("/:id/versiones/:version/descargar", descargarVersionEcu);
+router.get(
+  "/:id/procesamiento-externo/:indice/descargar",
+  descargarProcesamientoExterno
+);
 router.get("/:id", obtenerArchivoECUPorId);
 
 router.put("/:id", actualizarArchivoECU);

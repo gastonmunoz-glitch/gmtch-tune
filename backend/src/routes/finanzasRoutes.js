@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const {
   obtenerResumenFinanzas,
@@ -48,9 +49,15 @@ const limpiarNombreArchivo = (nombre) =>
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, comprobantesDir),
   filename: (req, file, cb) => {
-    const extension = path.extname(file.originalname || "");
+    const extensionOriginal = path.extname(file.originalname || "").toLowerCase();
+    const extension = /^\.[a-z0-9]{1,10}$/.test(extensionOriginal)
+      ? extensionOriginal
+      : "";
     const base = path.basename(file.originalname || "comprobante", extension);
-    cb(null, `${Date.now()}-${limpiarNombreArchivo(base)}${extension}`);
+    cb(
+      null,
+      `${Date.now()}-${crypto.randomUUID()}-${limpiarNombreArchivo(base)}${extension}`
+    );
   },
 });
 

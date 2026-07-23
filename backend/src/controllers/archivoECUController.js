@@ -96,11 +96,13 @@ const crearErrorHttp = (statusCode, message, extra = {}) => {
   return error;
 };
 
-const buscarUsuarioActivoPorId = async (usuarioId) => {
+const buscarUsuarioActivoPorId = async (usuarioId, empresaId) => {
   const id = limpiarTexto(usuarioId);
-  if (!id) return null;
+  const empresa = limpiarTexto(empresaId);
+  if (!id || !empresa) return null;
 
-  const usuario = await Usuario.findByPk(id, {
+  const usuario = await Usuario.findOne({
+    where: { id, empresaId: empresa },
     attributes: ["id", "username", "nombre", "rol", "activo"],
   });
 
@@ -155,7 +157,7 @@ const resolverResponsableArchivoDesdeBody = async (
   const usuarioId = limpiarTexto(body[campoId]);
 
   if (usuarioId) {
-    const usuario = await buscarUsuarioActivoPorId(usuarioId);
+    const usuario = await buscarUsuarioActivoPorId(usuarioId, opciones.empresaId);
     let guardia = null;
     if (opciones.validarGuardia !== false) {
       guardia = await validarGuardiaResponsable(usuario, {
@@ -603,7 +605,7 @@ const tieneResponsableTextoFileService = (archivo) =>
 const tieneResponsableFileService = (archivo) =>
   tieneResponsableIdFileService(archivo) || tieneResponsableTextoFileService(archivo);
 
-const validarResponsablesPersistidosActivos = async (archivo) => {
+const validarResponsablesPersistidosActivos = async (archivo, empresaId) => {
   const responsablesId = [
     limpiarTexto(archivo?.tuner_asignado_a_id),
     limpiarTexto(archivo?.operador_ecu_asignado_a_id),
@@ -611,7 +613,7 @@ const validarResponsablesPersistidosActivos = async (archivo) => {
   ].filter(Boolean);
 
   for (const responsableId of new Set(responsablesId)) {
-    await buscarUsuarioActivoPorId(responsableId);
+    await buscarUsuarioActivoPorId(responsableId, empresaId);
   }
 };
 
@@ -785,7 +787,7 @@ const validarChecklistCierreTecnicoOK = (archivo, observacion, opciones = {}) =>
 const PENDIENTE_DIAGNOSTICO_URGENTE = "DIAGNOSTICO_PENDIENTE";
 const PENDIENTE_RESPONSABLE_URGENTE = "RESPONSABLE_PENDIENTE";
 
-const evaluarRegularizacionUrgente = async (archivo) => {
+const evaluarRegularizacionUrgente = async (archivo, empresaId) => {
   if (!archivo?.creado_en_modo_urgente) {
     return {
       pendientes: [],
@@ -811,7 +813,7 @@ const evaluarRegularizacionUrgente = async (archivo) => {
   } else {
     for (const responsableId of new Set(responsablesId)) {
       // Un ID persistido invalido o inactivo nunca puede regularizarse por override.
-      await buscarUsuarioActivoPorId(responsableId);
+      await buscarUsuarioActivoPorId(responsableId, empresaId);
     }
   }
 
@@ -1584,6 +1586,15 @@ const crearArchivoECU = async (req, res) => {
   try {
     await prepararColumnas();
 
+    const empresaId = limpiarTexto(req.auth?.empresaId);
+    if (!empresaId) {
+      return responderDescartandoArchivo(req, res, 503, {
+        error: "EMPRESA_NO_DISPONIBLE",
+        codigo: "EMPRESA_NO_DISPONIBLE",
+        message: "La empresa autenticada no esta disponible para crear File Service.",
+      });
+    }
+
     if (!req.file) {
       return res.status(400).json({
         error: "No se recibió archivo original",
@@ -1598,7 +1609,9 @@ const crearArchivoECU = async (req, res) => {
       });
     }
 
-    const orden = await OrdenTrabajo.findByPk(ordenId);
+    const orden = await OrdenTrabajo.findOne({
+      where: { id: ordenId, empresaId },
+    });
 
     if (!orden) {
       return responderDescartandoArchivo(req, res, 404, {
@@ -1715,6 +1728,7 @@ const crearArchivoECU = async (req, res) => {
         campoId,
         campoTexto,
         {
+          empresaId,
           obligatorio: false,
           permitirOverrideGuardia:
             modoUrgente && overrideGuardiaSolicitado && jefaturaAutorizada,
@@ -1773,7 +1787,8 @@ const crearArchivoECU = async (req, res) => {
     const requiereRegularizacion = regularizacionPendientes.length > 0;
 
     transaction = await sequelize.transaction();
-    const ordenBloqueada = await OrdenTrabajo.findByPk(ordenId, {
+    const ordenBloqueada = await OrdenTrabajo.findOne({
+      where: { id: ordenId, empresaId },
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
@@ -1794,6 +1809,7 @@ const crearArchivoECU = async (req, res) => {
     }
 
     const nuevoArchivo = await ArchivoECU.create({
+      empresaId,
       ordenId,
 
       estado: "NOTIFICADO_MASTER",
@@ -1995,7 +2011,17 @@ const subirArchivoModificado = async (req, res) => {
   try {
     await prepararColumnas();
 
-    const archivo = await ArchivoECU.findByPk(req.params.id);
+    const empresaId = limpiarTexto(req.auth?.empresaId);
+    if (!empresaId) {
+      return responderDescartandoArchivo(req, res, 503, {
+        error: "EMPRESA_NO_DISPONIBLE",
+        codigo: "EMPRESA_NO_DISPONIBLE",
+      });
+    }
+
+    const archivo = await ArchivoECU.findOne({
+      where: { id: req.params.id, empresaId },
+    });
 
     if (!archivo) {
       return responderDescartandoArchivo(req, res, 404, {
@@ -2028,7 +2054,8 @@ const subirArchivoModificado = async (req, res) => {
 
     transaction = await sequelize.transaction();
     await archivo.reload({ transaction, lock: transaction.LOCK.UPDATE });
-    const ordenBloqueada = await OrdenTrabajo.findByPk(archivo.ordenId, {
+    const ordenBloqueada = await OrdenTrabajo.findOne({
+      where: { id: archivo.ordenId, empresaId },
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
@@ -2186,7 +2213,17 @@ const registrarProcesamientoExterno = async (req, res) => {
   try {
     await prepararColumnas();
 
-    const archivo = await ArchivoECU.findByPk(req.params.id);
+    const empresaId = limpiarTexto(req.auth?.empresaId);
+    if (!empresaId) {
+      return responderDescartandoArchivo(req, res, 503, {
+        error: "EMPRESA_NO_DISPONIBLE",
+        codigo: "EMPRESA_NO_DISPONIBLE",
+      });
+    }
+
+    const archivo = await ArchivoECU.findOne({
+      where: { id: req.params.id, empresaId },
+    });
 
     if (!archivo) {
       return responderDescartandoArchivo(req, res, 404, {
@@ -2197,6 +2234,16 @@ const registrarProcesamientoExterno = async (req, res) => {
     if (archivo.archivado) {
       return responderDescartandoArchivo(req, res, 400, {
         error: "No puedes registrar procesamiento externo en un archivo archivado",
+      });
+    }
+
+    const orden = await OrdenTrabajo.findOne({
+      where: { id: archivo.ordenId, empresaId },
+      attributes: ["id", "empresaId"],
+    });
+    if (!orden) {
+      return responderDescartandoArchivo(req, res, 404, {
+        error: "Registro no encontrado",
       });
     }
 
@@ -2557,7 +2604,17 @@ const registrarPostEscritura = async (req, res) => {
   try {
     await prepararColumnas();
 
-    const archivo = await ArchivoECU.findByPk(req.params.id);
+    const empresaId = limpiarTexto(req.auth?.empresaId);
+    if (!empresaId) {
+      return responderDescartandoArchivo(req, res, 503, {
+        error: "EMPRESA_NO_DISPONIBLE",
+        codigo: "EMPRESA_NO_DISPONIBLE",
+      });
+    }
+
+    const archivo = await ArchivoECU.findOne({
+      where: { id: req.params.id, empresaId },
+    });
 
     if (!archivo) {
       return responderDescartandoArchivo(req, res, 404, {
@@ -2568,6 +2625,16 @@ const registrarPostEscritura = async (req, res) => {
     if (archivo.archivado) {
       return responderDescartandoArchivo(req, res, 400, {
         error: "No puedes registrar post escritura en un archivo archivado",
+      });
+    }
+
+    const orden = await OrdenTrabajo.findOne({
+      where: { id: archivo.ordenId, empresaId },
+      attributes: ["id", "empresaId"],
+    });
+    if (!orden) {
+      return responderDescartandoArchivo(req, res, 404, {
+        error: "Archivo ECU no encontrado",
       });
     }
 
@@ -2841,7 +2908,17 @@ const registrarCierreTecnico = async (req, res) => {
     transaction = await sequelize.transaction();
     await prepararColumnas();
 
-    const referenciaArchivo = await ArchivoECU.findByPk(req.params.id, {
+    const empresaId = limpiarTexto(req.auth?.empresaId);
+    if (!empresaId) {
+      await transaction.rollback();
+      return res.status(503).json({
+        error: "EMPRESA_NO_DISPONIBLE",
+        codigo: "EMPRESA_NO_DISPONIBLE",
+      });
+    }
+
+    const referenciaArchivo = await ArchivoECU.findOne({
+      where: { id: req.params.id, empresaId },
       attributes: ["id", "ordenId"],
       transaction,
     });
@@ -2857,7 +2934,10 @@ const registrarCierreTecnico = async (req, res) => {
       referenciaArchivo.ordenId,
       transaction
     );
-    const archivo = await ArchivoECU.findByPk(req.params.id, { transaction });
+    const archivo = await ArchivoECU.findOne({
+      where: { id: req.params.id, empresaId },
+      transaction,
+    });
 
     if (archivo.archivado) {
       await transaction.rollback();
@@ -2871,7 +2951,8 @@ const registrarCierreTecnico = async (req, res) => {
       return responderArchivoTecnicoCerrado(res);
     }
 
-    const ordenBloqueada = await OrdenTrabajo.findByPk(archivo.ordenId, {
+    const ordenBloqueada = await OrdenTrabajo.findOne({
+      where: { id: archivo.ordenId, empresaId },
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
@@ -2918,10 +2999,13 @@ const registrarCierreTecnico = async (req, res) => {
     let motivoOverrideRegularizacion = "";
 
     if (resultado === "OK") {
-      await validarResponsablesPersistidosActivos(archivo);
+      await validarResponsablesPersistidosActivos(archivo, empresaId);
 
       if (archivo.creado_en_modo_urgente) {
-        evaluacionRegularizacion = await evaluarRegularizacionUrgente(archivo);
+        evaluacionRegularizacion = await evaluarRegularizacionUrgente(
+          archivo,
+          empresaId
+        );
 
         if (evaluacionRegularizacion.pendientes.length > 0) {
           const solicitaOverride = valorBooleano(req.body.override_regularizacion);
@@ -3352,7 +3436,17 @@ const actualizarArchivoECU = async (req, res) => {
     transaction = await sequelize.transaction();
     await prepararColumnas();
 
-    const referenciaArchivo = await ArchivoECU.findByPk(req.params.id, {
+    const empresaId = limpiarTexto(req.auth?.empresaId);
+    if (!empresaId) {
+      await transaction.rollback();
+      return res.status(503).json({
+        error: "EMPRESA_NO_DISPONIBLE",
+        codigo: "EMPRESA_NO_DISPONIBLE",
+      });
+    }
+
+    const referenciaArchivo = await ArchivoECU.findOne({
+      where: { id: req.params.id, empresaId },
       attributes: ["id", "ordenId"],
       transaction,
     });
@@ -3369,7 +3463,10 @@ const actualizarArchivoECU = async (req, res) => {
       referenciaArchivo.ordenId,
       transaction
     );
-    const archivo = await ArchivoECU.findByPk(req.params.id, { transaction });
+    const archivo = await ArchivoECU.findOne({
+      where: { id: req.params.id, empresaId },
+      transaction,
+    });
 
     if (archivo.archivado) {
       await transaction.rollback();
@@ -3379,7 +3476,8 @@ const actualizarArchivoECU = async (req, res) => {
       });
     }
 
-    const ordenBloqueada = await OrdenTrabajo.findByPk(archivo.ordenId, {
+    const ordenBloqueada = await OrdenTrabajo.findOne({
+      where: { id: archivo.ordenId, empresaId },
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
@@ -3590,6 +3688,7 @@ const actualizarArchivoECU = async (req, res) => {
         campoId,
         campoTexto,
         {
+          empresaId,
           validarGuardia:
             String(archivo[campoId] || "") !== String(nuevoResponsableId),
           permitirOverrideGuardia: overrideGuardiaSolicitado,
@@ -3677,7 +3776,10 @@ const actualizarArchivoECU = async (req, res) => {
     };
 
     if (archivo.creado_en_modo_urgente) {
-      evaluacionRegularizacion = await evaluarRegularizacionUrgente(archivoProspectivo);
+      evaluacionRegularizacion = await evaluarRegularizacionUrgente(
+        archivoProspectivo,
+        empresaId
+      );
 
       if (quiereFinalizarTecnico && evaluacionRegularizacion.pendientes.length > 0) {
         const solicitaOverrideRegularizacion = valorBooleano(
@@ -3743,7 +3845,7 @@ const actualizarArchivoECU = async (req, res) => {
         ...payload,
       };
 
-      await validarResponsablesPersistidosActivos(archivoCierre);
+      await validarResponsablesPersistidosActivos(archivoCierre, empresaId);
 
       checklistCierre = validarChecklistCierreTecnicoOK(
         archivoCierre,
